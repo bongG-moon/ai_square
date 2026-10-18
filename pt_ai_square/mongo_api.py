@@ -428,3 +428,22 @@ def download(tid,n):
 def manifest(tid):
     t=tool(tid);usable(t);v=next(v for v in t['versions'] if v['n']==t['active'])
     return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],managedInstall=False,notice='PC 자동 설치·업데이트·롤백은 후속 앱 연동 기능입니다.')
+
+@api.get('/api/tools/<int:tid>/version-check')
+def version_check(tid):
+    """Compare a locally recorded release with the active deployment; no mutation."""
+    t=tool(tid);usable(t)
+    value=request.args.get('release','')
+    if not re.fullmatch(r'[1-9][0-9]{0,8}',value):
+        raise BadRequest('현재 설치된 배포 번호를 release에 양의 정수로 입력해 주세요.')
+    installed=int(value);active=t['active']
+    known=next((v for v in t['versions'] if v['n']==installed),None)
+    if not known:
+        status='unknown_release';message='설치 버전을 확인할 수 없습니다. 등록한 도구 ID와 배포 번호를 확인해 주세요.'
+    elif installed==active:
+        status='current';message=f'현재 배포 버전 v{active}를 사용 중입니다.'
+    elif installed>active:
+        status='rollback_available';message=f'서버 배포가 v{active}로 복구되었습니다. 현재 설치된 v{installed}의 안내를 확인해 주세요.'
+    else:
+        status='update_available';message=f'새 버전 v{active}가 있습니다. 현재 설치된 버전은 v{installed}입니다.'
+    return jsonify(schemaVersion=1,toolId=tid,installedRelease=installed,activeRelease=active,revision=t['revision'],status=status,message=message,installedWithdrawn=bool(known and known.get('withdrawn')),updatePaused=t.get('paused',False),checkedAt=time.time(),checkOnly=True)

@@ -40,3 +40,5 @@ python -m pt_ai_square.build_workspace
 MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다. `tests/legacy_reference`의 텍스트는 이전 SQL 구현 테스트를 보관한 참고 자료이며 현재 테스트는 MongoDB 전용으로 대체했습니다.
 
 실제 사내 SSO, 운영 배포, PC 설치·자동 업데이트 연동은 별도 검증 범위입니다. 새 메뉴·권한·알림의 세부 동작은 GUIDE_V3.md를 확인하세요.
+
+실행 시 **버전만 확인**하는 읽기 전용 API(`/api/tools/{id}/version-check?release=1`)와 배포 Skill의 Python 예제를 제공합니다. 새 버전·서버 롤백을 알리고 파일은 교체하지 않습니다. 개별 도구 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [연결 안내](static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.

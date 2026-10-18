@@ -54,4 +54,8 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다.
 
 ## 현재 검증 범위
 
-2026-10-18, Windows / Python 3.13 / 로컬 MongoDB에서 23개 테스트 통과. Skill·MCP의 MD+Python ZIP 게시 → 파일 해시·바이트 확인 → v2 등록 → v1 배포 복구를 검증했습니다. 도구 자체의 업무 동작, 실제 회사 SSO와 운영 배포는 각 회사 환경에서 별도로 확인해야 합니다. 웹 버전 관리와 PC 자동 설치·업데이트는 다릅니다.
+2026-10-18, Windows / Python 3.13 / 로컬 MongoDB에서 25개 테스트 통과. Skill·MCP의 MD+Python ZIP 게시 → 파일 해시·바이트 확인 → v2 등록 → v1 배포 복구를 검증했습니다. 도구 자체의 업무 동작, 실제 회사 SSO와 운영 배포는 각 회사 환경에서 별도로 확인해야 합니다. 웹 버전 관리와 PC 자동 설치·업데이트는 다릅니다.
+
+## 실행 시 버전 확인
+
+`GET /api/tools/{id}/version-check?release={설치된번호}`는 현재 배포와 설치 버전을 비교하는 인증된 읽기 전용 API입니다. 새 버전·서버 롤백을 구분하며 파일을 다운로드하거나 교체하지 않습니다. 배포 Skill에 Python 예제를 포함했습니다. 각 도구의 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [등록자용 연결 안내](pt_ai_square/static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.
