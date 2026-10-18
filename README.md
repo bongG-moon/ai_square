@@ -1,4 +1,4 @@
-# P&T AI SQUARE v3.1
+# P&T AI SQUARE v3.2
 
 Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비스 정보는 MongoDB에 저장하고, 업로드 파일만 서버 디스크에 저장합니다. SQLite 실행 모드는 없습니다.
 
@@ -18,7 +18,7 @@ python -m venv .venv-square
 
 브라우저: http://127.0.0.1:5080/
 
-`mock`은 로컬 전용 개발 인증입니다. 운영은 `local` 또는 회사 `sso`를 설정합니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
+`mock`은 로컬 전용 개발 인증입니다. 회사 운영은 `sso`를 설정합니다. 별도 아이디·비밀번호 로그인은 없습니다. mock에서도 MongoDB가 연결되어 있으면 업로드·업데이트·권한·알림이 실제로 저장됩니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
 
 ## 기존 자료 이전
 
@@ -41,6 +41,8 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다.
 
 실제 사내 SSO, 운영 배포, PC 설치·자동 업데이트 연동은 별도 검증 범위입니다. 새 메뉴·권한·알림의 세부 동작은 GUIDE_V3.md를 확인하세요.
 
+실행 시 **버전만 확인**하는 읽기 전용 API(`/api/tools/{id}/version-check?release=1`)와 배포 Skill의 Python 예제를 제공합니다. 새 버전·서버 롤백을 알리고 파일은 교체하지 않습니다. 개별 도구 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [연결 안내](pt_ai_square/static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.
+
 ## 소스 구성
 
 - `pt_ai_square/demo/`: DB 없는 화면 체험용 가상 자료
@@ -54,8 +56,7 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다.
 
 ## 현재 검증 범위
 
-2026-10-18, Windows / Python 3.13 / 로컬 MongoDB에서 25개 테스트 통과. Skill·MCP의 MD+Python ZIP 게시 → 파일 해시·바이트 확인 → v2 등록 → v1 배포 복구를 검증했습니다. 도구 자체의 업무 동작, 실제 회사 SSO와 운영 배포는 각 회사 환경에서 별도로 확인해야 합니다. 웹 버전 관리와 PC 자동 설치·업데이트는 다릅니다.
+2026-10-19, Windows / Python 3.13 / 로컬 MongoDB에서 30개 테스트 통과. Skill·MCP의 MD+Python ZIP 게시 → 파일 해시·바이트 확인 → v2 등록 → v1 배포 복구를 검증했습니다. 도구 자체의 업무 동작, 실제 회사 SSO와 운영 배포는 각 회사 환경에서 별도로 확인해야 합니다. 웹 버전 관리와 PC 자동 설치·업데이트는 다릅니다.
 
-## 실행 시 버전 확인
 
-`GET /api/tools/{id}/version-check?release={설치된번호}`는 현재 배포와 설치 버전을 비교하는 인증된 읽기 전용 API입니다. 새 버전·서버 롤백을 구분하며 파일을 다운로드하거나 교체하지 않습니다. 배포 Skill에 Python 예제를 포함했습니다. 각 도구의 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [등록자용 연결 안내](pt_ai_square/static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.
+SSO와 mock에서 같은 등록·수정·업데이트·다운로드·롤백 흐름을 검증했습니다. mock은 설정 사번으로 동작하며 사번 변경·권한 승인·알림·재시작 후 유지 및 실제 로컬 HTTP 파일 업로드까지 시험했습니다. 비밀번호 로그인과 create-user 명령은 제거되었습니다.

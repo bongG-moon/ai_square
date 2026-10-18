@@ -1,10 +1,8 @@
 import hmac
 import secrets
-import time
 from datetime import timedelta
 from urllib.parse import urlsplit
 from flask import g, request, session, jsonify, redirect, render_template, current_app
-from werkzeug.security import check_password_hash
 from .storage import db, ensure_user, public_user
 
 def install_auth(app):
@@ -45,9 +43,6 @@ def install_auth(app):
                     return redirect(target)
             except Exception:
                 return (jsonify(error='HCP SSO 인증을 확인할 수 없습니다. 운영 설정을 확인해 주세요.'),503) if request.path.startswith('/api/') else (render_template('login.html',error='HCP SSO 모듈·쿠키 검증 설정을 확인해 주세요. 다른 인증 모드로 자동 전환하지 않습니다.',mode=mode),503)
-        elif session.get('user_id'):
-            row=db().users.find_one({'_id':session['user_id']})
-            if row: g.user=public_user(row)
         if g.user and not g.user['enabled']: g.user=None
         if request.method in {'POST','PUT','PATCH','DELETE'}:
             supplied=request.headers.get('X-CSRF-Token') or request.form.get('csrf','')
@@ -59,28 +54,11 @@ def install_auth(app):
                 return jsonify(error='로그인이 필요합니다.',login='/login'),401
             return redirect('/login')
 
-    @app.route('/login',methods=['GET','POST'])
+    @app.get('/login')
     def login():
         if g.user: return redirect('/')
-        if app.config['AUTH_MODE']!='local':
-            return render_template('login.html',mode=app.config['AUTH_MODE'],error='회사 로그인 인증이 필요합니다.'),401
-        error=''
-        if request.method=='POST':
-            uid=request.form.get('user_id','').strip()[:100]
-            key=(request.remote_addr or '')+':'+uid
-            now=time.time()
-            attempt=db().login_attempts.find_one({'_id':key})
-            if attempt and attempt['count']>=8 and attempt['until']>now:
-                return render_template('login.html',mode='local',error='로그인 시도가 많습니다. 15분 뒤 다시 시도해 주세요.'),429
-            row=db().users.find_one({'_id':uid})
-            if row and row['enabled'] and row.get('password') and check_password_hash(row['password'],request.form.get('password','')):
-                session.clear();session.update(user_id=uid,csrf=secrets.token_urlsafe(32));session.permanent=True
-                db().login_attempts.delete_one({'_id':key})
-                return redirect('/')
-            count=attempt['count']+1 if attempt and attempt['until']>now else 1
-            db().login_attempts.update_one({'_id':key},{'$set':{'count':count,'until':now+900}},upsert=True)
-            error='아이디 또는 비밀번호를 확인해 주세요.'
-        return render_template('login.html',mode='local',error=error)
+        error='설정한 시험 사번이 비활성 상태입니다. 관리자에게 확인해 주세요.' if app.config['AUTH_MODE']=='mock' else '회사 로그인 인증이 필요합니다.'
+        return render_template('login.html',mode=app.config['AUTH_MODE'],error=error),401
 
     @app.post('/api/logout')
     def logout():

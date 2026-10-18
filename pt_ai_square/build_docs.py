@@ -49,7 +49,7 @@ style=f"@font-face{{font-family:Pretendard;font-weight:100 900;src:url(data:font
 for source,name in [('PLAN_V3.md','P&T_AI_SQUARE_상세기획서_v3.html'),('GUIDE_V3.md','P&T_AI_SQUARE_실행_사용가이드_v3.html')]:
     content,toc=render((BASE/source).read_text(encoding='utf-8'))
     title='P&T AI SQUARE · '+('상세 기획서' if source.startswith('PLAN') else '실행·사용 가이드')
-    result='<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(title)+'</title><style>'+style+'</style><header><strong>P&T AI SQUARE</strong><span>v3.1 · MongoDB 저장 / 미설정 시 데모</span></header><main><nav>'+''.join(f'<a href="#{key}">{html.escape(label)}</a>' for key,label in toc)+'</nav><article>'+content+'</article></main></html>'
+    result='<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(title)+'</title><style>'+style+'</style><header><strong>P&T AI SQUARE</strong><span>v3.2 · MongoDB 저장 / 미설정 시 데모</span></header><main><nav>'+''.join(f'<a href="#{key}">{html.escape(label)}</a>' for key,label in toc)+'</nav><article>'+content+'</article></main></html>'
     (OUT/name).write_text(result,encoding='utf-8')
     if source.startswith('GUIDE'):(BASE/'static/guides/PT_AI_SQUARE_등록가이드.html').write_text(result,encoding='utf-8')
     print(name)

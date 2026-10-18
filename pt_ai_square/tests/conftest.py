@@ -7,10 +7,16 @@ import pytest
 from pt_ai_square import create_app
 from pt_ai_square.storage import db, ensure_user
 
+class FixtureSSO:
+    """Test-only identity provider, passed through the existing SSO adapter."""
+    def __init__(self,request):self.uid=request.cookies.get('test_employee','')
+    def check_day_cookie(self,cookie):return bool(self.uid)
+    def get_sso_info(self,cookie):return (self.uid,self.uid,'','공통','','')
+
 @pytest.fixture
 def app(tmp_path):
     name='ptai_test_'+uuid.uuid4().hex
-    app=create_app({'TESTING':True,'AUTH_MODE':'local','ADMIN_IDS':'admin','SECRET_KEY':'test-session-key','SESSION_COOKIE_SECURE':False,'DATA_DIR':str(tmp_path),'MONGODB_URI':os.environ.get('PTAI_TEST_MONGO_URI','mongodb://127.0.0.1:27018/'),'MONGODB_DATABASE':name,'MONGODB_TIMEOUT_MS':1000})
+    app=create_app({'TESTING':True,'AUTH_MODE':'sso','SSO_FACTORY':FixtureSSO,'MOCK_ADMIN':False,'ADMIN_IDS':'admin','SECRET_KEY':'test-session-key','SESSION_COOKIE_SECURE':False,'DATA_DIR':str(tmp_path),'MONGODB_URI':os.environ.get('PTAI_TEST_MONGO_URI','mongodb://127.0.0.1:27018/'),'MONGODB_DATABASE':name,'MONGODB_TIMEOUT_MS':1000})
     with app.app_context():
         for uid in ['admin','owner','member','other']:ensure_user(uid,uid,'공통')
     yield app
@@ -20,7 +26,8 @@ def app(tmp_path):
 
 def ready(app,uid='owner'):
     c=app.test_client()
-    with c.session_transaction() as s:s['user_id']=uid;s['csrf']='test-csrf-'+uid
+    c.set_cookie('test_employee',uid)
+    with c.session_transaction() as s:s['csrf']='test-csrf-'+uid
     return c,{'X-CSRF-Token':'test-csrf-'+uid}
 
 def publish(c,h,tid=None,revision=None,**overrides):

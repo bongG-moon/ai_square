@@ -68,7 +68,7 @@ def purge_deleted():
             except OSError: continue
             db().tools.update_one({'_id': t['_id']}, {'$set': {'versions.$[v].path': None}}, array_filters=[{'v.n': v['n'], 'v.deleted': True}])
 
-def ensure_user(uid, name, org='공통', password=None, org_code=None):
+def ensure_user(uid, name, org='공통', org_code=None):
     tax = db().taxonomy.find_one({'kind': 'organization', 'ssoCode': org_code}) if org_code else None
     if not tax: tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if not tax:
@@ -77,7 +77,6 @@ def ensure_user(uid, name, org='공통', password=None, org_code=None):
         tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if org_code: db().taxonomy.update_one({'_id': tax['_id']}, {'$set': {'ssoCode': org_code}})
     values = {'name': name, 'orgId': tax['_id']}
-    if password is not None: values['password'] = password
     db().users.update_one({'_id': uid}, {'$set': values, '$setOnInsert': {'enabled': True, 'created': time.time()}}, upsert=True)
 
 def public_user(row):

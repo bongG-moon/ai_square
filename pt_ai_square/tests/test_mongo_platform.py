@@ -4,7 +4,6 @@ import io
 import json
 import time
 import zipfile
-from werkzeug.security import generate_password_hash
 from pt_ai_square.storage import db, deliver_notifications, ensure_user
 from pt_ai_square import create_app
 from .conftest import ready, publish
@@ -116,7 +115,7 @@ def test_release_subscription_rollback_delete_and_restore(app):
 def test_no_sqlite_files_and_persistence(app):
     owner,h=ready(app);publish(owner,h);owner.put('/api/tools/1/like',json={'liked':True},headers=h)
     assert not list(Path(app.config['DATA_DIR']).rglob('*.sqlite*'))
-    app2=create_app({k:app.config[k] for k in ['TESTING','AUTH_MODE','ADMIN_IDS','SECRET_KEY','SESSION_COOKIE_SECURE','DATA_DIR','MONGODB_URI','MONGODB_DATABASE']})
+    app2=create_app({k:app.config[k] for k in ['TESTING','AUTH_MODE','SSO_FACTORY','ADMIN_IDS','SECRET_KEY','SESSION_COOKIE_SECURE','DATA_DIR','MONGODB_URI','MONGODB_DATABASE']})
     c,_=ready(app2);x=c.get('/api/bootstrap').json['items'][0];assert x['likes']==1 and x['name']=='장비 점검'
     app2.extensions['square_mongo_client'].close()
 
@@ -135,14 +134,14 @@ def test_auth_csrf_xss_and_upload_validation(app):
 def db_tools_count(app):
     with app.app_context():return db().tools.count_documents({})
 
-def test_local_login_and_disabled_user(app):
-    with app.app_context():ensure_user('login-user','Login','공통',generate_password_hash('correct-password'))
-    c=app.test_client();c.get('/login')
-    with c.session_transaction() as s:csrf=s['csrf']
-    assert c.post('/login',data={'user_id':'login-user','password':'correct-password','csrf':csrf}).status_code==302
+def test_sso_disabled_user_and_removed_password_login(app):
+    c,h=ready(app,'login-user')
     assert c.get('/api/bootstrap').status_code==200
+    assert c.post('/login',data={'user_id':'login-user','password':'unused'},headers=h).status_code==405
     with app.app_context():db().users.update_one({'_id':'login-user'},{'$set':{'enabled':False}})
     assert c.get('/api/bootstrap').status_code==401
+    page=c.get('/login').get_data(as_text=True)
+    assert 'type="password"' not in page and 'name="user_id"' not in page
 
 def test_outbox_replay_does_not_duplicate_inbox(app):
     owner,h=ready(app);publish(owner,h,approval=True)

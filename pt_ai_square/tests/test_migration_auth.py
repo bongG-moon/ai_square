@@ -42,7 +42,7 @@ def test_sso_mapping_and_fail_closed(app):
 def test_python_config_and_native_env_priority(monkeypatch,tmp_path):
     from pt_ai_square import config
     monkeypatch.setattr(config,'BASE',tmp_path)
-    (tmp_path/'runtime_config.py').write_text("SETTINGS={'MONGODB_DATABASE':'from_mapping'}\nPTAI_AUTH_MODE='local'\nMONGODB_URI='mongodb://localhost:27018/'\nPTAI_ADMIN_IDS='a,b'\n",encoding='utf-8')
+    (tmp_path/'runtime_config.py').write_text("SETTINGS={'MONGODB_DATABASE':'from_mapping'}\nPTAI_AUTH_MODE='sso'\nMONGODB_URI='mongodb://localhost:27018/'\nPTAI_ADMIN_IDS='a,b'\n",encoding='utf-8')
     monkeypatch.delenv('MONGODB_DATABASE',raising=False)
     assert config.settings()['MONGODB_DATABASE']=='from_mapping'
     monkeypatch.setenv('MONGODB_DATABASE','native_environment')

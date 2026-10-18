@@ -1,7 +1,6 @@
 """Optional startup check. Does not install, download artifacts, or modify files.
 
-The caller supplies its own authenticated HTTP opener when the site uses SSO/local
-login. Browser login is NOT automatically inherited by a Python process.
+The caller supplies its own authenticated HTTP opener when the site uses SSO. Browser login is NOT automatically inherited by a Python process.
 """
 import json
 from http.client import HTTPException

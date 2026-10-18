@@ -15,8 +15,8 @@ def settings():
     def get(name, default=''):
         return os.environ.get('PTAI_' + name) or private.get('PTAI_' + name, default)
     mode = str(get('AUTH_MODE', 'sso')).lower()
-    if mode not in {'sso', 'local', 'mock'}:
-        raise ValueError('PTAI_AUTH_MODE must be sso, local or mock')
+    if mode not in {'sso', 'mock'}:
+        raise ValueError('PTAI_AUTH_MODE는 sso 또는 mock만 지원합니다. local 로그인 모드는 제거되었습니다.')
     def named(name, default=''):
         return os.environ.get(name) or private.get(name, default)
     backend='mongodb'

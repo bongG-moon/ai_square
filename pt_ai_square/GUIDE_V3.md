@@ -1,4 +1,4 @@
-# P&T AI SQUARE v3.1 — 실행과 사용 안내
+# P&T AI SQUARE v3.2 — 실행과 사용 안내
 
 이 문서는 MongoDB 전용 구현을 기준으로 합니다. 이전 v2 기획서의 SQLite·혼합 저장, 조직별 목록 숨김, 통합 운영 관리 설명은 이 문서와 상세 기획서 v3로 대체합니다.
 
@@ -63,7 +63,7 @@ MONGODB_DATABASE = 'pt_ai_square'
 PTAI_MONGODB_TIMEOUT_MS = 3000
 ```
 
-`mock`은 이 PC에서만 허용하는 체험 인증입니다. 여러 사람이 실제로 사용할 때는 아래의 `local` 또는 `sso`를 사용하세요. `PTAI_MOCK_ADMIN=True`이면 설정한 체험 계정이 기본 관리자가 됩니다.
+`mock`은 설정한 사번으로 이 PC에서 실제 저장 기능을 시험하는 인증입니다. 회사 운영에서는 `sso`를 사용하세요. `PTAI_MOCK_ADMIN=True`이면 설정한 체험 계정이 기본 관리자가 됩니다.
 
 설정 적용 순서는 **실제 프로세스 환경변수 → runtime_config.py → 기본값**입니다. `.env` 파일은 읽지 않습니다. 예전 `PTAI_ACTIVITY_BACKEND` 값은 저장 방식을 바꾸지 않으며 모든 데이터는 MongoDB에 저장됩니다.
 
@@ -77,24 +77,32 @@ PTAI_MONGODB_TIMEOUT_MS = 3000
 
 설정 파일을 바꿨다면 웹 서버를 종료한 뒤 다시 실행해야 합니다. 웹 화면에서 조직·업무·추가 관리자를 바꾼 것은 서버 재시작 없이 반영됩니다.
 
-## 3. 여러 계정으로 SSO 없이 사용하기
+## 3. 설정한 사번으로 mock 시험하기
 
-설정 파일에서 다음을 지정합니다.
+로그인 모드는 **sso / mock 두 가지**입니다. 별도 아이디·비밀번호 로그인과 create-user 명령은 제거했습니다. 예전 설정이 `PTAI_AUTH_MODE = 'local'`이면 `mock` 또는 `sso`로 바꿔야 합니다.
+
+설정 파일의 다음 값으로 시험합니다. 사번은 앞의 0이 사라지지 않게 따옴표로 감싼 문자열로 적습니다.
 
 ```python
-PTAI_AUTH_MODE = 'local'
+PTAI_AUTH_MODE = 'mock'
+PTAI_MOCK_USER = '1000001'
+PTAI_MOCK_NAME = '시험 등록자'
+PTAI_MOCK_ADMIN = False
 PTAI_ADMIN_IDS = '1000001'
+MONGODB_URI = 'mongodb://127.0.0.1:27018/'
+MONGODB_DATABASE = 'pt_ai_square'
 ```
 
-계정을 만듭니다. 비밀번호는 명령 실행 후 터미널에서 두 번 입력하며 화면에 표시되지 않습니다.
+1. 서버를 시작하고 브라우저로 접속합니다. 비밀번호 입력 없이 설정한 사번으로 동작합니다. 처음 쓰는 사번이면 사용자 정보가 MongoDB에 만들어집니다.
+2. 상단 **도구 등록**에서 ZIP과 설명을 입력하고 **게시**합니다. v1과 등록자 사번이 실제로 저장됩니다. 담당자 표시 이름을 다르게 적어도 등록자는 설정한 사번입니다.
+3. **등록 관리 → 버전 → 새 버전 등록**에서 바뀐 ZIP을 게시합니다. v2가 생성되고 내려받으면 새 파일이 제공됩니다.
+4. **이전 버전으로 복구**를 선택하면 웹의 현재 배포가 v1로 돌아가고 철회된 v2 다운로드는 중단됩니다.
+5. 서버를 종료하고 다시 켜도 같은 MongoDB와 파일 저장 경로를 쓰면 등록 정보·버전·파일·이력이 유지됩니다.
+6. 다른 사용자를 시험하려면 `PTAI_MOCK_USER = '2000001'`로 바꾸고 재시작합니다. `PTAI_MOCK_ADMIN = False`를 유지하고 기본 관리자 목록에는 새 사번을 추가하지 않습니다. 이전 사번의 기능을 임의로 수정·삭제할 수 없고, 승인형 기능은 조회 권한을 신청해야 합니다.
 
-```powershell
-.venv-square\Scripts\python.exe -m pt_ai_square create-user 1000001 --name "관리자" --org "공통"
-.venv-square\Scripts\python.exe -m pt_ai_square create-user 2000001 --name "등록자" --org "장비팀"
-.venv-square\Scripts\python.exe -m pt_ai_square create-user 3000001 --name "사용자" --org "제조팀"
-```
+`mock`과 `sso`는 사용자 확인 방법만 다르고 업로드·업데이트·승인·알림 API와 MongoDB 저장 방식은 같습니다. mock은 로컬 접속만 허용합니다. 요청에 다른 사번을 넣거나 이전 로그인 세션이 남아 있어도 설정한 사번을 대신할 수 없습니다. `PTAI_MOCK_ADMIN=True`이면 현재 mock 사번이 관리자이므로 일반 사용자 권한 시험 때는 False로 둡니다.
 
-서버를 시작하고 로그인 화면에서 사번과 비밀번호를 입력합니다. 기본 관리자는 `PTAI_ADMIN_IDS`로 지정합니다. 이 설정은 local과 sso에 공통으로 적용됩니다. 새 사용자 가입·비밀번호 재설정 UI는 포함하지 않습니다.
+**MongoDB 주소를 비운 데모 화면은 별개입니다.** 실제 업로드·업데이트를 확인하려면 URI를 입력하고 MongoDB를 실행해야 합니다. mock이라는 이유로 더미 데이터를 사용하지 않습니다.
 
 ## 4. 회사 운영환경에 넣을 값
 
@@ -103,7 +111,7 @@ PTAI_ADMIN_IDS = '1000001'
 | `MONGODB_URI` | MongoDB 연결 주소 | 회사에서 제공하는 URI. 인증이 필요한 경우 계정·인증 DB 포함 |
 | `MONGODB_DATABASE` | 서비스 데이터베이스 이름 | `pt_ai_square` |
 | `PTAI_ADMIN_IDS` | 기본 관리자 계정 ID | `'사번1,사번2'` |
-| `PTAI_AUTH_MODE` | 로그인 방식 | `sso` 또는 `local` |
+| `PTAI_AUTH_MODE` | 인증 방식 | `sso` 또는 `mock` (mock은 로컬 시험) |
 | `PTAI_SECRET_KEY` | 웹 세션 서명 키 | 회사에서 지정 가능. 비워두면 MongoDB에 최초 생성·보관 |
 | `PTAI_DATA_DIR` | 업로드 파일 저장 경로 | 예: `r'D:\pt_ai_square_data'` |
 | `PTAI_HOST` / `PTAI_PORT` | 웹 서버 바인딩 주소·포트 | 회사 배포환경에 맞게 입력 |

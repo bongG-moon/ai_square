@@ -1,9 +1,9 @@
 # Copy to runtime_config.py. HCP Secret/process environment overrides these values.
-# sso: HCP-verified company identity / local: provisioned local accounts
+# sso: HCP-verified company identity / mock: configured employee ID on loopback
 # mock: loopback-only development, NEVER an authentication method for deployment.
-PTAI_AUTH_MODE = 'local'
+PTAI_AUTH_MODE = 'mock'
 PTAI_SECRET_KEY = ''  # Empty: generated once and retained in MongoDB settings.
-PTAI_ADMIN_IDS = ''   # Base administrator IDs for BOTH local and SSO login, comma-separated.
+PTAI_ADMIN_IDS = ''   # Base administrator employee IDs for SSO and mock, comma-separated.
 PTAI_COOKIE_SECURE = False  # Set True behind production HTTPS, including non-SSO use.
 PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'  # Use a different name for parallel instances on one host.
 PTAI_MAX_UPLOAD_MB = 128

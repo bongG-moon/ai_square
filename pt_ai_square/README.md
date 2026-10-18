@@ -1,4 +1,4 @@
-# P&T AI SQUARE v3.1
+# P&T AI SQUARE v3.2
 
 Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비스 정보는 MongoDB에 저장하고, 업로드 파일만 서버 디스크에 저장합니다. SQLite 실행 모드는 없습니다.
 
@@ -18,7 +18,7 @@ python -m venv .venv-square
 
 브라우저: http://127.0.0.1:5080/
 
-`mock`은 로컬 전용 개발 인증입니다. 운영은 `local` 또는 회사 `sso`를 설정합니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
+`mock`은 로컬 전용 개발 인증입니다. 회사 운영은 `sso`를 설정합니다. 별도 아이디·비밀번호 로그인은 없습니다. mock에서도 MongoDB가 연결되어 있으면 업로드·업데이트·권한·알림이 실제로 저장됩니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
 
 ## 기존 자료 이전
 

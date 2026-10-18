@@ -14,6 +14,11 @@ def create_app(overrides=None):
     app=Flask(__name__)
     app.config.update(settings())
     if overrides: app.config.update(overrides)
+    if app.config['AUTH_MODE'] not in {'sso','mock'}:
+        raise ValueError('PTAI_AUTH_MODE는 sso 또는 mock만 지원합니다.')
+    app.config['MOCK_USER']=str(app.config['MOCK_USER']).strip()
+    if app.config['AUTH_MODE']=='mock' and (not app.config['MOCK_USER'] or len(app.config['MOCK_USER'])>100):
+        raise ValueError('PTAI_MOCK_USER에 시험할 사번을 문자열로 입력하세요.')
     app.config['DEMO_MODE']=not bool(app.config['MONGODB_URI'].strip())
     if app.config['DEMO_MODE']:
         from .demo_api import install_demo
@@ -33,7 +38,7 @@ def create_app(overrides=None):
     @app.get('/health')
     def health():
         if not app.config['DEMO_MODE']: db().command('ping')
-        return jsonify(status='ok',service='P&T AI SQUARE',storage='demo' if app.config['DEMO_MODE'] else 'mongodb',demo=app.config['DEMO_MODE'],version='3.1')
+        return jsonify(status='ok',service='P&T AI SQUARE',storage='demo' if app.config['DEMO_MODE'] else 'mongodb',demo=app.config['DEMO_MODE'],version='3.2')
     @app.errorhandler(HTTPException)
     def http_error(error): return jsonify(error=error.description),error.code
     @app.errorhandler(PyMongoError)
