@@ -1,0 +1,19 @@
+{
+  "organizations": ["공통", "기술팀", "장비팀", "제조팀"],
+  "categories": ["공통 업무", "분석", "문서 작성", "장비 점검"],
+  "users": [{"id":"demo-owner","name":"체험 사용자"},{"id":"demo-colleague","name":"예시 동료"}],
+  "requests": [],
+  "ideas": [{"id":1,"user":"demo-colleague","author":"예시 동료","name":"[예시] 점검 기록 자동 요약","body":"여러 점검 기록을 모아 핵심 조치 사항을 정리하고 싶어요.","category":"장비 점검","categoryId":"category-3","created":1792252800,"status":"접수 대기","assignee":null,"assigneeName":"","tool":null,"toolName":"","revision":0,"replies":[]}],
+  "tools": [
+    {"name":"[예시] 사내 문서 검색","desc":"필요한 업무 문서를 빠르게 찾아보세요.","type":"MCP","org":"공통","category":"공통 업무","tags":["문서 검색","업무 매뉴얼"]},
+    {"name":"[예시] 주간 보고서 작성","desc":"한 주의 업무를 읽기 좋은 보고서로 정리합니다.","type":"Skill","org":"공통","category":"문서 작성","tags":["보고서","주간 회의"]},
+    {"name":"[예시] 개발 워크플로 도우미","desc":"반복하는 개발 작업을 하나의 흐름으로 연결합니다.","type":"플러그인","org":"기술팀","category":"공통 업무","tags":["개발","코드 검토"]},
+    {"name":"[예시] 장비 점검 요약","desc":"점검 기록에서 주요 이상과 조치 사항을 추립니다.","type":"Skill","org":"장비팀","category":"장비 점검","tags":["장비 점검","보전"]},
+    {"name":"[예시] 데이터 조회 연결","desc":"분석에 필요한 데이터를 찾아 연결합니다.","type":"MCP","org":"기술팀","category":"분석","tags":["데이터 조회","분석"]},
+    {"name":"[예시] 회의록 정리","desc":"회의 메모를 결정 사항과 할 일로 정리합니다.","type":"Skill","org":"공통","category":"문서 작성","tags":["회의록","협업"]},
+    {"name":"[예시] 품질 검토 도우미","desc":"품질 검토 항목을 빠짐없이 확인합니다.","type":"하네스","org":"제조팀","category":"분석","tags":["품질 검토","불량 분석"]},
+    {"name":"[예시] 표 데이터 정리","desc":"반복되는 표 정리 작업을 간편하게 처리합니다.","type":"Tool","org":"공통","category":"분석","tags":["엑셀","데이터 정리"]},
+    {"name":"[예시] 변경 이력 요약","desc":"바뀐 내용과 확인할 사항을 한눈에 파악합니다.","type":"플러그인","org":"기술팀","category":"문서 작성","tags":["변경 이력","코드 검토"]},
+    {"name":"[예시] 매뉴얼 작성","desc":"작업 순서를 따라 하기 쉬운 안내로 만듭니다.","type":"Skill","org":"제조팀","category":"문서 작성","tags":["매뉴얼","교육"]}
+  ]
+}

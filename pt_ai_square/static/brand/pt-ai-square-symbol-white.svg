@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="P&amp;T AI SQUARE"><title>P&amp;T AI SQUARE</title><g fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M25 7v7m14-7v7M25 50v7m14-7v7M7 25h7m-7 14h7m36-14h7m-7 14h7"/>
+      <rect x="14" y="14" width="36" height="36" rx="9"/>
+      </g>
+      <path d="m32 22 10 6v12l-10 6-10-6V28z" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="m32 34 10-6v12l-10 6z" fill="#ffffff"/>
+      <path d="m22 28 10 6 10-6M32 34v12" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>
+      </svg>

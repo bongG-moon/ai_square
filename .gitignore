@@ -1,0 +1,15 @@
+runtime_config.py
+.env
+.env.*
+!.env.example
+.venv*/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+*.sqlite3
+.local-mongo/
+.preview/
+.test-*/
+instance/
+instance-*/

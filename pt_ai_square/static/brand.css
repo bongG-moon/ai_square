@@ -1,0 +1,70 @@
+/* P&T AI SQUARE typography and identity, 2026-10-18.
+   Apple KR reference: weight 600; Korean title tracking normal/~.007em.
+   Our bundled fonts: Inter (Latin), Pretendard (Hangul). */
+#square-app {
+  --sq-ui: Inter, Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --sq-ko: Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --sq-en: Inter, Pretendard, 'Segoe UI', sans-serif;
+  /* The inherited visualization reset also uses this token on headings. */
+  --font-sans: var(--sq-ui);
+  font-family: var(--sq-ui);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+#square-app :is(h1,h2,h3,h4,h5,h6,li,button,input,select,textarea) {
+  font-family: var(--sq-ui);
+}
+#square-app :is(h1,h2,h3) {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#square-app .sq-heading h1 {
+  font-size: 32px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+#square-app .sq-heading p {font-size:14px;line-height:1.55;letter-spacing:0}
+#square-app .sq-heading h1 .sq-heading-continuation {color:#6e6e73;font:inherit;letter-spacing:inherit}
+/* SF Pro KR 600 and Pretendard 600 have different perceived stroke weights.
+   Use the variable Korean face at 650 for display text only. */
+#square-app .sq-tool-icon[data-type="MCP"],#square-app .sq-type-label[data-type="MCP"]{--type-color:#2468d5;--type-tint:#eaf2ff}
+#square-app .sq-tool-icon[data-type="플러그인"],#square-app .sq-type-label[data-type="플러그인"]{--type-color:#b85a15;--type-tint:#fff1e4}
+#square-app .sq-tool-icon[data-type="Skill"],#square-app .sq-type-label[data-type="Skill"]{--type-color:#8741cc;--type-tint:#f4ebff}
+#square-app .sq-tool-icon[data-type="Tool"],#square-app .sq-type-label[data-type="Tool"]{--type-color:#267449;--type-tint:#e9f5ed}
+#square-app .sq-tool-icon[data-type="하네스"],#square-app .sq-type-label[data-type="하네스"]{--type-color:#087b87;--type-tint:#e5f5f6}
+#square-app .sq-tool-icon[data-type]{color:var(--type-color);background:var(--type-tint);box-shadow:inset 0 1px 0 #ffffffd9,0 4px 10px #00000008}
+#square-app .sq-type-label{color:var(--type-color);font-weight:600}
+#square-app #sq-rank-range{font-family:var(--sq-ko);letter-spacing:0;font-size:13px}
+#square-app .sq-activity-list{display:grid;gap:10px;margin:16px 0}
+#square-app .sq-activity-row{padding:14px 16px;background:#f5f5f7;border-radius:14px}
+#square-app .sq-activity-row>div{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+#square-app .sq-activity-row p{font-size:13px;margin:5px 0}
+#square-app .sq-activity-row small{color:#6e6e73;font-size:11px}
+#square-app .sq-section-head h2 {font-size:22px;line-height:1.3;letter-spacing:.007em}
+#square-app .sq-tool h3 {font-size:20px;font-weight:600;line-height:1.35;letter-spacing:.005em}
+#square-app .sq-shelf-grid .sq-tool h3 {font-size:18px;line-height:1.35;letter-spacing:.005em}
+#square-app .sq-rank-name strong {font-family:var(--sq-ui);font-size:15px;font-weight:600;line-height:1.35;letter-spacing:0}
+#square-app .sq-tool p {font-size:13px;line-height:1.6;letter-spacing:0}
+#square-app .sq-modal-head h2 {font-size:27px;line-height:1.3;letter-spacing:0}
+#square-app .sq-detail-hero h3 {font-size:24px;font-weight:600;line-height:1.3;letter-spacing:.009em}
+#square-app .sq-detail-hero p {font-size:14px;line-height:1.6}
+#square-app .sq-brand {font-family:var(--sq-en);font-size:19px;font-weight:600;letter-spacing:-.035em;gap:9px}
+#square-app .sq-brand::before {display:none;content:none}
+#square-app .sq-brand .sq-logo {display:block;width:34px;height:34px;flex:none;object-fit:contain}
+#square-app .sq-demo {font-family:var(--sq-ko);letter-spacing:0}
+/* Numeric counters remain deliberately smaller and tabular. */
+#square-app :is(.sq-count,.sq-rank-number,.sq-numeric) {font-family:var(--sq-en);font-variant-numeric:tabular-nums}
+@media(max-width:700px){
+  #square-app .sq-heading h1{font-size:28px}
+  #square-app .sq-section-head h2{font-size:20px}
+  #square-app .sq-shelf-grid .sq-tool h3{font-size:17px}
+  #square-app .sq-catalog .sq-tool h3{font-size:18px}
+  #square-app .sq-brand{font-size:17px;gap:7px}
+  #square-app .sq-brand .sq-logo{width:29px;height:29px}
+  #square-app .sq-modal-head h2{font-size:23px}
+}
+#square-app .sq-heading h1,#square-app .sq-section-head h2,#square-app .sq-tool h3,#square-app .sq-shelf-grid .sq-tool h3,#square-app .sq-rank-name strong {
+ font-family:var(--sq-ko);font-weight:650;
+}
+#square-app .sq-server-error{margin:16px 0;padding:13px 17px;border-radius:12px;color:#9b3b13;background:#fff1e9;font-size:13px}

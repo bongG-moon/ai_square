@@ -1,0 +1,55 @@
+import os
+import secrets
+from pathlib import Path
+from flask import Flask, jsonify, render_template
+from werkzeug.exceptions import HTTPException
+from pymongo.errors import PyMongoError
+from .config import settings
+from .storage import init_db, db
+from .auth import install_auth
+from .api import api
+from .activity import init_activity
+
+def create_app(overrides=None):
+    app=Flask(__name__)
+    app.config.update(settings())
+    if overrides: app.config.update(overrides)
+    app.config['DEMO_MODE']=not bool(app.config['MONGODB_URI'].strip())
+    if app.config['DEMO_MODE']:
+        from .demo_api import install_demo
+        install_demo(app)
+    else:
+        data=Path(app.config['DATA_DIR']).resolve();data.mkdir(parents=True,exist_ok=True)
+        (data/'artifacts').mkdir(exist_ok=True)
+        app.config['DATA_DIR']=str(data)
+        init_db(app);init_activity(app)
+        @app.before_request
+        def migration_guard():
+            if db().migrations.find_one({'state':'running'}, {'_id':1}):
+                return jsonify(error='데이터 이전 중입니다. 이전 작업을 완료한 후 다시 접속해 주세요.'),503
+        install_auth(app);app.register_blueprint(api)
+    @app.get('/')
+    def index(): return render_template('index.html')
+    @app.get('/health')
+    def health():
+        if not app.config['DEMO_MODE']: db().command('ping')
+        return jsonify(status='ok',service='P&T AI SQUARE',storage='demo' if app.config['DEMO_MODE'] else 'mongodb',demo=app.config['DEMO_MODE'],version='3.1')
+    @app.errorhandler(HTTPException)
+    def http_error(error): return jsonify(error=error.description),error.code
+    @app.errorhandler(PyMongoError)
+    def mongo_error(error):
+        app.logger.error('MongoDB unavailable: %s', type(error).__name__)
+        return jsonify(error='MongoDB 연결을 확인할 수 없습니다. 저장 결과를 확인한 후 다시 시도해 주세요.'),503
+    @app.errorhandler(Exception)
+    def unexpected(error):
+        app.logger.exception('Request failed')
+        return jsonify(error='요청을 처리하지 못했습니다. 다시 시도하거나 운영자에게 알려주세요.'),500
+    @app.after_request
+    def headers(response):
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='same-origin'
+        response.headers['X-Frame-Options']='DENY'
+        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        if response.mimetype=='application/json': response.headers['Cache-Control']='no-store'
+        return response
+    return app

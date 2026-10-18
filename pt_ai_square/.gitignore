@@ -1,0 +1,14 @@
+instance/
+instance-*/
+.test-tmp/
+.preview/
+.test-tmp-*/
+.test-*/
+.ui-v3/
+*.log
+runtime_config.py
+.local-mongo/
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/

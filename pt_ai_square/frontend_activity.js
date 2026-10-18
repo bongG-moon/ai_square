@@ -1,0 +1,5 @@
+function activityPanel(){
+ const labels={like:'좋아요',unlike:'좋아요 취소',download:'다운로드'};
+ return `<div class="sq-callout">MongoDB에 저장된 실제 이력입니다. 반복 다운로드도 기록하며, 순위에는 사용자·도구별 한국시간 하루 한 번만 반영합니다. 이전 자료는 남아 있던 집계 정보만 이전했습니다.</div><div class="sq-activity-list">${(server.activityEvents||[]).map(e=>`<article class="sq-activity-row"><div><strong>${esc(labels[e.kind]||e.kind)}</strong><small>${new Date(e.created*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}</small></div><p>${esc(e.toolName)}${e.version?` · v${e.version}`:''}</p><small>${esc(e.userName)}${e.imported?' · 기존 집계 이전':''}${e.kind==='download'&&!e.counted?' · 당일 중복, 집계 제외':''}</small></article>`).join('')||'<p class="sq-note">아직 저장된 이력이 없습니다.</p>'}</div>${server.activityCursor?button('activity-more','이전 이력 더 보기','sq-secondary'):''}`;
+}
+actions['activity-more']=async()=>{const r=await requestAPI('/api/activity?before='+encodeURIComponent(server.activityCursor));server.activityEvents.push(...r.events);server.activityCursor=r.nextCursor;manage('activity');};
