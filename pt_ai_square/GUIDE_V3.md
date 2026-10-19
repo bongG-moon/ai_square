@@ -69,6 +69,8 @@ PTAI_MONGODB_TIMEOUT_MS = 3000
 
 ### 실행
 
+VS Code에서 `pt_ai_square/web_main.py`를 열고 **Python 파일 실행**을 눌러도 됩니다. 또는 `pt_ai_square` 폴더 안에서 `python web_main.py`를 실행하세요. 직접 실행과 아래 모듈 실행은 같은 설정·Waitress 서버를 사용합니다. 운영 WSGI 서버에서 `pt_ai_square.web_main:app`으로 불러오는 방식도 유지합니다.
+
 ```powershell
 .venv-square\Scripts\python.exe -m pt_ai_square run
 ```
@@ -76,6 +78,8 @@ PTAI_MONGODB_TIMEOUT_MS = 3000
 브라우저에서 **http://127.0.0.1:5080/** 을 엽니다. 또는 `pt_ai_square/run_server.cmd`를 더블클릭합니다. 창을 종료하거나 Ctrl+C를 누르면 웹 서버가 멈춥니다. MongoDB와 웹 서버는 서로 다른 프로세스입니다.
 
 설정 파일을 바꿨다면 웹 서버를 종료한 뒤 다시 실행해야 합니다. 웹 화면에서 조직·업무·추가 관리자를 바꾼 것은 서버 재시작 없이 반영됩니다.
+
+`attempted relative import with no known parent package`가 나오면 이전 web_main.py 파일입니다. 최신 소스로 갱신하거나, `pt_ai_square` 폴더의 **상위 폴더**로 이동한 뒤 `python -m pt_ai_square run`을 실행하세요. import 한 줄만 바꾸는 것으로는 서버가 시작되지 않을 수 있으므로 최신 실행 파일 전체를 사용하세요.
 
 ## 3. 설정한 사번으로 mock 시험하기
 

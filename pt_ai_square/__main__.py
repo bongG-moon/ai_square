@@ -1,13 +1,13 @@
 import argparse
 from . import create_app
 
-def main():
+def main(argv=None):
     parser=argparse.ArgumentParser(description='P&T AI SQUARE')
     sub=parser.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run');run.add_argument('--host');run.add_argument('--port',type=int);run.add_argument('--dev',action='store_true')
     sub.add_parser('sync-activity',help='기존 이력과 저장 대기 이력을 MongoDB에 안전하게 반영')
     migrate=sub.add_parser('migrate-legacy',help='서버를 중지한 후 이전 SQLite 자료를 MongoDB에 한 번 이전');migrate.add_argument('path')
-    args=parser.parse_args();app=create_app()
+    args=parser.parse_args(argv);app=create_app()
     if app.config['DEMO_MODE'] and args.command!='run':
         parser.error('데모 모드입니다. runtime_config.py에 MONGODB_URI를 입력한 후 실행하세요.')
     if args.command=='migrate-legacy':
