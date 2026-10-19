@@ -19,7 +19,7 @@ def deployment(tmp_path):
         if path.name!='runtime_config.py':shutil.copy2(path,package/path.name)
     shutil.copytree(source/'demo',package/'demo')
     env={k:v for k,v in os.environ.items() if not k.startswith(('PTAI_','MONGODB_')) and k!='PYTHONPATH'}
-    env.update(PTAI_AUTH_MODE='mock',PYTHONIOENCODING='utf-8')
+    env.update(PYTHONIOENCODING='utf-8')
     return package,env
 
 def test_direct_file_starts_real_http_server_from_another_directory(deployment,tmp_path):

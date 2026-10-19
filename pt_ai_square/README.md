@@ -21,6 +21,8 @@ python -m venv .venv-square
 
 VS Code의 **Python 파일 실행**으로 `pt_ai_square/web_main.py`를 실행하거나, `pt_ai_square` 폴더 안에서 `python web_main.py`를 실행할 수도 있습니다. 두 실행 방식 모두 같은 설정과 서버를 사용합니다. WSGI 배포 진입점은 `pt_ai_square.web_main:app`입니다.
 
+기본 인증 모드는 SSO를 사용하지 않는 `mock`입니다. 별도 설정이 없으면 로컬 주소 `http://127.0.0.1:5080`에서 실행되며 기본 시험 사번은 `1000001`입니다. `runtime_config.py`의 `PTAI_MOCK_USER`로 시험 사번을 바꿀 수 있습니다. 환경변수나 설정 파일에 명시한 값이 있으면 해당 값이 기본값보다 우선합니다.
+
 `mock`은 로컬 전용 개발 인증입니다. 회사 운영은 `sso`를 설정합니다. 별도 아이디·비밀번호 로그인은 없습니다. mock에서도 MongoDB가 연결되어 있으면 업로드·업데이트·권한·알림이 실제로 저장됩니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
 
 ## 기존 자료 이전
