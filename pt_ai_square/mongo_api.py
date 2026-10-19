@@ -10,6 +10,7 @@ from pymongo.errors import DuplicateKeyError
 from .storage import db, next_id, audit, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
 from .request_files import stage_attachments, attachment_path, public_attachments
+from .package_contract import registration_fields
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -105,7 +106,7 @@ def serialize(t, stats, now):
     versions = []
     if can_read:
         for v in reversed(t.get('versions', [])):
-            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else ''))
+            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
     subscription = db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
     return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
@@ -140,7 +141,6 @@ def publish(tid=None):
     if not isinstance(raw,dict): raise BadRequest('등록 정보를 확인해 주세요.')
     t=tool(tid,True) if tid else None
     if t: check_revision(t,raw)
-    data=metadata(raw,t['data'] if t else None)
     if raw.get('mode')=='url':
         url=text(raw,'url',2048);parts=urlsplit(url)
         if parts.scheme!='https' or not parts.hostname or parts.username or parts.password: raise BadRequest('인증정보 없는 HTTPS 주소를 입력해 주세요.')
@@ -148,6 +148,18 @@ def publish(tid=None):
     else: artifact=stage_upload(request.files.get('artifact'))
     committed=False
     try:
+        package=artifact.get('package')
+        if package:
+            # Preview is advisory. Re-read and validate the actual upload at publish time.
+            raw={**registration_fields(package),**raw}
+            if any(raw.get(k)!=package[k] for k in ['platform','type']):
+                raise BadRequest('프로그램·유형이 ZIP 배포 정보와 다릅니다. ai-square.json 또는 입력값을 맞춰 주세요.')
+            previous=next((v.get('package') for v in reversed(t['versions']) if v.get('package')),None) if t else None
+            if previous and previous['packageId']!=package['packageId']:
+                raise BadRequest('새 버전의 packageId가 기존 도구와 다릅니다. 다른 도구는 새로 등록하세요.')
+        elif t and any(v.get('package') for v in t['versions']):
+            raise BadRequest('배포 정보를 사용한 도구의 새 버전에는 같은 packageId의 ai-square.json을 포함하세요.')
+        data=metadata(raw,t['data'] if t else None)
         if used_bytes()>current_app.config['STORAGE_QUOTA']: raise Conflict('파일 저장 공간 한도를 초과했습니다.')
         n=max([v['n'] for v in t['versions']],default=0)+1 if t else 1
         version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type']})
@@ -159,7 +171,7 @@ def publish(tid=None):
             tid=next_id('tools');db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version]})
         committed=True
         subscribe(tid,g.user['id']);audit(f'{data["name"]} v{n} 게시');deliver_notifications()
-        return jsonify(id=tid,version=n),201
+        return jsonify(id=tid,version=n,packageRecognized=bool(package),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
     finally:
         if not committed and artifact['path']:
             # A network timeout may follow a committed write. Never remove a potentially referenced file.
@@ -167,13 +179,30 @@ def publish(tid=None):
             except Exception: referenced=True
             if not referenced: artifact_path(artifact['path']).unlink(missing_ok=True)
 
+@api.post('/api/packages/inspect')
+def inspect_package():
+    """Authenticated, CSRF-protected preview. Temporary upload is always removed."""
+    artifact=stage_upload(request.files.get('artifact'))
+    try:
+        package=artifact.get('package')
+        return jsonify(recognized=bool(package),package=package,
+                       metadata=registration_fields(package) if package else {},
+                       sha256=artifact['sha'],bytes=artifact['size'],
+                       notice='배포 정보와 필수 파일을 확인했습니다. 코드 실행·설치 검증은 포함하지 않습니다.' if package else '배포 정보가 없는 일반 파일입니다. 등록 항목과 설치 안내를 직접 입력하세요.')
+    finally:
+        artifact_path(artifact['path']).unlink(missing_ok=True)
+
 @api.patch('/api/tools/<int:tid>')
 def edit(tid):
     t=tool(tid,True);raw=payload();check_revision(t,raw)
     merged={**resolved(t),**raw}
     for k in ['org','category']:
         if k in raw and k+'Id' not in raw: merged.pop(k+'Id',None)
-    data=metadata(merged,t['data']);cas(t,{'$set':{'data':data}});audit(f'{data["name"]} 등록 정보 수정')
+    data=metadata(merged,t['data'])
+    current_package=next((v.get('package') for v in t['versions'] if v['n']==t['active']),None)
+    if current_package and any(data[k]!=current_package[k] for k in ['platform','type']):
+        raise BadRequest('프로그램·유형은 현재 배포 정보와 일치해야 합니다. 변경한 패키지를 새 버전으로 등록하세요.')
+    cas(t,{'$set':{'data':data}});audit(f'{data["name"]} 등록 정보 수정')
     return jsonify(ok=True)
 
 @api.delete('/api/tools/<int:tid>')
@@ -447,7 +476,22 @@ def download(tid,n):
 @api.get('/api/tools/<int:tid>/manifest')
 def manifest(tid):
     t=tool(tid);usable(t);v=next(v for v in t['versions'] if v['n']==t['active'])
-    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],managedInstall=False,notice='PC 자동 설치·업데이트·롤백은 후속 앱 연동 기능입니다.')
+    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
+
+@api.get('/api/tools/<int:tid>/releases/<int:n>/deployment')
+def deployment_info(tid,n):
+    t=tool(tid);usable(t)
+    v=next((v for v in t['versions'] if v['n']==n),None)
+    if not v or v.get('deleted') or v.get('withdrawn') or not v.get('package'):
+        raise NotFound('사용 가능한 배포 정보가 없습니다.')
+    response=jsonify(schemaVersion=1,toolId=tid,release=n,activeRelease=t['active'],
+        package=v['package'],filename=v['name'],sha256=v['sha'],bytes=v['size'],
+        downloadUrl=f'/download/{tid}/{n}',versionCheckUrl=f'/api/tools/{tid}/version-check?release={n}',
+        authenticationRequired=True,managedInstall=False,
+        installationGuide=v['data']['guide'],environment=v['data']['environment'],
+        notice='상대 주소는 이 웹 서비스 주소 기준입니다. 실제 설치 후 이 배포 번호를 기록하세요. SSO 인증 연결과 실행 시 확인 코드는 도구 제작자가 연결해야 합니다.')
+    response.headers['Content-Disposition']=f'attachment; filename="ai-square-{tid}-v{n}.json"'
+    return response
 
 @api.get('/api/tools/<int:tid>/version-check')
 def version_check(tid):

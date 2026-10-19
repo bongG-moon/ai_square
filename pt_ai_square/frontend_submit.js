@@ -1,7 +1,7 @@
 root.addEventListener('submit',event=>{
  event.preventDefault();const form=event.target;if(form.dataset.busy)return;const values=new FormData(form),data=Object.fromEntries(values);
  if(form.id==='sq-search-form'){clearTimeout(runtime.searchTimer);state.query=$('#sq-query').value.trim();state.type='전체';state.category='모든 업무';navigate('browse','discovery');return;}
- if(form.id==='sq-register-form'){captureDraft();const error=Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
+ if(form.id==='sq-register-form'){captureDraft();const error=packageBlockingError(runtime.draft)||Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
  form.dataset.busy='true';form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   const id=runtime.detailId;

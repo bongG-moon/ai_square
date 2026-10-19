@@ -43,3 +43,7 @@ MongoDB에는 도구·버전·권한·사용 이력·요청·첨부 정보·알�
 실제 MongoDB를 연결하지 않고 화면만 보려면 runtime_config.py에서 `PTAI_DATA_MODE = 'dummy'`, `PTAI_AUTH_MODE = 'mock'`으로 설정하고 서버를 재시작합니다. 별도 `pt_ai_square/dummy/catalog.json`의 가짜 데이터로 목록·순위·상세 화면을 표시하며 쓰기·파일 다운로드는 차단합니다. 실제 DB 연결 정보는 남겨 두어도 사용하지 않습니다.
 
 실제 저장·업로드·버전 관리는 기본값 `PTAI_DATA_MODE = 'mongodb'`를 사용합니다. DB 장애 시 가짜 데이터로 자동 전환하지 않습니다. 설정 파일 예시에는 각 값의 용도·단위·입력 예시를 한국어 주석으로 제공합니다.
+
+## Skill 배포 정보 연결
+
+**도구 등록 → ZIP에서 불러오기**로 Skill이 만든 ai-square.json을 읽어 입력하고 필수 파일을 검사합니다. 게시 후 원본 ZIP과 별도의 배포 정보 JSON(도구 ID·버전·파일 해시·버전 확인 주소)을 제공합니다. 코드 가공·EXE 생성·설치는 수행하지 않습니다. 기존 일반 파일과 URL 등록은 유지합니다. 선언 규칙은 다운로드 Skill의 references/package-format.md에 있습니다.

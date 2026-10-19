@@ -172,3 +172,15 @@
  #square-app .sq-shelf-grid{flex:1}
 }
 @media(max-width:700px){#square-app .sq-wizard-steps{gap:12px}#square-app .sq-wizard-steps span{font-size:11px}#square-app .ws-access-card{padding:15px;gap:10px}}
+
+/* Distribution declaration: quiet glass surfaces, consistent with registration. */
+.ws-package-import{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;margin:0 0 22px;background:#f5f5f780;border:1px solid #e6e6eb;border-radius:20px}
+.ws-package-import svg{width:20px;height:20px;vertical-align:middle;margin-right:8px;color:#6e6e73}
+.ws-package-import p,.ws-package p{font-size:13px;line-height:1.65;color:#6e6e73;margin:8px 0}
+.ws-package-import label{white-space:nowrap;cursor:pointer}.ws-package-import label:focus-within{outline:2px solid #0071e3;outline-offset:3px}
+.ws-package{border:1px solid #e1e4e9;border-radius:18px;padding:18px 20px;margin:18px 0;background:#ffffffb8;backdrop-filter:blur(16px);overflow-wrap:anywhere}
+.ws-package-heading{display:flex;align-items:center;gap:8px}.ws-package-heading svg{width:18px;color:#347648}.ws-package-heading .ws-badge{margin-left:auto}
+.ws-package small{display:block;color:#77777d;font-size:12px;line-height:1.7}.ws-package .sq-link{display:inline-block;margin:8px 12px 8px 0}
+.ws-package-facts{display:grid;gap:6px;margin:12px 0;color:#6e6e73;font-size:12px}.ws-package-facts b{font-weight:500;color:#36363b;margin-left:8px}
+.ws-package.is-error{border-color:#e2b4b4}.ws-package.is-error strong{color:#9c3737}
+@media(max-width:640px){.ws-package-import{align-items:flex-start;flex-direction:column;gap:12px}.ws-package-import label{width:100%;text-align:center}.ws-package-heading{flex-wrap:wrap}}

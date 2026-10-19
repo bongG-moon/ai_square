@@ -55,3 +55,7 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다. `tests/legac
 runtime_config.py에서 `PTAI_DATA_MODE = 'dummy'`, `PTAI_AUTH_MODE = 'mock'`으로 설정하고 재시작하면 별도 dummy 폴더의 가짜 데이터로 화면을 볼 수 있습니다. 조회 전용이며 실제 DB에 연결하거나 저장하지 않습니다. 실제 업로드·다운로드·버전 관리는 기본값 `PTAI_DATA_MODE = 'mongodb'`를 사용하세요. 연결 장애 시 자동으로 샘플 모드가 되지는 않습니다.
 
 ZIP·EXE 등은 업로드한 원본으로 배포합니다. MCP·소스를 EXE로 자동 변환하는 빌드 기능은 현재 없습니다.
+
+## 배포 Skill 연결
+
+Skill이 만든 ZIP 최상위 `ai-square.json`을 웹에서 읽고 필수 파일을 검사합니다. **도구 등록 → ZIP에서 불러오기**로 자동 입력한 뒤 게시하면 원본 ZIP과 별도의 배포 정보 JSON(ID·버전·해시·버전 확인 주소)을 제공합니다. 기존 일반 파일과 URL도 등록할 수 있습니다. 코드 변환·EXE 생성·PC 설치는 수행하지 않습니다.

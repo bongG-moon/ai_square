@@ -120,11 +120,11 @@ function wizard(){
  openModal(x?'새 버전 등록':'도구 등록',x?`${x.name} · 버전은 자동으로 관리합니다.`:'잘 만든 도구를 동료들과 나눠보세요.',`${steps}<form id="sq-register-form" novalidate>${content}<p id="sq-register-error" class="sq-error" role="alert"></p><div class="sq-actions">${step>1?button('wizard-back','이전'):button('creator-guide','작성 가이드','sq-link')}${step<3?'<button class="sq-primary cursor-interaction">다음</button>':button('publish','게시','sq-primary')}</div></form>`);
 }
 async function publish(){
- const d=runtime.draft,error=Core.validate(d,1)||Core.validate(d,2);if(runtime.step!==3||error){if(error)throw Error(error);return;}
- const form=new FormData();form.append('metadata',JSON.stringify({...d,file:undefined,sample:undefined}));if(d.mode==='file')form.append('artifact',d.file);
+ const d=runtime.draft,error=packageBlockingError(d)||Core.validate(d,1)||Core.validate(d,2);if(runtime.step!==3||error){if(error)throw Error(error);return;}
+ const form=new FormData();form.append('metadata',JSON.stringify({...d,file:undefined,sample:undefined,packageInspection:undefined}));if(d.mode==='file')form.append('artifact',d.file);
  const result=await requestAPI(runtime.releaseId?`/api/tools/${runtime.releaseId}/versions`:'/api/tools','POST',form);
  runtime.newId=result.id;runtime.draft=null;await refresh();
- openModal('공유할 준비가 되었습니다.','게시 완료',`<div class="sq-success"><span class="sq-feature-icon">${icon('check')}</span><h3>${esc(getItem(result.id).name)}</h3><p>v${result.version}을 서버에 저장했습니다.<br>설치·연결 안내와 공개 범위를 확인해 주세요.</p><div class="sq-actions" style="justify-content:center">${button('published-detail','상세 화면 보기','sq-primary')}${button('manage','등록 도구 관리')}</div></div>`);
+ openModal('공유할 준비가 되었습니다.','게시 완료',`<div class="sq-success"><span class="sq-feature-icon">${icon('check')}</span><h3>${esc(getItem(result.id).name)}</h3><p>v${result.version}을 서버에 저장했습니다.<br>설치·연결 안내와 공개 범위를 확인해 주세요.</p>${result.deploymentUrl?`<div class="ws-package"><strong>도구 ID ${result.id} · 배포 v${result.version}</strong><p>배포 정보에 원본 파일·버전 확인 주소를 연결했습니다.</p><a class="sq-link" href="${esc(result.deploymentUrl)}" download>배포 정보 JSON 받기</a></div>`:''}<div class="sq-actions" style="justify-content:center">${button('published-detail','상세 화면 보기','sq-primary')}${button('manage','등록 도구 관리')}</div></div>`);
 }
 
 function versionManager(id){const x=getItem(id);runtime.detailId=x.id;const rows=x.versions.filter(v=>!v.deleted).map(v=>`<div class="sq-version"><div><strong>v${v.n}</strong> ${v.n===x.active?'<span class="sq-badge blue">현재 배포</span>':v.withdrawn?'<span class="sq-badge">배포 중단</span>':v.n===x.fallback?'<span class="sq-badge">복구용 보호</span>':''}<p>${esc(v.note)} · ${v.age}일 전 · ${v.size} MB</p></div><div class="sq-row-actions">${button('rollback','이 버전으로 복구','',`data-version="${v.n}" ${v.n===x.active||v.withdrawn?'disabled':''}`)}${button('delete-version','삭제','',`data-version="${v.n}" ${Core.canDelete(x,v)?'':'disabled'}`)}</div></div>`).join('');openModal('버전과 배포 관리',x.name,`<div class="sq-admin-head"><div><h3>현재 배포 v${x.active}</h3><p class="sq-note">배포 지시 번호 ${x.revision} · ${x.updatePaused?'업데이트 보류':'업데이트 정보 제공'}</p></div>${button('new-release','새 버전 등록','sq-primary',`data-id="${x.id}"`)}</div>${x.updatePaused?'<div class="sq-callout"><strong>이전 버전으로 복구했습니다.</strong> 문제가 있던 버전은 배포가 중단되었습니다. 사용자 PC 반영 여부는 연동 앱에서 별도로 확인해야 합니다.</div>':''}<div class="sq-version-list">${rows}</div><div class="sq-callout">현재 배포와 복구용 버전은 삭제할 수 없습니다. PC별 설치 현황은 아직 수집하지 않습니다. 파일을 지워도 배포 이력과 변경 기록은 남깁니다.</div><div class="sq-actions">${button('manage','관리 목록으로')}</div>`);}
@@ -143,7 +143,7 @@ function editOrg(index){runtime.orgIndex=index;const o=organizations[index];open
 function cleanupPreview(){const candidates=items.flatMap(x=>Core.retention(x,policy.keep,policy.days).map(v=>({item:x,v})));runtime.cleanup=candidates;openModal('이전 버전 정리','삭제하기 전 대상 확인',`<div class="sq-callout"><strong>${candidates.length}개 파일 · ${candidates.reduce((n,c)=>n+c.v.size,0)} MB</strong><br>현재 배포·복구용 파일을 제외한 목록입니다. 삭제 후에는 해당 파일을 내려받거나 복구할 수 없습니다.</div><div class="sq-version-list">${candidates.map(c=>`<div class="sq-version"><div><strong>${esc(c.item.name)} · v${c.v.n}</strong><p>${c.v.age}일 전 · ${c.v.size} MB</p></div><span class="sq-badge">정리 가능</span></div>`).join('')}</div><div class="sq-actions">${button('admin-tab','돌아가기','sq-secondary','data-tab="storage"')}${button('cleanup-confirm','이 파일들 삭제','sq-primary',candidates.length?'':'disabled')}</div>`);}
 function creatorGuide(){openModal('공유를 준비하는 가장 쉬운 방법','등록 가이드',`<ol class="sq-steps-list"><li><strong>누가, 어떤 프로그램에서 쓸지 정하세요.</strong><p>Claude · ChatGPT · 기타 중 하나를 선택하고 사용 환경을 적습니다. 관련 업무에는 ‘불량 분석, 수율 검토’처럼 동료가 검색할 말을 쉼표로 구분해 입력하세요.</p></li><li><strong>지침과 코드를 한 묶음으로 준비하세요.</strong><p>Skill은 SKILL.md와 scripts/의 Python 코드 등을 ZIP으로 묶을 수 있습니다. MCP 서버는 연결 URL을 등록할 수도 있습니다.</p></li><li><strong>파일에 맞는 배포 방식을 선택하세요.</strong><p>ZIP은 패키지, EXE·MSI는 기존 설치 프로그램, PS1은 설치 스크립트로 받습니다. 자동 설치를 지원하려면 실행·버전 확인·제거 규칙을 추가로 검증합니다.</p></li><li><strong>동료가 따라 할 설치 방법을 적으세요.</strong><p>필요한 계정, 실행할 파일, 설치 위치와 간단한 확인 예시를 적습니다. 버전 번호는 웹에서 발급합니다.</p></li></ol><div class="sq-callout"><strong>제작 도우미에 줄 요청 예시</strong><br>“이 도구를 사내 공유용으로 정리해줘. 지침, 실행 코드, 필요한 라이브러리, 설치·제거 방법, 사용 예시를 포함하고 내 개인 경로나 비밀키는 제외해줘.”</div><div class="sq-actions">${runtime.draft?button('resume-draft','작성 중인 등록으로 돌아가기','sq-primary'):button('register','도구 등록 시작','sq-primary')}</div>`);}
 function downloadResource(kind){const asset=window.PT_GUIDE_ASSETS?.[kind];if(!asset){announce('다운로드 자료는 브라우저용 전체화면 HTML에 포함되어 있습니다. 해당 파일에서 다시 눌러주세요.');return;}const bytes=Uint8Array.from(atob(asset.base64),c=>c.charCodeAt(0));const url=URL.createObjectURL(new Blob([bytes],{type:asset.mime}));const a=document.createElement('a');a.href=url;a.download=asset.name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);announce(`${asset.name} 다운로드를 시작했습니다. 브라우저의 다운로드 목록에서 확인하세요.`);}
-function resourceGuide(){openModal('공유 준비를 더 쉽게.','P&T AI SQUARE · 등록자 도우미',`<div class="sq-detail-hero"><h3>AI와 함께 파일을 정리하고,<br>가이드를 보며 등록하세요.</h3><p>파일 배포 Skill은 지침과 코드, 설치 방법을 공유하기 좋은 형태로 정리하도록 AI를 돕습니다.</p></div><div class="sq-two-col"><section><span class="sq-badge blue">AI로 준비하기</span><h3 style="margin:12px 0">파일 배포 Skill</h3><p class="sq-note">SKILL.md · 설치 안내 작성 양식 · 웹 등록 정보 예시를 ZIP으로 제공합니다. 기존 코드와 지침을 함께 정리할 때 사용하세요.</p><div class="sq-actions" style="justify-content:flex-start">${button('download-skill',icon('download')+' Skill ZIP 다운로드','sq-primary')}</div></section><section><span class="sq-badge">직접 따라 하기</span><h3 style="margin:12px 0">등록 가이드</h3><p class="sq-note">파일 형식 선택부터 기본 정보, 사용 권한, 새 버전 등록까지 버튼과 실제 예시로 설명합니다. 브라우저에서 바로 읽는 HTML입니다.</p><div class="sq-actions" style="justify-content:flex-start">${button('download-guide',icon('download')+' 가이드 다운로드','sq-secondary')}</div></section></div><ol class="sq-steps-list"><li><strong>Skill ZIP을 받고 압축을 풉니다.</strong><p>Skill을 지원하는 도구에 폴더를 추가하거나 SKILL.md 내용을 작업 지침으로 제공하세요.</p></li><li><strong>공유할 프로젝트에서 준비를 요청합니다.</strong><p>“이 프로젝트를 P&T AI SQUARE에 등록할 수 있도록 파일, 설치·제거 안내, 등록 설명을 준비해줘.”</p></li><li><strong>결과를 확인한 뒤 도구 등록을 누릅니다.</strong><p>공유 파일이나 URL을 올리고 조직·담당자·권한을 선택합니다. 버전 번호는 웹에서 자동 발급합니다.</p></li></ol><div class="sq-callout">Skill은 설치 프로그램이 아닌 AI 작업 지침입니다. 실제 게시·PC 설치·권한 변경은 자동으로 실행하지 않습니다. 배포 자료는 초안이며, 사용 중인 프로그램의 호환성과 사내 규칙을 확인해야 합니다.</div><div class="sq-actions">${runtime.draft?button('resume-draft','작성 중인 등록으로 돌아가기','sq-primary'):button('register','도구 등록 시작','sq-primary')}</div>`);}
+function resourceGuide(){openModal('공유 준비를 더 쉽게.','P&T AI SQUARE · 등록자 도우미',`<div class="sq-detail-hero"><h3>AI와 함께 파일을 정리하고,<br>가이드를 보며 등록하세요.</h3><p>파일 배포 Skill은 코드와 설치 안내에 ai-square.json 배포 정보를 더합니다. 웹이 이 정보를 읽고 필수 파일을 검사합니다.</p></div><div class="sq-two-col"><section><span class="sq-badge blue">AI로 준비하기</span><h3 style="margin:12px 0">파일 배포 Skill</h3><p class="sq-note">SKILL.md · 배포 정보 양식 · ZIP 준비 스크립트를 제공합니다. 기존 코드와 지침을 함께 정리할 때 사용하세요.</p><div class="sq-actions" style="justify-content:flex-start">${button('download-skill',icon('download')+' Skill ZIP 다운로드','sq-primary')}</div></section><section><span class="sq-badge">직접 따라 하기</span><h3 style="margin:12px 0">등록 가이드</h3><p class="sq-note">파일 형식 선택부터 기본 정보, 사용 권한, 새 버전 등록까지 버튼과 실제 예시로 설명합니다. 브라우저에서 바로 읽는 HTML입니다.</p><div class="sq-actions" style="justify-content:flex-start">${button('download-guide',icon('download')+' 가이드 다운로드','sq-secondary')}</div></section></div><ol class="sq-steps-list"><li><strong>Skill ZIP을 받고 압축을 풉니다.</strong><p>Skill을 지원하는 도구에 폴더를 추가하거나 SKILL.md 내용을 작업 지침으로 제공하세요.</p></li><li><strong>공유할 프로젝트에서 준비를 요청합니다.</strong><p>“이 프로젝트를 P&T AI SQUARE에 등록할 수 있도록 파일, 설치·제거 안내, 등록 설명을 준비해줘.”</p></li><li><strong>결과를 확인한 뒤 도구 등록을 누릅니다.</strong><p>도구 등록 → ZIP에서 불러오기로 정보를 확인하고 조직·담당자·권한을 선택합니다. 게시 후 원본 파일과 별도의 배포 정보 JSON을 받습니다.</p></li></ol><div class="sq-callout">Skill은 설치 프로그램이 아닌 AI 작업 지침입니다. 실제 게시·PC 설치·권한 변경은 자동으로 실행하지 않습니다. 배포 자료는 초안이며, 사용 중인 프로그램의 호환성과 사내 규칙을 확인해야 합니다.</div><div class="sq-actions">${runtime.draft?button('resume-draft','작성 중인 등록으로 돌아가기','sq-primary'):button('register','도구 등록 시작','sq-primary')}</div>`);}
 const actions={
  home:()=>{state.query='';navigate('home');},
  browse:()=>{state.query='';state.type='전체';state.category='모든 업무';navigate('browse','discovery');},
@@ -254,7 +254,7 @@ root.addEventListener('click',event=>{const b=event.target.closest('button');if(
 root.addEventListener('submit',event=>{
  event.preventDefault();const form=event.target;if(form.dataset.busy)return;const values=new FormData(form),data=Object.fromEntries(values);
  if(form.id==='sq-search-form'){clearTimeout(runtime.searchTimer);state.query=$('#sq-query').value.trim();state.type='전체';state.category='모든 업무';navigate('browse','discovery');return;}
- if(form.id==='sq-register-form'){captureDraft();const error=Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
+ if(form.id==='sq-register-form'){captureDraft();const error=packageBlockingError(runtime.draft)||Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
  form.dataset.busy='true';form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   const id=runtime.detailId;
@@ -316,6 +316,7 @@ function decorateForms(){
   box.outerHTML=`<div class="sq-field wide ws-access-field"><span>조회 권한 설정</span><label class="ws-access-card"><span class="ws-access-icon">${icon('shield-check')}</span><span class="ws-access-copy"><strong>승인받은 사용자만 상세 조회</strong><small>켜면 등록자·관리자의 승인 후 상세 내용과 파일을 볼 수 있습니다.</small></span><input type="checkbox" role="switch" name="approval" aria-label="승인받은 사용자만 상세 조회" ${checked?'checked':''}></label><small>끄면 사내 사용자가 바로 조회합니다. 목록은 모두에게 보이며 등록자와 관리자는 항상 조회할 수 있습니다.</small></div>`;
  }
  const upload=form.querySelector('.sq-upload');if(upload)upload.outerHTML=uploadArea('artifact',runtime.draft.file?[runtime.draft.file]:[]);
+ decoratePackageForm(form);
 
 }
 
@@ -378,6 +379,7 @@ detail=async function(id,tab='intro'){
  try{const fresh=await requestAPI(`/api/tools/${x.id}`);if(token!==runtime.detailLoadToken)return;Object.assign(x,fresh,{likes:fresh.likes-(fresh.liked?1:0)});}
  catch(error){if(error.status!==403)throw error;await refresh();if(token===runtime.detailLoadToken)lockedDetail(getItem(id));return;}
  originalDetail(id,tab);
+ deploymentLinks(x,tab);
  $('.sq-detail-top .sq-row-actions')?.insertAdjacentHTML('afterbegin',button('subscribe',icon(x.subscribed?'bell-ring':'bell')+(x.subscribed?'업데이트 알림 켜짐':'업데이트 알림 받기'),'sq-secondary',`data-id="${x.id}" aria-pressed="${x.subscribed}"`));
  if(tab==='comments'){
   const tabs=$('#sq-dialog-body .sq-tabs');while(tabs.nextElementSibling)tabs.nextElementSibling.remove();
@@ -464,7 +466,8 @@ function selectFiles(kind,files){
  if(kind==='artifact'){
   if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
   if(!/\.(zip|exe|msi|ps1)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
-  captureDraft();runtime.draft.file=files[0];wizard();
+  captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;wizard();
+  if(typeof inspectSelectedPackage==='function')inspectSelectedPackage(files[0]);
  }else{
   const combined=[...(work.ideaFiles||[]),...files];
   if(combined.length>5||files.some(f=>f.size>20*1048576||!f.size||! /\.(png|jpe?g|webp|pdf|txt|csv|xlsx|docx|zip)$/i.test(f.name)))throw Error('이미지·PDF·TXT·CSV·XLSX·DOCX·ZIP을 최대 5개, 파일당 20MB까지 첨부하세요.');
@@ -475,7 +478,7 @@ function refreshAttachments(){const area=$('[data-upload="attachments"]');if(are
 root.addEventListener('click',e=>{
  const pick=e.target.closest('[data-file-pick]');if(pick){e.preventDefault();pick.closest('[data-upload]').querySelector('input[type=file]').click();return;}
  const remove=e.target.closest('[data-file-remove]');if(!remove)return;e.preventDefault();
- if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
+ if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;runtime.draft.packageInspection=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
 });
 // Capture before the legacy file input handler so validation and drops share one path.
 root.addEventListener('change',e=>{const input=e.target;if(input.type!=='file'||!input.closest('[data-upload]'))return;e.stopImmediatePropagation();try{selectFiles(input.name,[...input.files]);}catch(error){input.value='';showError(error);}},true);
@@ -484,6 +487,69 @@ for(const type of ['dragenter','dragover','dragleave','drop'])root.addEventListe
  area.classList.toggle('is-dragging',type==='dragenter'||type==='dragover');
  if(type==='drop')try{selectFiles(area.dataset.upload,[...e.dataTransfer.files]);}catch(error){showError(error);}
 });
+
+// Inspect a declaration, never run or transform uploaded code.
+function packagePanel(d){
+ const p=d.packageInspection;if(!p)return '';
+ if(p.state==='loading')return '<div class="ws-package" role="status"><strong>배포 정보를 확인하고 있습니다.</strong><p>파일을 임시 전송하여 확인합니다. 게시 전에는 보관하지 않습니다.</p></div>';
+ if(p.state==='error')return `<div class="ws-package is-error" role="alert"><strong>배포 정보를 확인해 주세요.</strong><p>${esc(p.error)}</p><button type="button" class="sq-link" data-package-retry>다시 검사</button></div>`;
+ if(!p.result.recognized)return `<div class="ws-package"><strong>일반 파일 등록</strong><p>${esc(p.result.notice)}</p></div>`;
+ const info=p.result.package;
+ return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small><div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'ZIP 정보 다시 적용':'ZIP 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
+}
+function decoratePackageForm(form){
+ if(form.id!=='sq-register-form')return;
+ const d=runtime.draft;
+ if(runtime.step===1){
+  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP을 선택하면 배포 정보를 읽어 입력을 도와드려요.</p></div><label class="sq-secondary">ZIP에서 불러오기<input type="file" name="artifact" accept=".zip" class="sq-sr" data-package-import aria-label="배포 ZIP에서 정보 불러오기"></label></div>`);
+ }
+ if(d.mode==='file'&&d.file){
+  const anchor=form.querySelector('[data-upload="artifact"]')||form.querySelector('.ws-package-import');
+  if(anchor)anchor.insertAdjacentHTML('afterend',packagePanel(d));
+  else form.insertAdjacentHTML('afterbegin',packagePanel(d));
+ }
+}
+function applyPackageFields(d,result){
+ for(const key of ['name','desc','platform','type','environment','changes','guide'])d[key]=result.metadata[key];
+ d.workTags=result.metadata.workTags.join(', ');
+ d.mode='file';d.packageInspection.applied=true;
+}
+async function inspectSelectedPackage(file){
+ const d=runtime.draft;
+ const check={state:'loading'};d.packageInspection=check;
+ if($('#sq-register-form'))wizard();
+ const body=new FormData();body.append('artifact',file);
+ try{
+  const result=await requestAPI('/api/packages/inspect','POST',body);
+  if(runtime.draft!==d||d.file!==file||d.packageInspection!==check)return;
+  // Keep edits entered while the request was in flight.
+  captureDraft();check.state='ready';check.result=result;
+  if(result.recognized&&!runtime.releaseId&&!d.name.trim()&&!d.desc.trim())applyPackageFields(d,result);
+ }catch(error){
+  if(runtime.draft!==d||d.file!==file||d.packageInspection!==check)return;
+  check.state='error';check.error=error.message;
+ }
+ if(runtime.draft===d&&$('#sq-register-form'))wizard();
+}
+function packageBlockingError(d){
+ if(d.mode!=='file')return '';
+ if(d.packageInspection?.state==='loading')return '배포 정보 검사가 끝난 뒤 진행해 주세요.';
+ if(d.packageInspection?.state==='error')return '파일 검사에 실패했습니다. 안내를 확인하고 파일을 다시 선택하거나 재검사해 주세요.';
+ return '';
+}
+root.addEventListener('change',e=>{
+ if(!e.target.matches('[data-package-import]'))return;e.stopImmediatePropagation();
+ try{selectFiles('artifact',[...e.target.files]);}catch(error){showError(error);}
+},true);
+root.addEventListener('click',e=>{
+ if(e.target.closest('[data-package-retry]')){e.preventDefault();captureDraft();inspectSelectedPackage(runtime.draft.file);}
+ if(e.target.closest('[data-package-apply]')){e.preventDefault();captureDraft();applyPackageFields(runtime.draft,runtime.draft.packageInspection.result);wizard();}
+});
+function deploymentLinks(x,tab){
+ const versions=tab==='versions'?x.versions.filter(v=>v.deploymentUrl):x.versions.filter(v=>v.n===x.active&&v.deploymentUrl);
+ if(!versions.length||!['connect','versions'].includes(tab))return;
+ $('#sq-dialog-body').insertAdjacentHTML('beforeend',`<section class="ws-package"><strong>배포 정보</strong><p>파일은 원본 그대로 제공됩니다. 아래 JSON에는 도구 ID·배포 번호·필수 파일·버전 확인 주소가 연결되어 있습니다.</p>${versions.map(v=>`<a class="sq-link" href="${esc(v.deploymentUrl)}" download>v${v.n} 배포 정보 JSON 받기</a>`).join(' ')}<small>이 정보만으로 PC 설치나 실행 시 버전 확인 코드가 자동 적용되지는 않습니다.</small></section>`);
+}
 
 // END WORKSPACE EXTENSION
 refresh().catch(showError);setInterval(()=>{if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);},300000);

@@ -1,0 +1,141 @@
+import hashlib
+import io
+import json
+from pathlib import Path
+import subprocess
+import sys
+import zipfile
+
+import pytest
+from pt_ai_square.storage import db
+from .conftest import ready
+
+BASE=Path(__file__).resolve().parents[1]
+
+
+def declaration(**changes):
+    return dict(schemaVersion=1,packageId='sample-tool',name='선언한 도구',desc='선언에서 읽은 설명',
+        platform='Claude',type='MCP/Tool',entryPoint='main.py',guideFile='INSTALL.md',
+        requiredFiles=['requirements.txt'],requirements=['Python 3.11'],workTags=['분석'],
+        environment='Python',changes='첫 배포',**changes)
+
+
+def bundle(raw=None,missing=None,manifest_path='ai-square.json'):
+    b=io.BytesIO()
+    with zipfile.ZipFile(b,'w') as z:
+        z.writestr(manifest_path,json.dumps(declaration() if raw is None else raw,ensure_ascii=False))
+        for name,value in {'main.py':'raise RuntimeError("MUST NEVER EXECUTE")',
+                           'INSTALL.md':'압축을 풀고 Python 환경을 준비하세요.',
+                           'requirements.txt':'# dependencies'}.items():
+            if name!=missing:z.writestr(name,value)
+    return b.getvalue()
+
+
+def post(c,h,blob,url='/api/tools',**extra):
+    meta=dict(org='공통',category='공통 업무',owner='등록자',approval=False,mode='file')
+    meta.update(extra)
+    return c.post(url,headers=h,data={'metadata':json.dumps(meta),'artifact':(io.BytesIO(blob),'tool.zip')})
+
+
+def test_inspect_publish_original_bytes_versions_and_rollback(app):
+    c,h=ready(app);v1=bundle()
+    before=list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+    inspected=c.post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(v1),'tool.zip')})
+    assert inspected.status_code==200 and inspected.json['recognized']
+    assert inspected.json['metadata']['guide']=='압축을 풀고 Python 환경을 준비하세요.'
+    assert inspected.json['sha256']==hashlib.sha256(v1).hexdigest()
+    assert list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())==before
+    with app.app_context():assert db().tools.count_documents({})==0
+    published=post(c,h,v1);assert published.status_code==201,published.json
+    tid=published.json['id'];url=published.json['deploymentUrl']
+    info=c.get(url);assert info.status_code==200
+    assert info.json['toolId']==tid and info.json['release']==1
+    assert info.json['package']['entryPoint']=='main.py'
+    assert info.json['managedInstall'] is False
+    assert 'attachment;' in info.headers['Content-Disposition']
+    assert c.get(info.json['downloadUrl']).data==v1
+    assert c.get(info.json['versionCheckUrl']).json['status']=='current'
+    updated=declaration();updated.update(changes='두 번째',entryPoint='requirements.txt')
+    v2=bundle(updated)
+    result=post(c,h,v2,f'/api/tools/{tid}/versions',expectedRevision=1)
+    assert result.status_code==201,result.json
+    assert c.get(result.json['deploymentUrl']).json['release']==2
+    assert c.get(f'/api/tools/{tid}/manifest').json['package']['entryPoint']=='requirements.txt'
+    assert c.get(info.json['versionCheckUrl']).json['status']=='update_available'
+    assert c.post(f'/api/tools/{tid}/rollback',headers=h,json={'version':1,'expectedRevision':2}).status_code==200
+    assert c.get(f'/api/tools/{tid}/manifest').json['package']['entryPoint']=='main.py'
+    assert c.get(result.json['deploymentUrl']).status_code==404
+    assert c.get(url).json['release']==1
+    assert c.get(f'/download/{tid}/1').data==v1
+
+
+@pytest.mark.parametrize('case',['missing','path','nested','schema','duplicate','unknown','wrong-kind','empty-guide'])
+def test_invalid_declaration_rejected_without_residual_files(app,case):
+    c,h=ready(app);raw=declaration()
+    if case=='path':raw['entryPoint']='../private.py'
+    if case=='schema':raw['schemaVersion']=2
+    if case=='unknown':raw['toolId']=1
+    if case=='wrong-kind':raw['type']='MCP'
+    blob=bundle(raw,missing='main.py' if case=='missing' else None,manifest_path='folder/ai-square.json' if case=='nested' else 'ai-square.json')
+    if case in {'duplicate','empty-guide'}:
+        b=io.BytesIO(blob)
+        with zipfile.ZipFile(b,'a') as z:
+            z.writestr('MAIN.py' if case=='duplicate' else 'EMPTY.md','x' if case=='duplicate' else '')
+        if case=='empty-guide':
+            raw['guideFile']='EMPTY.md'
+            b=io.BytesIO()
+            with zipfile.ZipFile(b,'w') as z:
+                z.writestr('ai-square.json',json.dumps(raw));z.writestr('EMPTY.md','')
+                z.writestr('main.py','x');z.writestr('requirements.txt','x')
+        blob=b.getvalue()
+    for url in ['/api/packages/inspect','/api/tools']:
+        result=post(c,h,blob,url)
+        assert result.status_code==400,(case,result.json)
+        assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+    with app.app_context():assert db().tools.count_documents({})==0
+
+
+def test_declaration_cannot_grant_access_or_skip_actual_validation(app):
+    c,h=ready(app);blob=bundle()
+    assert c.post('/api/packages/inspect',data={'artifact':(io.BytesIO(blob),'x.zip')}).status_code==403
+    assert app.test_client().post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(blob),'x.zip')}).status_code in {401,403}
+    r=post(c,h,blob,approval=True);tid=r.json['id']
+    member,_=ready(app,'member')
+    assert member.get(r.json['deploymentUrl']).status_code==403
+    card=next(x for x in member.get('/api/bootstrap').json['items'] if x['id']==tid)
+    assert card['versions']==[] and 'package' not in card
+    assert member.get(f'/api/tools/{tid}/manifest').status_code==403
+    forged=declaration();forged['entryPoint']='absent.py'
+    assert post(c,h,bundle(forged),f'/api/tools/{tid}/versions',expectedRevision=1,packageInspection={'recognized':True}).status_code==400
+    different=declaration();different['packageId']='different-tool'
+    assert post(c,h,bundle(different),f'/api/tools/{tid}/versions',expectedRevision=1).status_code==400
+    assert post(c,h,blob,f'/api/tools/{tid}/versions',expectedRevision=1,type='Skill').status_code==400
+    no_manifest=io.BytesIO()
+    with zipfile.ZipFile(no_manifest,'w') as z:z.writestr('README.md','# legacy')
+    assert post(c,h,no_manifest.getvalue(),f'/api/tools/{tid}/versions',expectedRevision=1).status_code==400
+    assert len(list((Path(app.config['DATA_DIR'])/'artifacts').iterdir()))==1
+    assert c.get(r.json['deploymentUrl']).json['release']==1
+    assert c.patch(f'/api/tools/{tid}',headers=h,json={'type':'Skill','expectedRevision':1}).status_code==400
+
+
+def test_legacy_inspection_remains_supported(app):
+    c,h=ready(app);blob=io.BytesIO()
+    with zipfile.ZipFile(blob,'w') as z:z.writestr('README.md','# old package')
+    r=c.post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(blob.getvalue()),'legacy.zip')})
+    assert r.status_code==200 and r.json['recognized'] is False
+    assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+
+
+def test_downloadable_skill_builds_accepted_package(app,tmp_path):
+    skill=BASE/'static/guides/pt-file-distribution'
+    assert (skill/'scripts/package_contract.py').read_bytes()==(BASE/'package_contract.py').read_bytes()
+    source=tmp_path/'prepared';source.mkdir()
+    with zipfile.ZipFile(io.BytesIO(bundle())) as z:z.extractall(source)
+    output=tmp_path/'release.zip'
+    built=subprocess.run([sys.executable,str(skill/'scripts/prepare_package.py'),str(source),str(output)],capture_output=True)
+    assert built.returncode==0,built.stderr
+    c,h=ready(app);r=post(c,h,output.read_bytes())
+    assert r.status_code==201,r.json
+    assert c.get(f'/download/{r.json["id"]}/1').data==output.read_bytes()
+    again=subprocess.run([sys.executable,str(skill/'scripts/prepare_package.py'),str(source),str(output)],capture_output=True)
+    assert again.returncode!=0 and output.exists()

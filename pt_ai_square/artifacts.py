@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from flask import current_app
 from werkzeug.exceptions import BadRequest
+from .package_contract import read_package
 
 def stage_upload(upload):
     if not upload or not upload.filename: raise BadRequest('공유 파일을 선택해 주세요.')
@@ -25,6 +26,7 @@ def stage_upload(upload):
             raw=path.read_bytes()
             try: raw.decode('utf-16' if raw[:2] in (b'\xff\xfe',b'\xfe\xff') else 'utf-8-sig')
             except UnicodeError: raise BadRequest('PS1은 UTF-8 또는 BOM이 있는 UTF-16으로 저장해 주세요.')
+        package=None
         if ext=='.zip':
             try:
                 with zipfile.ZipFile(path) as z:
@@ -37,9 +39,11 @@ def stage_upload(upload):
                             raise BadRequest('ZIP의 경로·링크·암호화 항목을 확인해 주세요.')
                         if entry.file_size>max(entry.compress_size,1)*200: raise BadRequest('ZIP 압축률이 허용 범위를 초과했습니다.')
                     if z.testzip(): raise BadRequest('손상된 ZIP 파일입니다.')
+                    try: package=read_package(z)
+                    except ValueError as error: raise BadRequest(str(error)) from None
             except (zipfile.BadZipFile,RuntimeError,NotImplementedError): raise BadRequest('읽을 수 없는 ZIP 파일입니다.')
         with path.open('rb') as f: sha=hashlib.file_digest(f,'sha256').hexdigest()
-        return dict(path=path.name,name=name,size=size,sha=sha,url='',ext=ext)
+        return dict(path=path.name,name=name,size=size,sha=sha,url='',ext=ext,package=package)
     except Exception:
         path.unlink(missing_ok=True)
         raise
