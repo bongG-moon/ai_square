@@ -17,8 +17,8 @@ render=function(){
  const unread=server.unread||0;$('#ws-unread').hidden=!unread;$('#ws-unread').textContent=unread>99?'99+':unread;
  $('.ws-bell').setAttribute('aria-label',`내 알림, 읽지 않은 알림 ${unread}개`);
  if(special){
-  const labels={manage:['등록 관리.','내가 공유한 도구를 한곳에서 관리하세요.'],admin:['관리자.','분류부터 권한까지, 함께 쓰는 공간을 관리하세요.'],ideas:['필요한 기능이 있나요?','업무의 불편함을 나누고, 함께 해결해 보세요.']};
-  $('#sq-page-title').textContent=labels[state.route][0];$('#sq-page-description').hidden=false;$('#sq-page-description').textContent=labels[state.route][1];renderWorkspace();
+  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.']};
+  setPageHeading(...labels[state.route],true);renderWorkspace();
  }
  enhanceSelects();
 };

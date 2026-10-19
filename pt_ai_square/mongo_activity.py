@@ -26,7 +26,13 @@ def set_like(tid, uid, liked):
     except DuplicateKeyError: pass
     now = time.time()
     e = {'_id': uuid.uuid4().hex, 'tool': tid, 'user': uid, 'kind': 'like' if liked else 'unlike', 'created': now, 'version': None, 'counted': liked}
-    db().activity_state.update_one({'_id': key, 'liked': {'$ne': liked}}, {'$set': {'liked': liked, 'created': now}, '$push': {'outbox': e}})
+    # Keep the first known like date when cancelling/re-liking, so toggling
+    # cannot move an old recommendation into the recent seven-day window.
+    db().activity_state.update_one({'_id': key, 'liked': {'$ne': liked}}, [{'$set': {
+        'liked': liked, 'created': now,
+        'firstLikedAt': {'$ifNull': ['$firstLikedAt', {'$ifNull': ['$created', now]}]},
+        'outbox': {'$concatArrays': [{'$ifNull': ['$outbox', []]}, [e]]}
+    }}])
     return db().activity_state.count_documents({'tool': tid, 'kind': 'like', 'liked': True})
 
 def record_download(tid, uid, version):
@@ -39,15 +45,23 @@ def record_download(tid, uid, version):
     db().activity_state.update_one({'_id': key}, [{'$set': {'outbox': {'$concatArrays': [{'$ifNull': ['$outbox', []]}, [{'_id': eid, 'tool': tid, 'user': uid, 'kind': 'download', 'created': now, 'version': version, 'counted': {'$eq': ['$count', 0]}}]]}, 'count': {'$add': ['$count', 1]}}}])
 
 def statistics(ids, uid, now):
-    stats = {tid: dict(liked=False, likes=0, downloads=0, rankScore=0) for tid in ids}
+    stats = {tid: dict(liked=False, likes=0, downloads=0, recentLikes=0,
+                      recentDownloads=0, rankScore=0, totalRankScore=0) for tid in ids}
+    cutoff = now - 7 * 86400
     for r in db().activity_state.find({'tool': {'$in': ids}}):
-        s = stats[r['tool']]; age = now - r.get('created', 0)
-        weight = 4 if age < 3600 else 2 if age < 21600 else 1 if age < 86400 else 0
+        s = stats[r['tool']]
+        created = r.get('firstLikedAt', r.get('created', 0)) if r['kind'] == 'like' else r.get('created', 0)
+        recent = cutoff <= created <= now
         if r['kind'] == 'like' and r.get('liked'):
-            s['likes'] += 1; s['rankScore'] += 3 * weight
+            s['likes'] += 1
+            if recent: s['recentLikes'] += 1
             if r['user'] == uid: s['liked'] = True
         elif r['kind'] == 'download' and r.get('count', 0):
-            s['downloads'] += 1; s['rankScore'] += weight
+            s['downloads'] += 1
+            if recent: s['recentDownloads'] += 1
+    for s in stats.values():
+        s['rankScore'] = 2 * s['recentLikes'] + s['recentDownloads']
+        s['totalRankScore'] = 2 * s['likes'] + s['downloads']
     return stats
 
 def history(before=None):

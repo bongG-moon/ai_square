@@ -18,7 +18,7 @@ const Core={
  validate:(draft,step)=>{if(step===1){if(Core.tagError(draft.workTags))return Core.tagError(draft.workTags);if(!draft.name.trim())return '도구 이름을 입력해 주세요.';if(!draft.desc.trim())return '어떤 업무를 돕는지 한 줄로 적어 주세요.';if(!draft.owner.trim())return '담당자를 입력해 주세요.';if(draft.visibility==='선택 조직'&&!draft.audience.length)return '공개할 조직을 하나 이상 선택해 주세요.';}if(step===2){if(!draft.guide.trim())return '설치하거나 연결하는 방법을 적어 주세요.';if(draft.mode==='url'){try{const u=new URL(draft.url);if(u.protocol!=='https:')return 'https://로 시작하는 연결 주소를 입력해 주세요.';}catch{return '올바른 연결 주소를 입력해 주세요.';}}else if(!draft.file)return '공유할 파일을 선택해 주세요.';else if(!/\.(zip|exe|msi|ps1)$/i.test(draft.file.name))return 'ZIP, EXE, MSI, PS1 중 하나를 선택해 주세요. 여러 코드 파일은 ZIP으로 묶어 주세요.';}return '';}
 };
 const items=[];
-const state={route:'home',platform:'전체',org:'전체 조직',type:'전체',category:'모든 업무',query:'',sort:'discovery',page:0,rankPage:0,auto:!motion.matches,liked:new Set(),snapshot:0};
+const state={route:'home',homeType:'전체',platform:'전체',org:'전체 조직',type:'전체',category:'모든 업무',query:'',sort:'discovery',page:0,rankPage:0,rankMode:'recent',auto:!motion.matches,liked:new Set(),snapshot:0};
 const runtime={timer:null,progress:null,hover:false,focus:false,inView:false,busy:false,token:0,detailId:null,detailTab:'intro',adminTab:'tools',returnFocus:null,confirm:null,draft:null,step:1,releaseId:null,newId:null};
 const organizations=[],requests=[];
 const policy={keep:3,days:90},audit=[];
@@ -28,12 +28,29 @@ const persist=()=>{};
 const getItem=id=>items.find(x=>x.id===Number(id));
 const button=(action,label,cls='sq-secondary',extra='')=>`<button class="${cls} cursor-interaction" data-action="${action}" ${extra}>${label}</button>`;
 const options=(values,selected)=>values.map(v=>`<option${v===selected?' selected':''}>${esc(v)}</option>`).join('');
-function filtered(home=false){return Core.filter(items,{...state,type:home?'전체':state.type,category:home?'모든 업무':state.category,query:home?'':state.query});}
-function rankItems(){return filtered(true).sort((a,b)=>b.rankScore-a.rankScore||a.id-b.id).slice(0,10);}
+function filtered(home=false){return Core.filter(items,{...state,platform:'전체',org:home?'전체 조직':state.org,type:home?state.homeType:state.type,category:home?'모든 업무':state.category,query:home?'':state.query});}
+function rankMetrics(x){return state.rankMode==='recent'?{score:x.rankScore||0,likes:x.recentLikes||0,downloads:x.recentDownloads||0}:{score:x.totalRankScore||0,likes:x.likes+(state.liked.has(x.id)?1:0),downloads:x.downloads};}
+function rankItems(){return filtered(true).sort((a,b)=>{const am=rankMetrics(a),bm=rankMetrics(b);return bm.score-am.score||bm.downloads-am.downloads||bm.likes-am.likes||b.created-a.created||a.id-b.id;}).slice(0,10);}
 function tagChips(tags,limit=8,query=''){const all=Core.normalizeTags(tags),q=Core.normalizeSearch(query);return all.length?`<span class="sq-work-tags" aria-label="관련 업무">${all.slice(0,limit).map(t=>`<span class="sq-work-tag${q&&Core.normalizeSearch(t).includes(q)?' is-match':''}">${esc(t)}</span>`).join('')}${all.length>limit?`<span class="sq-work-tag">+${all.length-limit}</span>`:''}</span>`:'';}
 function workTagField(value){return `<label class="sq-field wide"><span>관련 업무 태그</span><input name="workTags" value="${esc(value)}" maxlength="300" placeholder="예: 주간 보고, 실적 정리, 보고서 작성"><small>동료가 검색할 업무명을 쉼표로 구분하세요. 최대 8개, 각 30자까지. 예: 불량 분석, 수율 검토</small></label>`;}
 function card(item,shelf=false){return `<article class="sq-tool" data-tone="${({MCP:'blue',Skill:'violet',Tool:'mint',플러그인:'peach',하네스:'rose'})[item.type]||'blue'}"><button class="sq-tool-main cursor-interaction" data-action="detail" data-id="${item.id}" aria-label="${esc(item.name)} 상세 보기"><div class="sq-tool-top"><span class="sq-tool-icon" data-type="${esc(item.type)}">${icon(item.icon)}</span><span class="sq-tool-kind">${esc(item.platform)} · <span class="sq-type-label" data-type="${esc(item.type)}">${esc(item.type)}</span></span></div><h3>${esc(item.name)}</h3><p>${esc(item.desc)}</p>${shelf?'':tagChips([...(item.workTags||[])].sort((a,b)=>Number(!!state.query&&Core.normalizeSearch(b).includes(Core.normalizeSearch(state.query)))-Number(!!state.query&&Core.normalizeSearch(a).includes(Core.normalizeSearch(state.query)))),3,state.query)}</button><div class="sq-tool-footer"><span>${esc(item.org)}</span><div class="sq-tool-metrics"><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${item.id}" aria-label="${esc(item.name)} 좋아요" aria-pressed="${state.liked.has(item.id)}">${icon('heart')}<span>${num(item.likes+(state.liked.has(item.id)?1:0))}</span></button><span class="sq-count" aria-label="다운로드 ${num(item.downloads)}건">${icon('arrow-down-to-line')}${num(item.downloads)}</span></div></div></article>`;}
-function renderOrgs(){const value=state.org;$('#sq-org').innerHTML=options(['전체 조직',...organizations.map(o=>o.name)],value);}
+const toolTypes=['전체','MCP/Tool','Skill','플러그인/하네스'];
+const typeLabel=type=>({'MCP/Tool':'MCP/TOOL',Skill:'SKILL'})[type]||type;
+function renderFilterTabs(){
+ const tabs=$('#sq-filter-tabs'),home=state.route==='home';
+ tabs.setAttribute('aria-label',home?'도구 유형':'등록 조직');
+ tabs.classList.toggle('sq-organization-tabs',!home);
+ if(home){tabs.innerHTML=toolTypes.map(type=>`<button class="cursor-interaction" data-home-type="${type}" aria-pressed="${type===state.homeType}">${typeLabel(type)}</button>`).join('');return;}
+ // Organization counts reflect all current filters except the organization itself.
+ const available=Core.filter(items,{...state,platform:'전체',org:'전체 조직'});
+ const names=[...new Set([...organizations.filter(o=>o.enabled!==false||items.some(x=>x.org===o.name)).map(o=>o.name),...items.filter(x=>!x.hidden).map(x=>x.org)])];
+ tabs.innerHTML=['전체 조직',...names].map(org=>{const count=org==='전체 조직'?available.length:available.filter(x=>x.org===org).length;return `<button class="cursor-interaction" data-org="${esc(org)}" aria-pressed="${org===state.org}">${esc(org==='전체 조직'?'전체':org)} <span class="sq-filter-count">(${num(count)})</span></button>`;}).join('');
+}
+function setPageHeading(lead,continuation,home=false){
+ const title=$('#sq-page-title');title.textContent=lead;
+ const suffix=document.createElement('span');suffix.className='sq-heading-continuation'+(home?'':' sq-heading-secondary');suffix.textContent=' '+continuation;title.append(suffix);
+ $('#sq-page-description').hidden=true;
+}
 function revealElements(){
  if(motion.matches)return;
  const elements=$$('.sq-heading,.sq-toolbar,.sq-chart,.sq-home-shelves .sq-section-head,.sq-tool').filter(el=>!el.dataset.revealed&&!el.closest('[hidden]'));
@@ -44,42 +61,60 @@ function revealElements(){
 function render(){
  runtime.token++;runtime.busy=false;stopAuto();
  $('#sq-home').hidden=state.route!=='home';$('#sq-browse').hidden=state.route!=='browse';$$('[data-route]').forEach(b=>{if(b.dataset.route===state.route)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
- $('#sq-page-title').textContent=state.route==='home'?'좋은 도구가 모이는 곳.':'필요한 도구를 발견하세요.';
- if(state.route==='home'){
-  const continuation=document.createElement('span');
-  continuation.className='sq-heading-continuation';
-  continuation.textContent=' 동료의 노하우를, 당신의 업무로.';
-  $('#sq-page-title').append(continuation);
- }
- $('#sq-page-description').hidden=state.route==='home';
- $('#sq-page-description').textContent=state.route==='home'?'':'MCP부터 Skill까지. 당신의 업무에 맞는 도구를 둘러보세요.';
- $$('[data-platform]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.platform===state.platform)));$('#sq-query').value=state.query;renderOrgs();
- const homeItems=filtered(true);$('#sq-popular').innerHTML=Core.sort(homeItems,'downloads').slice(0,3).map(x=>card(x,true)).join('')||empty('해당 조직의 도구가 아직 없습니다.');$('#sq-recent').innerHTML=Core.sort(homeItems,'recent').slice(0,3).map(x=>card(x,true)).join('')||empty('새로 공유된 도구가 없습니다.');
+ if(state.route==='home')setPageHeading('좋은 도구가 모이는 곳.','동료의 노하우를, 당신의 업무로.',true);
+ else setPageHeading('우리의 경험을 둘러보세요.','지금 필요한 도구를 찾는 시간.',true);
+ $('#sq-query').value=state.query;renderFilterTabs();
+ const homeItems=filtered(true);$('#sq-popular').innerHTML=Core.sort(homeItems,'downloads').slice(0,3).map(x=>card(x,true)).join('')||empty('선택한 유형의 도구가 아직 없습니다.');$('#sq-recent').innerHTML=Core.sort(homeItems,'recent').slice(0,3).map(x=>card(x,true)).join('')||empty('새로 공유된 도구가 없습니다.');
  renderRanks();renderCatalog();mountIcons();revealElements();schedule();
 }
-function empty(title){return `<div class="sq-empty"><h3>${esc(title)}</h3><p>프로그램이나 조직 선택을 바꿔보세요.</p>${button('clear-filters','전체 도구 보기')}</div>`;}
-function renderCatalog(){const list=Core.sort(filtered(),state.sort),paging=Core.pages(list.length,state.page,12);state.page=paging.page;$('#sq-types').innerHTML=['전체','MCP/Tool','Skill','플러그인/하네스'].map(type=>`<button class="cursor-interaction" data-type="${type}" aria-pressed="${type===state.type}">${type}</button>`).join('');$('#sq-category').value=state.category;$('#sq-sort').value=state.sort;$('#sq-result-count').textContent=state.query?`“${state.query}” 검색 결과 ${list.length}개`:`${list.length}개의 도구 · 순위 번호 없이 둘러보기`;$('#sq-catalog').innerHTML=list.slice(state.page*12,state.page*12+12).map(x=>card(x)).join('')||empty('검색 결과가 없습니다.');$('#sq-catalog-pages').innerHTML=paging.count>1?`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${paging.count}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',state.page===paging.count-1?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`:'';revealElements();}
-function renderRanks(){const list=rankItems();if(state.rankPage*5>=list.length)state.rankPage=0;const group=list.slice(state.rankPage*5,state.rankPage*5+5);$('#sq-rank-range').textContent='실시간 순위';$('#sq-rank-list').innerHTML=group.map((x,i)=>`<div class="sq-rank-row" data-rank="${state.rankPage*5+i+1}"><span class="sq-rank-number">${state.rankPage*5+i+1}</span><button class="sq-rank-name cursor-interaction" data-action="detail" data-id="${x.id}"><strong>${esc(x.name)}</strong><small>${esc(x.platform)}<span class="sq-type-label" data-type="${esc(x.type)}">${esc(x.type)}</span></small></button><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${x.id}" aria-label="${esc(x.name)} 좋아요" aria-pressed="${state.liked.has(x.id)}">${icon('heart')}<span>${num(x.likes+(state.liked.has(x.id)?1:0))}</span></button><span class="sq-count" aria-label="다운로드 ${num(x.downloads)}건">${icon('arrow-down-to-line')}${num(x.downloads)}</span></div>`).join('')||'<div class="sq-empty">조건에 맞는 순위가 없습니다.</div>';$$('[data-action=rank-page]').forEach(b=>{b.setAttribute('aria-pressed',String(+b.dataset.page===state.rankPage));b.disabled=+b.dataset.page*5>=list.length;});$('#sq-chart-time').textContent=new Date(server.rankAsOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});}
+function empty(title){return `<div class="sq-empty"><h3>${esc(title)}</h3><p>도구 유형이나 조직 선택을 바꿔보세요.</p>${button('clear-filters','전체 도구 보기')}</div>`;}
+function renderCatalog(){renderFilterTabs();const list=Core.sort(filtered(),state.sort),paging=Core.pages(list.length,state.page,12);state.page=paging.page;$('#sq-types').innerHTML=toolTypes.map(type=>`<button class="cursor-interaction" data-type="${type}" aria-pressed="${type===state.type}">${typeLabel(type)}</button>`).join('');$('#sq-category').value=state.category;$('#sq-sort').value=state.sort;$('#sq-result-count').textContent=state.query?`“${state.query}” 검색 결과 ${list.length}개`:`${list.length}개의 도구 · 순위 번호 없이 둘러보기`;$('#sq-catalog').innerHTML=list.slice(state.page*12,state.page*12+12).map(x=>card(x)).join('')||empty('검색 결과가 없습니다.');$('#sq-catalog-pages').innerHTML=paging.count>1?`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${paging.count}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',state.page===paging.count-1?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`:'';revealElements();}
+function rankRowHTML(x,rank){const metric=rankMetrics(x);return `<div class="sq-rank-row" data-rank="${rank}"><span class="sq-rank-number">${rank}</span><button class="sq-rank-name cursor-interaction" data-action="detail" data-id="${x.id}"><strong>${esc(x.name)}</strong><small>${esc(x.platform)}<span class="sq-type-label" data-type="${esc(x.type)}">${esc(x.type)}</span></small></button><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${x.id}" aria-label="${esc(x.name)} 좋아요" aria-pressed="${state.liked.has(x.id)}">${icon('heart')}<span>${num(metric.likes)}</span></button><span class="sq-count" aria-label="다운로드 ${num(metric.downloads)}건">${icon('arrow-down-to-line')}${num(metric.downloads)}</span></div>`;}
+function renderRanks(){$('#sq-rank-list').removeAttribute('aria-busy');const list=rankItems();if(state.rankPage*5>=list.length)state.rankPage=0;const group=list.slice(state.rankPage*5,state.rankPage*5+5);$('#sq-rank-range').textContent=state.rankMode==='recent'?'실시간 순위':'누적 순위';$('#sq-rank-period').textContent=state.rankMode==='recent'?'최근 7일':'전체 기간';$$('[data-action=rank-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===state.rankMode)));$('#sq-rank-list').innerHTML=group.map((x,i)=>rankRowHTML(x,state.rankPage*5+i+1)).join('')||'<div class="sq-empty">조건에 맞는 순위가 없습니다.</div>';$$('[data-action=rank-page]').forEach(b=>{b.setAttribute('aria-pressed',String(+b.dataset.page===state.rankPage));b.disabled=+b.dataset.page*5>=list.length;});$('#sq-chart-time').textContent=new Date(server.rankAsOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});}
 function stopAuto(){clearTimeout(runtime.timer);runtime.timer=null;runtime.progress?.cancel();runtime.progress=null;}
 function canAuto(){return state.route==='home'&&runtime.inView&&!runtime.busy&&!document.hidden&&!$('#sq-dialog').open&&rankItems().length>5;}
-function schedule(){
+function schedule(delay=5000){
  stopAuto();const count=rankItems().length;$('#sq-rank-all').hidden=count>5;
 
  if(!canAuto())return;
  const meter=$(`[data-action=rank-page][data-page="${state.rankPage}"] span`);
- if(!motion.matches&&meter?.animate)runtime.progress=meter.animate([{transform:'scaleX(0)'},{transform:'scaleX(1)'}],{duration:5000,fill:'forwards'});
- runtime.timer=setTimeout(()=>{if(canAuto())changeRank(1-state.rankPage);else schedule();},5000);
+ if(!motion.matches&&meter?.animate)runtime.progress=meter.animate([{transform:'scaleX(0)'},{transform:'scaleX(1)'}],{duration:delay,fill:'forwards'});
+ runtime.timer=setTimeout(()=>{if(canAuto())changeRank(1-state.rankPage);else schedule();},delay);
 }
 
 async function changeRank(page){
- if(runtime.busy||page===state.rankPage||page*5>=rankItems().length)return;
- stopAuto();runtime.busy=true;const token=++runtime.token,list=$('#sq-rank-list'),direction=page>state.rankPage?1:-1;
+ const ranked=rankItems();
+ if(runtime.busy||page===state.rankPage||page*5>=ranked.length)return;
+ stopAuto();runtime.busy=true;
+ const started=performance.now(),token=++runtime.token,list=$('#sq-rank-list'),direction=page>state.rankPage?1:-1;
  try{
-  if(!motion.matches&&list.animate)await list.animate([{opacity:1,transform:'translateY(0)',filter:'blur(0px)'},{opacity:0,transform:`translateY(${-direction*22}px)`,filter:'blur(3px)'}],{duration:220,easing:'cubic-bezier(.4,0,1,1)'}).finished.catch(()=>{});
+  if(motion.matches||!list.animate){state.rankPage=page;renderRanks();mountIcons();return;}
+  const next=ranked.slice(page*5,page*5+5),old=[...list.children];
+  const emptyRow=()=>{const el=document.createElement('div');el.className='sq-rank-row';el.setAttribute('aria-hidden','true');return el;};
+  list.setAttribute('aria-busy','true');
+  await Promise.all(Array.from({length:Math.max(old.length,next.length)},async(_,i)=>{
+   const front=old[i]||emptyRow();if(!front.isConnected)list.append(front);
+   front.classList.add('sq-rank-flipping');front.inert=true;
+   const turnOut=front.animate([
+    {transform:'perspective(850px) rotateX(0deg)',filter:'brightness(1)'},
+    {transform:`perspective(850px) rotateX(${-direction*90}deg)`,filter:'brightness(.96)'}
+   ],{duration:260,delay:i*90,fill:'forwards',easing:'cubic-bezier(.55,0,1,.45)'});
+   await turnOut.finished.catch(()=>{});
+   if(token!==runtime.token||!front.isConnected){turnOut.cancel();return;}
+   let back=emptyRow();
+   if(next[i]){const template=document.createElement('template');template.innerHTML=rankRowHTML(next[i],page*5+i+1);back=template.content.firstElementChild;}
+   back.classList.add('sq-rank-flipping');back.inert=true;
+   front.replaceWith(back);turnOut.cancel();mountIcons();
+   const turnIn=back.animate([
+    {transform:`perspective(850px) rotateX(${direction*90}deg)`,filter:'brightness(.96)'},
+    {transform:'perspective(850px) rotateX(0deg)',filter:'brightness(1)'}
+   ],{duration:360,fill:'both',easing:'cubic-bezier(.16,1,.3,1)'});
+   await turnIn.finished.catch(()=>{});turnIn.cancel();
+   back.classList.remove('sq-rank-flipping');back.inert=false;
+  }));
   if(token!==runtime.token)return;
   state.rankPage=page;renderRanks();mountIcons();
-  if(!motion.matches)await Promise.all($$('.sq-rank-row').map((row,i)=>row.animate?row.animate([{opacity:0,transform:`translateY(${direction*30}px) scale(.97)`,filter:'blur(3px)'},{opacity:1,transform:'translateY(0) scale(1)',filter:'blur(0px)'}],{duration:560,delay:i*65,fill:'backwards',easing:'cubic-bezier(.16,1,.3,1)'}).finished.catch(()=>{}):Promise.resolve()));
- }finally{if(token===runtime.token){runtime.busy=false;schedule();}}
+ }finally{if(token===runtime.token){list.removeAttribute('aria-busy');runtime.busy=false;schedule(Math.max(0,5000-(performance.now()-started)));}}
 }
 function navigate(route,sort){runtime.token++;runtime.busy=false;state.route=route;state.page=0;if(sort)state.sort=sort;render();persist();}
 function openModal(title,kicker,html){if(!$('#sq-dialog').open)runtime.returnFocus=document.activeElement;$('#sq-dialog-title').textContent=title;$('#sq-dialog-kicker').textContent=kicker;$('#sq-dialog-body').innerHTML=html;$('#sq-modal-status').textContent='';if(!$('#sq-dialog').open)$('#sq-dialog').showModal();$('#sq-dialog').scrollTop=0;mountIcons();schedule();}
@@ -149,7 +184,7 @@ const actions={
  browse:()=>{state.query='';state.type='전체';state.category='모든 업무';navigate('browse','discovery');},
  'browse-downloads':()=>{state.query='';state.type='전체';state.category='모든 업무';navigate('browse','downloads');},
  'browse-recent':()=>{state.query='';state.type='전체';state.category='모든 업무';navigate('browse','recent');},
- 'clear-filters':()=>{Object.assign(state,{query:'',platform:'전체',org:'전체 조직',type:'전체',category:'모든 업무',page:0});render();persist();},
+ 'clear-filters':()=>{Object.assign(state,{query:'',platform:'전체',homeType:'전체',org:'전체 조직',type:'전체',category:'모든 업무',page:0});render();persist();},
  'catalog-prev':()=>{state.page--;renderCatalog();mountIcons();},
  'catalog-next':()=>{state.page++;renderCatalog();mountIcons();},
  detail:b=>detail(b.dataset.id||runtime.detailId),
@@ -163,8 +198,9 @@ const actions={
   announce(liked?'좋아요를 추가했습니다.':'좋아요를 취소했습니다.');persist();
  },
  'rank-page':b=>changeRank(+b.dataset.page),
+ 'rank-mode':b=>{if(b.dataset.mode===state.rankMode)return;state.rankMode=b.dataset.mode;state.rankPage=0;render();},
  autoplay:()=>{state.auto=!state.auto;schedule();},
- 'rank-info':()=>openModal('최근의 관심을, 순위로.','실시간 TOP 10 집계 기준',`<div class="sq-detail-hero"><h3>최근 좋아요와 다운로드에<br>더 높은 비중을 줍니다.</h3><p>좋아요 3점 · 다운로드 1점에 최근 1시간 4배, 1–6시간 2배, 6–24시간 1배를 적용합니다.</p></div><div class="sq-callout">웹 접속·새로고침 시점까지 저장된 이력으로 순위를 계산합니다. 좋아요·다운로드 후에도 다시 계산하며, 화면은 6초마다 5개씩 전환합니다. 한 사용자·한 도구의 다운로드는 한국 시간 하루에 한 번 집계합니다. 현재 집계는 서버 다운로드 응답 기준이며 PC 설치 완료 수가 아닙니다.</div>${button('rank-refresh','집계 새로고침','sq-primary')}`),
+ 'rank-info':()=>openModal('좋아요 2점, 다운로드 1점.','인기 TOP 10 집계 기준',`<div class="sq-detail-hero"><h3>최근의 관심과 꾸준한 인기를<br>나누어 살펴보세요.</h3><p><strong>실시간</strong>은 집계 시각부터 최근 7일, <strong>누적</strong>은 전체 기간을 기준으로 합니다. 두 순위 모두 좋아요 × 2 + 다운로드 × 1로 계산합니다.</p></div><div class="sq-callout">좋아요는 한 사람·한 도구당 한 번 반영하며, 취소하면 점수가 빠집니다. 다시 눌러도 최초 좋아요 날짜가 유지되어 최근 점수를 반복해서 올릴 수 없습니다.<br><br>다운로드는 같은 사용자·도구의 한국 시간 하루 첫 다운로드만 1점입니다. 버전이 달라도 같은 날에는 추가 점수가 없습니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.<br><br>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위 행에 표시되는 좋아요·다운로드 수도 선택한 기간 기준입니다.</div><p class="sq-note">접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 뒤집어 보여주며, 페이지 전환 자체는 재집계가 아닙니다. 다운로드 수는 서버 응답 기준이며 설치 완료 수가 아닙니다.</p>${button('rank-refresh','집계 새로고침','sq-primary')}`),
  'rank-refresh':()=>{state.snapshot++;render();closeModal();announce('다음 가상 집계를 반영했습니다. 화면 페이지 전환과 순위 재집계는 별개입니다.');},
  'close-dialog':closeModal,
  'cancel-confirm':()=>{$('#sq-confirm').close();runtime.confirm=null;},
@@ -250,10 +286,10 @@ function activityPanel(){
 }
 actions['activity-more']=async()=>{const r=await requestAPI('/api/activity?before='+encodeURIComponent(server.activityCursor));server.activityEvents.push(...r.events);server.activityCursor=r.nextCursor;manage('activity');};
 
-root.addEventListener('click',event=>{const b=event.target.closest('button');if(!b||!root.contains(b)||b.disabled)return;if(b.hasAttribute('data-platform')){state.platform=b.dataset.platform;state.page=0;state.rankPage=0;render();persist();return;}if(b.hasAttribute('data-type')){state.type=b.dataset.type;state.page=0;renderCatalog();mountIcons();return;}const handler=actions[b.dataset.action];if(handler){event.preventDefault();b.disabled=true;Promise.resolve().then(()=>handler(b)).catch(showError).finally(()=>{if(b.isConnected)b.disabled=false;});}});
+root.addEventListener('click',event=>{const b=event.target.closest('button');if(!b||!root.contains(b)||b.disabled)return;if(b.hasAttribute('data-home-type')){state.homeType=b.dataset.homeType;state.rankPage=0;render();return;}if(b.hasAttribute('data-org')){state.org=b.dataset.org;state.page=0;renderCatalog();mountIcons();return;}if(b.hasAttribute('data-type')){state.type=b.dataset.type;state.page=0;renderCatalog();mountIcons();return;}const handler=actions[b.dataset.action];if(handler){event.preventDefault();b.disabled=true;Promise.resolve().then(()=>handler(b)).catch(showError).finally(()=>{if(b.isConnected)b.disabled=false;});}});
 root.addEventListener('submit',event=>{
  event.preventDefault();const form=event.target;if(form.dataset.busy)return;const values=new FormData(form),data=Object.fromEntries(values);
- if(form.id==='sq-search-form'){clearTimeout(runtime.searchTimer);state.query=$('#sq-query').value.trim();state.type='전체';state.category='모든 업무';navigate('browse','discovery');return;}
+ if(form.id==='sq-search-form'){clearTimeout(runtime.searchTimer);state.query=$('#sq-query').value.trim();if(state.route==='home'){state.type='전체';state.category='모든 업무';state.org='전체 조직';}navigate('browse','discovery');return;}
  if(form.id==='sq-register-form'){captureDraft();const error=packageBlockingError(runtime.draft)||Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
  form.dataset.busy='true';form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
@@ -269,10 +305,10 @@ root.addEventListener('submit',event=>{
 });
 
 root.addEventListener('change',event=>{
- const el=event.target;if(el.id==='sq-org'){state.org=el.value;state.page=0;state.rankPage=0;render();}if(el.id==='sq-sort'){state.sort=el.value;state.page=0;renderCatalog();mountIcons();}if(el.id==='sq-category'){state.category=el.value;state.page=0;renderCatalog();mountIcons();}
+ const el=event.target;if(el.id==='sq-sort'){state.sort=el.value;state.page=0;renderCatalog();mountIcons();}if(el.id==='sq-category'){state.category=el.value;state.page=0;renderCatalog();mountIcons();}
  if(el.closest('#sq-register-form')){if(el.name==='artifact'){captureDraft();const f=el.files?.[0];runtime.draft.file=f||null;runtime.draft.sample=false;wizard();}else if(el.name==='mode'){captureDraft();wizard();}else if(el.name==='visibility')$('#sq-audience').hidden=el.value!=='선택 조직';}
 });
-$('#sq-query').addEventListener('input',()=>{clearTimeout(runtime.searchTimer);runtime.searchTimer=setTimeout(()=>{if($('#sq-dialog').open)return;state.query=$('#sq-query').value.trim();if(!state.query&&state.route==='home')return;state.type='전체';state.category='모든 업무';navigate('browse','discovery');},450);});
+$('#sq-query').addEventListener('input',()=>{clearTimeout(runtime.searchTimer);runtime.searchTimer=setTimeout(()=>{if($('#sq-dialog').open)return;state.query=$('#sq-query').value.trim();if(!state.query&&state.route==='home')return;if(state.route==='home'){state.type='전체';state.category='모든 업무';state.org='전체 조직';}navigate('browse','discovery');},450);});
 $('#sq-dialog').addEventListener('close',()=>{runtime.returnFocus?.isConnected&&runtime.returnFocus.focus({preventScroll:true});schedule();});$('#sq-confirm').addEventListener('cancel',()=>runtime.confirm=null);document.addEventListener('visibilitychange',()=>{schedule();if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);});motion.addEventListener('change',()=>{if(motion.matches){$$('.sq-reveal').forEach(el=>el.classList.remove('sq-reveal','sq-visible'));runtime.revealObserver?.disconnect();}state.auto=!motion.matches;runtime.token++;runtime.busy=false;renderRanks();schedule();});
 if(globalThis.IntersectionObserver)new IntersectionObserver(entries=>{const visible=entries[0].isIntersecting;if(runtime.inView!==visible){runtime.inView=visible;schedule();}},{threshold:.05}).observe($('.sq-rank-window'));else runtime.inView=true;
 // BEGIN WORKSPACE EXTENSION
@@ -295,8 +331,8 @@ render=function(){
  const unread=server.unread||0;$('#ws-unread').hidden=!unread;$('#ws-unread').textContent=unread>99?'99+':unread;
  $('.ws-bell').setAttribute('aria-label',`내 알림, 읽지 않은 알림 ${unread}개`);
  if(special){
-  const labels={manage:['등록 관리.','내가 공유한 도구를 한곳에서 관리하세요.'],admin:['관리자.','분류부터 권한까지, 함께 쓰는 공간을 관리하세요.'],ideas:['필요한 기능이 있나요?','업무의 불편함을 나누고, 함께 해결해 보세요.']};
-  $('#sq-page-title').textContent=labels[state.route][0];$('#sq-page-description').hidden=false;$('#sq-page-description').textContent=labels[state.route][1];renderWorkspace();
+  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.']};
+  setPageHeading(...labels[state.route],true);renderWorkspace();
  }
  enhanceSelects();
 };
