@@ -60,3 +60,7 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다.
 
 
 SSO와 mock에서 같은 등록·수정·업데이트·다운로드·롤백 흐름을 검증했습니다. mock은 설정 사번으로 동작하며 사번 변경·권한 승인·알림·재시작 후 유지 및 실제 로컬 HTTP 파일 업로드까지 시험했습니다. 비밀번호 로그인과 create-user 명령은 제거되었습니다.
+
+## 파일 직접 실행
+
+VS Code에서 pt_ai_square/web_main.py를 열어 Python 파일 실행을 누르거나, 해당 폴더에서 python web_main.py를 실행할 수 있습니다. 기존 모듈 실행과 같은 설정·Waitress 서버를 사용합니다. WSGI 진입점 pt_ai_square.web_main:app도 유지합니다. 직접 실행 HTTP 시작, 패키지/독립 WSGI 로딩, mock 로컬 바인딩 제한에 대한 추가 테스트 4개를 통과했습니다.
