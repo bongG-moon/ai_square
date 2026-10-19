@@ -13,9 +13,9 @@ PTAI_PORT = 5080
 
 # .env is not read. Enter all deployment settings directly in runtime_config.py.
 # Same Mongo variable names as the reference Flask Portal.
-# Empty URI: read-only demo/catalog.json preview, no login or persistence.
+# URI and database are required in both local mock and SSO modes.
 # Actual local trial: 'mongodb://127.0.0.1:27018/'
-# Configured MongoDB failure never falls back to demo or SQLite.
+# Missing settings or connection failures stop startup; no alternate database.
 MONGODB_URI = ''
 MONGODB_DATABASE = 'pt_ai_square'
 PTAI_ACTIVITY_COLLECTION = 'square_activity_events'  # Legacy activity collection, migration input only.

@@ -9,8 +9,10 @@ from werkzeug.exceptions import BadRequest, Forbidden, NotFound, Conflict
 from pymongo.errors import DuplicateKeyError
 from .storage import db, next_id, audit, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
+from .request_files import stage_attachments, attachment_path, public_attachments
 
 api = Blueprint('api', __name__)
+TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
 
 def admin():
     if g.user['role'] != 'admin': raise Forbidden('관리자만 사용할 수 있습니다.')
@@ -52,7 +54,8 @@ def category(raw, kind, existing=None):
 
 def metadata(raw, existing=None):
     data = {k: text(raw, k, n, k not in {'environment', 'changes'}) for k, n in {'name': 50, 'desc': 200, 'owner': 100, 'platform': 20, 'type': 20, 'guide': 10000, 'environment': 200, 'changes': 2000}.items()}
-    for k, choices in {'platform': {'Claude','ChatGPT','기타'}, 'type': {'MCP','Skill','Tool','플러그인','하네스'}}.items():
+    data['type']=TYPE_ALIASES.get(data['type'],data['type'])
+    for k, choices in {'platform': {'Claude','ChatGPT','기타'}, 'type': {'MCP/Tool','Skill','플러그인/하네스'}}.items():
         if data[k] not in choices: raise BadRequest('프로그램과 유형을 확인해 주세요.')
     for kind, key in [('organization','org'), ('category','category')]:
         row = category(raw, kind, existing); data[key+'Id'] = row['_id']; data[key] = row['name']
@@ -68,6 +71,7 @@ def metadata(raw, existing=None):
 
 def resolved(t):
     data = copy.deepcopy(t['data'])
+    data['type']=TYPE_ALIASES.get(data.get('type'),data.get('type'))
     for key in ['org','category']:
         row = db().taxonomy.find_one({'_id': data.get(key+'Id')})
         if row: data[key] = row['name']
@@ -104,7 +108,7 @@ def serialize(t, stats, now):
             versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else ''))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
     subscription = db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
-    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP':'plug','Skill':'file-text','Tool':'package','플러그인':'braces','하네스':'layers-2'}[data['type']])
+    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
 
 def access_rows():
     result=[]
@@ -260,6 +264,7 @@ def feedback_reply(fid):
 def ideas():
     result=[]
     for i in db().ideas.find().sort('created',-1):
+        i['attachments']=public_attachments(i)
         i=dict(i);i['id']=i.pop('_id');i.pop('outbox',None);i['author']=name_of(i['user']);i['assigneeName']=name_of(i['assignee']) if i.get('assignee') else ''
         i['replies']=[dict(r,author=name_of(r['user'])) for r in i.get('replies',[])]
         linked=db().tools.find_one({'_id':i.get('tool'),'deleted':{'$ne':True}})
@@ -268,9 +273,24 @@ def ideas():
 
 @api.post('/api/ideas')
 def idea():
-    raw=payload();iid=next_id('ideas');name=text(raw,'name',100);cat=category(raw,'category')
-    db().ideas.insert_one({'_id':iid,'user':g.user['id'],'name':name,'body':text(raw,'desc',4000),'category':cat['name'],'categoryId':cat['_id'],'created':time.time(),'status':'접수 대기','assignee':None,'tool':None,'revision':0,'replies':[],'outbox':[event(all_admin_ids(),f'{g.user["name"]}님의 새 기능 요청: {name}',{'type':'idea','id':iid},'idea')]})
+    if request.mimetype=='multipart/form-data':
+        try: raw=json.loads(request.form.get('metadata',''))
+        except (ValueError,TypeError): raise BadRequest('요청 내용을 확인하세요.')
+        if not isinstance(raw,dict): raise BadRequest('요청 내용을 확인하세요.')
+    else: raw=payload()
+    name=text(raw,'name',100);cat=category(raw,'category');body=text(raw,'desc',4000)
+    iid=next_id('ideas');attachments=stage_attachments(request.files.getlist('attachments'))
+    db().ideas.insert_one({'_id':iid,'user':g.user['id'],'name':name,'body':body,'attachments':attachments,'category':cat['name'],'categoryId':cat['_id'],'created':time.time(),'status':'접수 대기','assignee':None,'tool':None,'revision':0,'replies':[],'outbox':[event(all_admin_ids(),f'{g.user["name"]}님의 새 기능 요청: {name}',{'type':'idea','id':iid},'idea')]})
     deliver_notifications();return jsonify(ok=True,id=iid),201
+
+@api.get('/api/ideas/<int:iid>/attachments/<aid>')
+def idea_attachment(iid,aid):
+    i=db().ideas.find_one({'_id':iid})
+    a=next((a for a in (i or {}).get('attachments',[]) if a['id']==aid),None)
+    if not a: raise NotFound('첨부파일을 찾을 수 없습니다.')
+    path=attachment_path(a['path'])
+    if not path.is_file(): raise NotFound('첨부파일을 찾을 수 없습니다.')
+    return send_file(path,as_attachment=True,download_name=a['name'],mimetype='application/octet-stream')
 
 @api.patch('/api/ideas/<int:iid>')
 def update_idea(iid):

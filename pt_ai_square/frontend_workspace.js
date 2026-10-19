@@ -9,10 +9,6 @@ const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('requ
 $('.sq-header-actions [data-action="manage"]').remove();
 $('.sq-header-actions').insertAdjacentHTML('afterbegin',`<button class="sq-quiet ws-bell" data-action="inbox" aria-label="내 알림" title="내 알림">${icon('bell')}<span id="ws-unread" hidden></span></button>`);
 render=function(){
- let demoBanner=$('#ws-demo-banner');
- if(server.demo&&!demoBanner){demoBanner=document.createElement('div');demoBanner.id='ws-demo-banner';demoBanner.className='ws-demo-banner';demoBanner.setAttribute('role','status');demoBanner.innerHTML='<strong>화면 체험 모드</strong><span>예시 데이터입니다. 등록·좋아요·권한 변경은 저장되지 않습니다. 실제 사용은 MongoDB 연결 후 가능합니다.</span>';$('.sq-shell').prepend(demoBanner);}
- if(demoBanner)demoBanner.hidden=!server.demo;
- if(server.demo){$('.sq-demo').textContent='데모 · 저장 안 됨';$('[data-action=logout]').hidden=true;}
  const categories=server.categories||[];
  $('#sq-category').innerHTML=options(['모든 업무',...categories.filter(x=>x.enabled||x.name===state.category).map(x=>x.name)],state.category);
  originalRender();const special=['manage','admin','ideas'].includes(state.route);
@@ -26,7 +22,7 @@ render=function(){
  }
  enhanceSelects();
 };
-openModal=function(title,kicker,html){originalModal(title,kicker,(server.demo?'<p class="ws-demo-note">데모 미리보기 · 입력·변경 내용은 저장되지 않으며 예시 도구 파일은 내려받을 수 없습니다.</p>':'')+html);decorateForms();enhanceSelects();};
+openModal=function(title,kicker,html){originalModal(title,kicker,html);decorateForms();enhanceSelects();};
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -36,8 +32,13 @@ function decorateForms(){
  if(!cat&&form.id==='sq-edit-tool-form'){const label=document.createElement('label');label.className='sq-field';label.innerHTML='<span>업무 분야</span><select name="category"></select>';form.querySelector('.sq-form-grid').append(label);cat=label.querySelector('select');cat.dataset.previous=getItem(runtime.detailId).category;}
  if(cat){const old=cat.dataset.previous||cat.value;cat.innerHTML=options((server.categories||[]).filter(c=>c.enabled||c.name===old).map(c=>c.name),old);}
  const approval=form.querySelector('[name=approval]');
- if(approval?.type==='checkbox'){const box=approval.closest('.sq-field');box.querySelector('span').textContent='조회 권한';approval.parentNode.lastChild.textContent='상세 내용을 보려면 등록자·관리자 승인이 필요합니다.';box.querySelector('small').textContent='목록에는 표시됩니다. 승인 전에는 상세 내용·파일·피드백을 열 수 없습니다.';}
- if(approval?.tagName==='SELECT'){approval.closest('label').querySelector('span').textContent='조회 권한';approval.options[0].text='모두 조회 가능';approval.options[1].text='승인 후 조회';}
+ if(approval){
+  const checked=approval.type==='checkbox'?approval.checked:approval.value==='true';
+  const box=approval.closest('.sq-field');
+  box.outerHTML=`<div class="sq-field wide ws-access-field"><span>조회 권한 설정</span><label class="ws-access-card"><span class="ws-access-icon">${icon('shield-check')}</span><span class="ws-access-copy"><strong>승인받은 사용자만 상세 조회</strong><small>켜면 등록자·관리자의 승인 후 상세 내용과 파일을 볼 수 있습니다.</small></span><input type="checkbox" role="switch" name="approval" aria-label="승인받은 사용자만 상세 조회" ${checked?'checked':''}></label><small>끄면 사내 사용자가 바로 조회합니다. 목록은 모두에게 보이며 등록자와 관리자는 항상 조회할 수 있습니다.</small></div>`;
+ }
+ const upload=form.querySelector('.sq-upload');if(upload)upload.outerHTML=uploadArea('artifact',runtime.draft.file?[runtime.draft.file]:[]);
+
 }
 
 // Searchable, keyboard-accessible select surface. Native select remains the form source.
@@ -86,7 +87,7 @@ function renderWorkspace(){
  if(work.tab==='feedback'){const feedback=list.flatMap(x=>x.comments.map(c=>({...c,toolName:x.name}))).sort((a,b)=>b.created-a.created);html+=`<div class="ws-panel-head"><div><h2>동료들의 피드백</h2><p>의견을 확인하고 답변과 처리 상태를 남겨주세요.</p></div></div>${feedback.map(c=>`<button class="ws-row ws-click" data-action="feedback-open" data-id="${c.tool}"><span class="ws-avatar">${icon('message-square')}</span><span class="ws-row-main"><strong>${esc(c.toolName)}</strong><span>${esc(c.author)} · ${esc(c.text)}</span></span>${badge(c.status)}${icon('chevron-right')}</button>`).join('')||blank('messages-square','아직 피드백이 없습니다.','사용자가 남긴 의견을 이곳에서 확인할 수 있습니다.')}`;}
  if(work.tab==='taxonomy')html+=taxonomyPanel();
  if(work.tab==='admins')html+=`<div class="ws-panel-head"><div><h2>함께 운영하는 관리자</h2><p>기본 관리자는 설정 파일에서, 추가 관리자는 이 화면에서 관리합니다.</p></div>${server.user.baseAdmin?button('add-admin',icon('user-plus')+' 관리자 추가','sq-primary'):''}</div>${(work.admins||[]).map(a=>`<div class="ws-row"><span class="ws-avatar">${esc(a.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(a.name)}</strong><p>${esc(a.id)}</p></div>${badge(a.base?'기본 관리자':'추가 관리자')}${!a.base&&server.user.baseAdmin?button('remove-admin','해제','sq-secondary',`data-user="${esc(a.id)}"`):''}</div>`).join('')||blank('users','관리자 목록을 불러오는 중입니다.','잠시만 기다려 주세요.')}`;
- if(work.tab==='storage')html+=`<div class="ws-panel-head"><div><h2>배포 파일 저장 공간</h2><p>파일만 서버 디스크에 저장합니다. 모든 서비스 정보는 MongoDB에 저장됩니다.</p></div>${button('storage-dialog','보관 정책·이전 버전 정리','sq-primary')}</div><div class="ws-storage">${((server.storage?.used||0)/1048576).toFixed(1)} <small>MB 사용 / ${((server.storage?.quota||0)/1073741824).toFixed(1)} GB</small></div>`;
+ if(work.tab==='storage')html+=`<div class="ws-panel-head"><div><h2>배포 파일 저장 공간</h2><p>배포 파일과 기능 요청 첨부파일은 서버 디스크에 저장합니다. 요청·버전·권한·이력과 파일 정보는 MongoDB에 저장됩니다.</p></div>${button('storage-dialog','보관 정책·이전 버전 정리','sq-primary')}</div><div class="ws-storage">${((server.storage?.used||0)/1048576).toFixed(1)} <small>MB 사용 / ${((server.storage?.quota||0)/1073741824).toFixed(1)} GB</small></div>`;
  if(work.tab==='activity')html+=activityPanel();
  workspace.innerHTML=html+'</div>';mountIcons();enhanceSelects();
 }
@@ -113,7 +114,7 @@ function renderIdeas(){
 async function loadIdeas(){work.ideas=(await requestAPI('/api/ideas')).ideas;}
 async function ideaDetail(id){await loadIdeas();const i=work.ideas.find(x=>x.id===+id);if(!i)throw Error('요청을 찾을 수 없습니다.');work.idea=i;
  const owner=server.user.role==='admin'||i.assignee===server.user.id;
- openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p><div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div><form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options([i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
+ openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div><form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options([i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
 }
 
 async function inbox(loadMore=false){
@@ -132,7 +133,7 @@ Object.assign(actions,{
  'requests-board':async()=>{await loadIdeas();closeModal();navigate('ideas');},
  'idea-filter':b=>{work.ideaFilter=b.dataset.filter;renderIdeas();},
  'idea-open':b=>ideaDetail(b.dataset.id),
- 'idea':()=>openModal('어떤 기능이 필요하세요?','새 기능 요청',`<form data-work-form="idea"><div class="sq-form-grid"><label class="sq-field wide"><span>요청 제목</span><input name="name" required maxlength="100" placeholder="예: 여러 장비의 점검 이력을 한 번에 비교하고 싶어요."></label><label class="sq-field wide"><span>현재 불편한 점과 원하는 결과</span><textarea name="desc" required maxlength="4000" placeholder="지금은 어떻게 일하고 있나요? 어떤 결과가 나오면 도움이 될까요?"></textarea></label><label class="sq-field"><span>관련 업무</span><select name="category">${options((server.categories||[]).filter(c=>c.enabled).map(c=>c.name),'공통 업무')}</select></label></div><div class="sq-actions"><button class="sq-primary">요청 등록</button></div></form>`),
+ 'idea':()=>{work.ideaFiles=[];openModal('어떤 기능이 필요하세요?','새 기능 요청',`<form data-work-form="idea"><div class="sq-form-grid"><label class="sq-field wide"><span>요청 제목</span><input name="name" required maxlength="100" placeholder="예: 여러 장비의 점검 이력을 한 번에 비교하고 싶어요."></label><label class="sq-field wide"><span>현재 불편한 점과 원하는 결과</span><textarea name="desc" required maxlength="4000" placeholder="지금은 어떻게 일하고 있나요? 어떤 결과가 나오면 도움이 될까요?"></textarea></label><label class="sq-field"><span>관련 업무</span><select name="category">${options((server.categories||[]).filter(c=>c.enabled).map(c=>c.name),'공통 업무')}</select></label></div>${uploadArea('attachments',work.ideaFiles)}<div class="sq-actions"><button class="sq-primary">요청 등록</button></div></form>`);},
  'idea-claim':b=>ask('이 요청의 개발을 맡으시겠어요?','내 이름이 개발 담당자로 표시되고 요청자에게 알림이 전달됩니다.',async()=>{await requestAPI(`/api/ideas/${b.dataset.id}`,'PATCH',{claim:true,expectedRevision:work.idea.revision});await ideaDetail(b.dataset.id);},'제가 구현할게요'),
  'feedback-open':b=>detail(b.dataset.id,'comments'),
  'feedback-reply':b=>{const x=getItem(runtime.detailId),c=x.comments.find(c=>c.id===+b.dataset.id);work.feedback=c;openModal('피드백에 답변하기',x.name,`<div class="sq-callout"><strong>${esc(c.author)}</strong><br>${esc(c.text)}</div><form data-work-form="feedback"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="검토 결과나 진행 상황을 알려주세요."></textarea></label>${x.canManage?`<label class="sq-field"><span>처리 상태</span><select name="status">${options(['접수','검토 중','반영 중','반영 완료','보류'],c.status)}</select></label>`:''}<div class="sq-actions"><button class="sq-primary">답변 저장</button></div></form>`);},
@@ -160,7 +161,7 @@ root.addEventListener('submit',event=>{
  form.dataset.busy='true';const data=Object.fromEntries(new FormData(form));form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   switch(form.dataset.workForm){
-   case 'idea':{const r=await requestAPI('/api/ideas','POST',data);await loadIdeas();navigate('ideas');await ideaDetail(r.id);break;}
+   case 'idea':{const body=new FormData();delete data.attachments;body.append('metadata',JSON.stringify(data));for(const file of work.ideaFiles||[])body.append('attachments',file);const r=await requestAPI('/api/ideas','POST',body);await loadIdeas();navigate('ideas');await ideaDetail(r.id);break;}
    case 'idea-reply':{const i=work.idea;await requestAPI(`/api/ideas/${i.id}`,'PATCH',{...data,tool:data.tool?+data.tool:null,expectedRevision:i.revision});await ideaDetail(i.id);await loadIdeas();if(state.route==='ideas')renderIdeas();break;}
    case 'feedback':{const c=work.feedback;await requestAPI(`/api/feedback/${c.id}/reply`,'POST',data);await refresh();await detail(c.tool,'comments');break;}
    case 'taxonomy':await requestAPI('/api/taxonomy','POST',{...data,...work.taxonomy,order:+data.order,enabled:data.enabled==='true'});closeModal();await refresh();break;

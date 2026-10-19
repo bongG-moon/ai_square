@@ -1,72 +1,39 @@
-# P&T AI SQUARE v3.2
+# P&T AI SQUARE v3.3
 
-Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비스 정보는 MongoDB에 저장하고, 업로드 파일만 서버 디스크에 저장합니다. SQLite 실행 모드는 없습니다.
+Flask + MongoDB 사내 도구 공유 플랫폼입니다. 인증만 SSO 사용(sso)과 미사용(mock)으로 구분하며 로컬에서도 실제 업로드·다운로드·버전 관리가 동작합니다.
 
-- [초보자용 실행·사용 안내](pt_ai_square/GUIDE_V3.md)
-- [최신 상세 기획서](pt_ai_square/PLAN_V3.md)
-- [설정 파일 예시](pt_ai_square/runtime_config.example.py)
+## 폴더 하나로 실행
 
-## 빠른 실행
+저장소의 `pt_ai_square` 폴더 전체를 복사합니다. 상위 프로젝트나 고정된 폴더 이름은 필요하지 않습니다. `web_main.py`가 있는 폴더에서 실행하세요.
 
-**화면만 체험할 때는 MongoDB와 설정 파일 없이** 아래 명령으로 실행합니다. `pt_ai_square/demo/catalog.json`의 예시 10개를 표시하며 등록·좋아요·수정·다운로드는 저장되지 않습니다. 실제 등록을 하려면 `runtime_config.example.py`를 `runtime_config.py`로 복사해 `MONGODB_URI`, 로그인 방식, DB 이름, 기본 관리자 사번을 입력합니다. `.env`는 사용하지 않습니다. 이미 설정된 MongoDB가 연결되지 않는 경우에는 오류를 표시하며 더미 데이터로 대체하지 않습니다.
-
-```powershell
-python -m venv .venv-square
-.venv-square\Scripts\python.exe -m pip install -r pt_ai_square\requirements.txt
-.venv-square\Scripts\python.exe -m pt_ai_square run
-```
-
-브라우저: http://127.0.0.1:5080/
-
-기본 인증 모드는 SSO를 사용하지 않는 `mock`입니다. 별도 설정이 없으면 로컬 주소 `http://127.0.0.1:5080`에서 실행되며 기본 시험 사번은 `1000001`입니다. `runtime_config.py`의 `PTAI_MOCK_USER`로 시험 사번을 바꿀 수 있습니다. 환경변수나 설정 파일에 명시한 값이 있으면 해당 값이 기본값보다 우선합니다.
-
-`mock`은 로컬 전용 개발 인증입니다. 회사 운영은 `sso`를 설정합니다. 별도 아이디·비밀번호 로그인은 없습니다. mock에서도 MongoDB가 연결되어 있으면 업로드·업데이트·권한·알림이 실제로 저장됩니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
-
-## 기존 자료 이전
-
-기존 서버를 멈추고 같은 파일 저장 경로를 유지한 상태에서 실행합니다.
+1. `runtime_config.example.py`를 `runtime_config.py`로 복사합니다.
+2. 실제 `MONGODB_URI`, `MONGODB_DATABASE`와 테스트 사번 `PTAI_MOCK_USER`를 입력합니다. 기본 인증 모드는 mock입니다.
+3. 다음 명령으로 설치하고 실행합니다.
 
 ```powershell
-.venv-square\Scripts\python.exe -m pt_ai_square migrate-legacy "pt_ai_square\.preview\square.sqlite3"
+python -m pip install -r requirements.txt
+python web_main.py
 ```
 
-원본은 읽기 전용으로 보존합니다. 이전 명령만 SQLite를 읽으며, 실행 중 웹은 MongoDB만 사용합니다. 이전 중인 DB에 대한 웹 요청은 차단됩니다.
+브라우저에서 http://127.0.0.1:5080/ 을 엽니다. MongoDB 미설정 시 설정을 요청하며 대체 데이터로 전환하지 않습니다. mock에서 Waitress가 없으면 로컬 Flask 서버로 실행합니다. SSO 직접 실행은 Waitress가 필요합니다. 회사 WSGI 진입점은 해당 폴더 기준 `web_main:app`입니다. 기존 패키지 실행도 지원합니다.
 
-## 개발
+`.env`는 읽지 않습니다. 프로세스 환경변수 > runtime_config.py > 기본값 순서입니다. 비밀번호·연결 URI가 들어 있는 개인 설정 파일은 Git에 포함하지 마세요.
 
-```powershell
-python -m pt_ai_square.build_workspace
-.venv-square\Scripts\python.exe -m pytest pt_ai_square\tests -q
-```
+## 가이드
 
-MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다.
+- [실행·운영 담당자 안내](pt_ai_square/OPERATOR_GUIDE.md)
+- [사용자·등록자 안내](pt_ai_square/USER_GUIDE.md)
+- [회사 Flask / SSO 배포](pt_ai_square/HCP_DEPLOYMENT.md)
+- [상세 기획서](pt_ai_square/PLAN_V3.md)
 
-실제 사내 SSO, 운영 배포, PC 설치·자동 업데이트 연동은 별도 검증 범위입니다. 새 메뉴·권한·알림의 세부 동작은 GUIDE_V3.md를 확인하세요.
+`docs`에는 별도 실행·운영 HTML이 있습니다. 웹에서 다운로드하는 가이드는 사용자·등록자 내용만 담습니다.
 
-실행 시 **버전만 확인**하는 읽기 전용 API(`/api/tools/{id}/version-check?release=1`)와 배포 Skill의 Python 예제를 제공합니다. 새 버전·서버 롤백을 알리고 파일은 교체하지 않습니다. 개별 도구 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [연결 안내](pt_ai_square/static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.
+## 저장과 배포
 
-## 소스 구성
+MongoDB에는 도구·버전·권한·사용 이력·요청·첨부 정보·알림을 저장합니다. 배포 원본은 DATA_DIR/artifacts, 기능 요청 첨부 원본은 DATA_DIR/request_attachments에 저장합니다. DB와 파일 폴더를 함께 백업하세요.
 
-- `pt_ai_square/demo/`: DB 없는 화면 체험용 가상 자료
-- `pt_ai_square/static/guides/`: 다운로드할 배포 Skill 원본·ZIP·HTML 안내
-- `pt_ai_square/runtime_config.example.py`: 복사해서 작성할 설정 예시
-- `pt_ai_square/frontend_workspace.js`: 등록 관리·관리자·요청·알림 UI (수정 후 `python -m pt_ai_square.build_workspace`)
-- `pt_ai_square/static/`: 실행 가능한 완성 UI. Node 빌드 없이 실행합니다.
-- `pt_ai_square/build_frontend.py`: 과거 시안 가져오기용 선택 도구. 일반 실행·수정에서는 사용하지 않습니다.
+파일은 원본 형식으로 배포하며 자동 EXE 변환은 하지 않습니다. 실행 시 버전 확인 API와 Skill 예제를 제공하며 사용자 PC의 파일은 자동 교체하지 않습니다. 회사 SSO 실제 로그인 및 개별 도구 설치 호환성은 사내 환경에서 확인해야 합니다.
 
-테스트하려면 `python -m pip install pytest` 후 `python -m pytest pt_ai_square/tests -q`를 실행합니다. 로컬 MongoDB 기본 시험 주소는 `mongodb://127.0.0.1:27018/`이며 테스트는 별도 임시 DB를 생성·삭제합니다. 다른 시험 주소는 프로세스 환경변수 `PTAI_TEST_MONGO_URI`로 지정합니다. DB 없이 데모만 시험하려면 `python -m pytest pt_ai_square/tests/test_demo.py -q`를 실행합니다.
+## 검증
 
-## 현재 검증 범위
-
-2026-10-19, Windows / Python 3.13 / 로컬 MongoDB에서 30개 테스트 통과. Skill·MCP의 MD+Python ZIP 게시 → 파일 해시·바이트 확인 → v2 등록 → v1 배포 복구를 검증했습니다. 도구 자체의 업무 동작, 실제 회사 SSO와 운영 배포는 각 회사 환경에서 별도로 확인해야 합니다. 웹 버전 관리와 PC 자동 설치·업데이트는 다릅니다.
-
-
-SSO와 mock에서 같은 등록·수정·업데이트·다운로드·롤백 흐름을 검증했습니다. mock은 설정 사번으로 동작하며 사번 변경·권한 승인·알림·재시작 후 유지 및 실제 로컬 HTTP 파일 업로드까지 시험했습니다. 비밀번호 로그인과 create-user 명령은 제거되었습니다.
-
-## 파일 직접 실행
-
-VS Code에서 pt_ai_square/web_main.py를 열어 Python 파일 실행을 누르거나, 해당 폴더에서 python web_main.py를 실행할 수 있습니다. 기존 모듈 실행과 같은 설정·Waitress 서버를 사용합니다. WSGI 진입점 pt_ai_square.web_main:app도 유지합니다. 직접 실행 HTTP 시작, 패키지/독립 WSGI 로딩, mock 로컬 바인딩 제한에 대한 추가 테스트 4개를 통과했습니다.
-
-## HCP 운영 Flask / SSO 연결
-
-회사 실행기에서 `web_main:app`으로 Flask 앱을 불러오는 방식을 지원합니다. SSO는 코드 주석 대신 `PTAI_AUTH_MODE`로 선택합니다. `/login?ORIGIN=원래주소`, `/login/<경로>`, 6개 사용자 세션 필드와 `logFlag`를 반영했습니다. [회사 기본 포맷과 운영 설정 안내](pt_ai_square/HCP_DEPLOYMENT.md)를 확인하세요. 실제 회사 hcputil·인증 서버·프록시를 통한 로그인은 운영환경 확인이 필요합니다.
+테스트는 저장소 상위에서 `python -m pytest pt_ai_square/tests -q`로 실행합니다. MongoDB 시험 주소는 `PTAI_TEST_MONGO_URI` 또는 기본 `mongodb://127.0.0.1:27018/`이며 임시 DB만 생성·삭제합니다. 파일 UI 단위 검증은 `node pt_ai_square/tests/test_upload_ui.cjs`입니다.

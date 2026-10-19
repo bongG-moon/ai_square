@@ -11,7 +11,7 @@ async function refresh(){
  const data=await requestAPI('/api/bootstrap');Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
  if($('#sq-server-error'))$('#sq-server-error').hidden=true;
  organizations.splice(0,organizations.length,...data.organizations);requests.splice(0,requests.length,...data.requests);Object.assign(policy,data.policy);audit.splice(0,audit.length,...data.audit);
- $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.authMode==='mock'?'로컬 시험':data.authMode==='sso'?'사내 SSO':'사내 공유';
+ $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.authMode==='mock'?'SSO 미사용':'SSO 사용';
  $('[data-action=logout]').hidden=data.authMode==='mock';render();
 }
 async function mutate(url,method,body,after){await requestAPI(url,method,body);await refresh();after?.();}
@@ -29,7 +29,7 @@ actions.like=async b=>{const id=+b.dataset.id,liked=!state.liked.has(id);const r
  if(result.pending){showError({message:result.notice});return;}
  await refresh();announce(liked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');};
 actions['rank-refresh']=async()=>{await refresh();closeModal();announce('서버 집계 기준으로 갱신했습니다.');};
-actions['download-demo']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
+actions['download-file']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
 actions['version-download']=b=>downloadVersion(runtime.detailId,+b.dataset.version);
 actions['connection-check']=()=>detail(runtime.detailId,'connect');
 actions['toggle-hidden']=b=>{const x=getItem(b.dataset.id);ask(x.hidden?'다시 공개할까요?':'공개를 중단할까요?',x.name+' · 설치된 PC의 파일은 변경하지 않습니다.',()=>mutate(`/api/tools/${x.id}`,'PATCH',{hidden:!x.hidden,expectedRevision:x.revision},()=>manage()));};

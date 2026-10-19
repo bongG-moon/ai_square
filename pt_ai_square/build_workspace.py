@@ -10,7 +10,7 @@ s=s.replace("throw Error(result.error||'요청을 처리하지 못했습니다.'
 s=s.replace("tab==='comments'", "tab==='comments'")
 anchor='refresh().catch(showError);setInterval('
 at=s.rindex(anchor)
-s=s[:at]+start+(BASE/'frontend_workspace.js').read_text(encoding='utf-8')+'\n'+end+s[at:]
+s=s[:at]+start+(BASE/'frontend_workspace.js').read_text(encoding='utf-8')+'\n'+(BASE/'frontend_upload.js').read_text(encoding='utf-8')+'\n'+end+s[at:]
 p.write_text(s,encoding='utf-8')
 p=BASE/'templates/index.html';s=p.read_text(encoding='utf-8')
 if '/static/workspace.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/workspace.css"></head>')

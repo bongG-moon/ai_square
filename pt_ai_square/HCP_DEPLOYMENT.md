@@ -8,7 +8,9 @@
 |---|---|
 | 회사 실행기가 web_main.py가 있는 폴더에서 모듈을 불러옴 | `web_main:app` |
 | 패키지의 상위 폴더에서 WSGI 실행기가 불러옴 | `pt_ai_square.web_main:app` |
-| 개발자가 VS Code에서 파일 실행 | `python web_main.py` — 이때만 Waitress 시작 |
+| 개발자가 VS Code에서 파일 실행 | `python web_main.py` — 이때만 웹 서버 시작 |
+
+`web_main.py`가 있는 폴더 전체만 배포하면 됩니다. 상위 프로젝트나 고정 폴더 이름이 필요하지 않습니다. 로컬 mock 모드에서는 Waitress가 없을 경우 Flask 내장 서버를 사용하며 디버그·자동 재시작은 끕니다. SSO 직접 실행은 Waitress가 필요합니다. 회사 실행기가 `web_main:app`을 불러올 때에는 내장 서버나 Waitress를 별도로 시작하지 않습니다.
 
 `app = Flask(__name__)`를 web_main.py 안에 새로 추가하면 기존 등록 화면·API가 연결되지 않은 별도 앱이 생깁니다. 예제의 `main()`과 `/login` 함수를 그대로 추가하면 같은 경로가 겹칩니다. 따라서 실행 진입점은 제공된 파일을 그대로 사용합니다.
 
@@ -27,7 +29,7 @@ PTAI_COOKIE_SECURE = True  # HTTPS 운영
 # PTAI_COOKIE_SECURE = False  # localhost HTTP 시험
 ```
 
-SSO 코드의 주석을 켜고 끄는 대신 이 설정이 해당 분기를 선택합니다. mock에서는 hcputil을 불러오지 않으며 지정 사번으로 로컬 요청을 처리합니다. 실제 저장을 사용하려면 MongoDB 주소도 설정해야 합니다. URI가 비어 있으면 SSO 운영이 아니라 로그인 없는 가상 데이터 체험 모드가 됩니다.
+SSO 코드의 주석을 켜고 끄는 대신 이 설정이 해당 분기를 선택합니다. mock에서는 hcputil을 불러오지 않으며 지정 사번으로 로컬 요청을 처리합니다. 실제 저장을 사용하려면 MongoDB 주소도 설정해야 합니다. URI와 DB 이름이 비어 있으면 설정을 요청하며 시작하지 않습니다.
 
 ## 회사 예제의 로그인 흐름 반영
 

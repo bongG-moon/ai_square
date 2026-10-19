@@ -88,7 +88,7 @@ start=js.index("  else if(x.platform==='ChatGPT'&&x.mode!=='server')")
 end=js.index('  if(x.guide)',start)
 js=js[:start]+'''  else {content+=`<div class="sq-callout"><strong>사용 환경</strong><br>${esc(x.environment||x.platform)}</div>`;
   if(x.mode==='server')content+=`<div class="sq-callout"><strong>등록된 연결 주소</strong><br><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><p class="sq-note">${x.platform==='ChatGPT'?'회사 ChatGPT 관리자에게 원격 연결 메뉴와 인증 방식의 지원 여부를 확인한 후 아래 안내를 따라 설정하세요.':'등록자가 제공한 안내에 따라 대상 프로그램에서 연결하세요.'} 웹이 연결 성공을 자동 확인하지는 않습니다.</p>`;
-  else content+=`${button('download-demo','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} PC 자동 설치·업데이트는 후속 앱 연동 기능입니다.</div>`;
+  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} PC 자동 설치·업데이트는 후속 앱 연동 기능입니다.</div>`;
   }
 '''+js[end:]
 js=js.replace('좋아요 3점 · 다운로드 1점에 최근 1시간 4배, 1–6시간 2배, 6–24시간 1배를 적용하는 제안입니다.','좋아요 3점 · 다운로드 1점에 최근 1시간 4배, 1–6시간 2배, 6–24시간 1배를 적용합니다.')

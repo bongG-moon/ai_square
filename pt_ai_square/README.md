@@ -1,25 +1,27 @@
-# P&T AI SQUARE v3.2
+# P&T AI SQUARE v3.3
 
 Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비스 정보는 MongoDB에 저장하고, 업로드 파일만 서버 디스크에 저장합니다. SQLite 실행 모드는 없습니다.
 
-- [초보자용 실행·사용 안내](GUIDE_V3.md)
+- [실행·운영 안내](OPERATOR_GUIDE.md)
+- [사용자·등록자 안내](USER_GUIDE.md)
 - [최신 상세 기획서](PLAN_V3.md)
 - [설정 파일 예시](runtime_config.example.py)
 - [회사 Flask 포맷 / HCP SSO 배포 안내](HCP_DEPLOYMENT.md)
 
 ## 빠른 실행
 
-**화면만 체험할 때는 MongoDB와 설정 파일 없이** 아래 명령으로 실행합니다. `demo/catalog.json`의 예시 10개를 표시하며 등록·좋아요·수정·다운로드는 저장되지 않습니다. 실제 등록을 하려면 `runtime_config.example.py`를 `runtime_config.py`로 복사해 `MONGODB_URI`, 로그인 방식, DB 이름, 기본 관리자 사번을 입력합니다. `.env`는 사용하지 않습니다. 이미 설정된 MongoDB가 연결되지 않는 경우에는 오류를 표시하며 더미 데이터로 대체하지 않습니다.
+`runtime_config.example.py`를 `runtime_config.py`로 복사하고 실제 `MONGODB_URI`, `MONGODB_DATABASE`를 입력합니다. SSO 기본값은 미사용(mock)입니다. 로컬에서도 같은 MongoDB와 파일 저장소로 실제 업로드·다운로드·버전 관리를 수행합니다. DB 미설정 시 설정 오류를 표시합니다. .env는 사용하지 않습니다.
 
 ```powershell
-python -m venv .venv-square
-.venv-square\Scripts\python.exe -m pip install -r pt_ai_square\requirements.txt
-.venv-square\Scripts\python.exe -m pt_ai_square run
+python -m pip install -r requirements.txt
+python web_main.py
 ```
 
 브라우저: http://127.0.0.1:5080/
 
-VS Code의 **Python 파일 실행**으로 `pt_ai_square/web_main.py`를 실행하거나, `pt_ai_square` 폴더 안에서 `python web_main.py`를 실행할 수도 있습니다. 두 실행 방식 모두 같은 설정과 서버를 사용합니다. WSGI 배포 진입점은 `pt_ai_square.web_main:app`입니다.
+위 명령은 `web_main.py`와 `requirements.txt`가 들어 있는 폴더에서 실행합니다. 이 폴더만 복사하면 되고, 상위 프로젝트나 `pt_ai_square`라는 폴더 이름은 필요하지 않습니다. VS Code의 **Python 파일 실행**도 지원합니다. WSGI 진입점은 해당 폴더 기준 `web_main:app`입니다. 기존 패키지 실행도 계속 지원합니다.
+
+로컬 `mock`에서는 Waitress가 없어도 Flask 내장 서버로 실행합니다(디버그·자동 재시작 꺼짐). SSO 운영은 Waitress를 설치하거나 회사 WSGI 실행기를 사용하세요. 설치는 실행에 사용하는 동일한 Python에서 진행해야 합니다.
 
 기본 인증 모드는 SSO를 사용하지 않는 `mock`입니다. 별도 설정이 없으면 로컬 주소 `http://127.0.0.1:5080`에서 실행되며 기본 시험 사번은 `1000001`입니다. `runtime_config.py`의 `PTAI_MOCK_USER`로 시험 사번을 바꿀 수 있습니다. 환경변수나 설정 파일에 명시한 값이 있으면 해당 값이 기본값보다 우선합니다.
 
@@ -30,7 +32,7 @@ VS Code의 **Python 파일 실행**으로 `pt_ai_square/web_main.py`를 실행�
 기존 서버를 멈추고 같은 파일 저장 경로를 유지한 상태에서 실행합니다.
 
 ```powershell
-.venv-square\Scripts\python.exe -m pt_ai_square migrate-legacy "pt_ai_square\.preview\square.sqlite3"
+python __main__.py migrate-legacy ".preview\square.sqlite3"
 ```
 
 원본은 읽기 전용으로 보존합니다. 이전 명령만 SQLite를 읽으며, 실행 중 웹은 MongoDB만 사용합니다. 이전 중인 DB에 대한 웹 요청은 차단됩니다.

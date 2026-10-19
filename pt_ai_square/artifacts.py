@@ -51,4 +51,5 @@ def artifact_path(name):
     return path
 
 def used_bytes():
-    return sum(p.stat().st_size for p in (Path(current_app.config['DATA_DIR'])/'artifacts').iterdir() if p.is_file())
+    root=Path(current_app.config['DATA_DIR'])
+    return sum(p.stat().st_size for folder in ['artifacts','request_attachments'] for p in (root/folder).glob('*') if p.is_file())

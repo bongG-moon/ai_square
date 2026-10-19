@@ -58,17 +58,17 @@ function render(){
  renderRanks();renderCatalog();mountIcons();revealElements();schedule();
 }
 function empty(title){return `<div class="sq-empty"><h3>${esc(title)}</h3><p>프로그램이나 조직 선택을 바꿔보세요.</p>${button('clear-filters','전체 도구 보기')}</div>`;}
-function renderCatalog(){const list=Core.sort(filtered(),state.sort),paging=Core.pages(list.length,state.page,12);state.page=paging.page;$('#sq-types').innerHTML=['전체','MCP','Skill','플러그인','하네스','Tool'].map(type=>`<button class="cursor-interaction" data-type="${type}" aria-pressed="${type===state.type}">${type}</button>`).join('');$('#sq-category').value=state.category;$('#sq-sort').value=state.sort;$('#sq-result-count').textContent=state.query?`“${state.query}” 검색 결과 ${list.length}개`:`${list.length}개의 도구 · 순위 번호 없이 둘러보기`;$('#sq-catalog').innerHTML=list.slice(state.page*12,state.page*12+12).map(x=>card(x)).join('')||empty('검색 결과가 없습니다.');$('#sq-catalog-pages').innerHTML=paging.count>1?`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${paging.count}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',state.page===paging.count-1?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`:'';revealElements();}
+function renderCatalog(){const list=Core.sort(filtered(),state.sort),paging=Core.pages(list.length,state.page,12);state.page=paging.page;$('#sq-types').innerHTML=['전체','MCP/Tool','Skill','플러그인/하네스'].map(type=>`<button class="cursor-interaction" data-type="${type}" aria-pressed="${type===state.type}">${type}</button>`).join('');$('#sq-category').value=state.category;$('#sq-sort').value=state.sort;$('#sq-result-count').textContent=state.query?`“${state.query}” 검색 결과 ${list.length}개`:`${list.length}개의 도구 · 순위 번호 없이 둘러보기`;$('#sq-catalog').innerHTML=list.slice(state.page*12,state.page*12+12).map(x=>card(x)).join('')||empty('검색 결과가 없습니다.');$('#sq-catalog-pages').innerHTML=paging.count>1?`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${paging.count}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',state.page===paging.count-1?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`:'';revealElements();}
 function renderRanks(){const list=rankItems();if(state.rankPage*5>=list.length)state.rankPage=0;const group=list.slice(state.rankPage*5,state.rankPage*5+5);$('#sq-rank-range').textContent='실시간 순위';$('#sq-rank-list').innerHTML=group.map((x,i)=>`<div class="sq-rank-row" data-rank="${state.rankPage*5+i+1}"><span class="sq-rank-number">${state.rankPage*5+i+1}</span><button class="sq-rank-name cursor-interaction" data-action="detail" data-id="${x.id}"><strong>${esc(x.name)}</strong><small>${esc(x.platform)}<span class="sq-type-label" data-type="${esc(x.type)}">${esc(x.type)}</span></small></button><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${x.id}" aria-label="${esc(x.name)} 좋아요" aria-pressed="${state.liked.has(x.id)}">${icon('heart')}<span>${num(x.likes+(state.liked.has(x.id)?1:0))}</span></button><span class="sq-count" aria-label="다운로드 ${num(x.downloads)}건">${icon('arrow-down-to-line')}${num(x.downloads)}</span></div>`).join('')||'<div class="sq-empty">조건에 맞는 순위가 없습니다.</div>';$$('[data-action=rank-page]').forEach(b=>{b.setAttribute('aria-pressed',String(+b.dataset.page===state.rankPage));b.disabled=+b.dataset.page*5>=list.length;});$('#sq-chart-time').textContent=new Date(server.rankAsOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});}
 function stopAuto(){clearTimeout(runtime.timer);runtime.timer=null;runtime.progress?.cancel();runtime.progress=null;}
 function canAuto(){return state.route==='home'&&runtime.inView&&!runtime.busy&&!document.hidden&&!$('#sq-dialog').open&&rankItems().length>5;}
 function schedule(){
  stopAuto();const count=rankItems().length;$('#sq-rank-all').hidden=count>5;
- $('#sq-chart-hint').textContent=count<=5?'현재 조건에 맞는 도구를 모두 표시하고 있어요.':'6초마다 1–5위와 6–10위를 자동으로 보여드려요.';
+
  if(!canAuto())return;
  const meter=$(`[data-action=rank-page][data-page="${state.rankPage}"] span`);
- if(!motion.matches&&meter?.animate)runtime.progress=meter.animate([{transform:'scaleX(0)'},{transform:'scaleX(1)'}],{duration:6000,fill:'forwards'});
- runtime.timer=setTimeout(()=>{if(canAuto())changeRank(1-state.rankPage);else schedule();},6000);
+ if(!motion.matches&&meter?.animate)runtime.progress=meter.animate([{transform:'scaleX(0)'},{transform:'scaleX(1)'}],{duration:5000,fill:'forwards'});
+ runtime.timer=setTimeout(()=>{if(canAuto())changeRank(1-state.rankPage);else schedule();},5000);
 }
 
 async function changeRank(page){
@@ -89,7 +89,7 @@ function detail(id,tab='intro'){
  const x=getItem(id);runtime.detailId=x.id;runtime.detailTab=tab;
  const tabs=[['intro','소개'],['connect','설치·연결'],['versions','버전'],['comments','의견']].map(([value,label])=>button('detail-tab',label,'',`data-tab="${value}" aria-pressed="${tab===value}"`)).join('');
  let content='';
- if(tab==='intro')content=`<div class="sq-detail-hero"><h3>${esc(x.name)}.<br>업무의 다음 단계를 더 쉽게.</h3><p>${esc(x.desc)}</p></div><div class="sq-two-col"><dl class="sq-meta"><dt>사용 프로그램</dt><dd>${esc(x.platform)}</dd><dt>공유 유형</dt><dd>${esc(x.type)}</dd><dt>등록 조직</dt><dd>${esc(x.org)}</dd><dt>담당자</dt><dd>${esc(x.owner)}</dd></dl><dl class="sq-meta"><dt>현재 배포</dt><dd>v${x.active} · ${x.updatePaused?'자동 업데이트 보류':'배포 정보 API 제공'}</dd><dt>공개 범위</dt><dd>${esc(x.visibility)}</dd><dt>사용 권한</dt><dd>${x.approval?'담당자 승인 필요':'사내 사용자'}</dd><dt>지원 수준</dt><dd>${esc(x.support)}</dd></dl></div><div class="sq-callout"><strong>사용 예시</strong><br>“${x.category==='제조'?'이번 주 품질 결과에서 달라진 내용을 정리해줘.':x.type==='MCP'?'관련 문서와 근거를 찾아줘.':'이 자료를 우리 팀 양식에 맞춰 정리해줘.'}”처럼 요청해 보세요. 도구마다 필요한 환경은 설치·연결 탭에서 확인합니다.</div>`;
+ if(tab==='intro')content=`<div class="sq-detail-hero"><h3>${esc(x.name)}.<br>업무의 다음 단계를 더 쉽게.</h3><p>${esc(x.desc)}</p></div><div class="sq-two-col"><dl class="sq-meta"><dt>사용 프로그램</dt><dd>${esc(x.platform)}</dd><dt>공유 유형</dt><dd>${esc(x.type)}</dd><dt>등록 조직</dt><dd>${esc(x.org)}</dd><dt>담당자</dt><dd>${esc(x.owner)}</dd></dl><dl class="sq-meta"><dt>현재 배포</dt><dd>v${x.active} · ${x.updatePaused?'자동 업데이트 보류':'배포 정보 API 제공'}</dd><dt>공개 범위</dt><dd>${esc(x.visibility)}</dd><dt>사용 권한</dt><dd>${x.approval?'담당자 승인 필요':'사내 사용자'}</dd><dt>지원 수준</dt><dd>${esc(x.support)}</dd></dl></div><div class="sq-callout"><strong>사용 예시</strong><br>“${x.category==='제조'?'이번 주 품질 결과에서 달라진 내용을 정리해줘.':x.type==='MCP/Tool'?'관련 문서와 근거를 찾아줘.':'이 자료를 우리 팀 양식에 맞춰 정리해줘.'}”처럼 요청해 보세요. 도구마다 필요한 환경은 설치·연결 탭에서 확인합니다.</div>`;
  if(tab==='intro')content+=`<section class="sq-related-work"><h3>관련 업무</h3>${tagChips(x.workTags)||'<p class="sq-note">등록된 관련 업무가 없습니다.</p>'}</section>`;
  if(tab==='connect'){
   const gated=x.approval&&x.access!=='approved';
@@ -97,7 +97,7 @@ function detail(id,tab='intro'){
   if(gated)content+=`<div class="sq-callout"><strong>${x.access==='pending'?'사용 신청을 검토하고 있습니다.':'먼저 사용 권한을 신청해 주세요.'}</strong><br>승인 담당: ${esc(x.org)} · ${esc(x.owner)}<br>도구 사용 승인을 받아도 원본 데이터 권한은 별도로 확인합니다.</div>${x.access==='pending'?'<span class="sq-note">승인 대기 중입니다.</span>':button('request-access','사용 권한 신청','sq-primary')}`;
   else {content+=`<div class="sq-callout"><strong>사용 환경</strong><br>${esc(x.environment||x.platform)}</div>`;
   if(x.mode==='server')content+=`<div class="sq-callout"><strong>등록된 연결 주소</strong><br><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><p class="sq-note">${x.platform==='ChatGPT'?'회사 ChatGPT 관리자에게 원격 연결 메뉴와 인증 방식의 지원 여부를 확인한 후 아래 안내를 따라 설정하세요.':'등록자가 제공한 안내에 따라 대상 프로그램에서 연결하세요.'} 웹이 연결 성공을 자동 확인하지는 않습니다.</p>`;
-  else content+=`${button('download-demo','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} PC 자동 설치·업데이트는 후속 앱 연동 기능입니다.</div>`;
+  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} PC 자동 설치·업데이트는 후속 앱 연동 기능입니다.</div>`;
   }
   if(x.guide)content+=`<div class="sq-callout"><strong>등록자가 제공한 안내</strong><br>${esc(x.guide).replace(/\n/g,'<br>')}</div>`;
   if(x.updatePaused)content+='<div class="sq-callout">현재 배포는 이전 버전으로 복구한 상태입니다. 자동 업데이트 재개 전 점검이 필요합니다.</div>';
@@ -114,9 +114,9 @@ function wizard(){
  const d=runtime.draft,step=runtime.step,x=runtime.releaseId?getItem(runtime.releaseId):null,nextVersion=x?Math.max(...x.versions.map(v=>v.n))+1:1;
  const steps=`<div class="sq-wizard-steps">${['기본 정보','파일·연결','확인·게시'].map((label,i)=>`<span class="${step===i+1?'active':''}"><b>${i+1}</b>${label}</span>`).join('')}</div>`;
  let content='';
- if(step===1)content=`<div class="sq-form-grid"><label class="sq-field wide"><span>도구 이름 *</span><input name="name" value="${esc(d.name)}" maxlength="50" placeholder="예: 주간 보고서 작성" required></label><label class="sq-field wide"><span>한 줄 소개 *</span><textarea name="desc" maxlength="200" placeholder="어떤 업무를 어떻게 도와주는지 적어주세요." required>${esc(d.desc)}</textarea></label>${workTagField(d.workTags)}<label class="sq-field"><span>사용 프로그램</span><select name="platform">${options(['Claude','ChatGPT','기타'],d.platform)}</select></label><label class="sq-field"><span>공유 유형</span><select name="type">${options(['MCP','Skill','플러그인','하네스','Tool'],d.type)}</select></label><label class="sq-field"><span>등록 조직</span><select name="org">${options(organizations.filter(o=>server.user.role==='admin'||o.name==='공통'||o.name===server.user.org).map(o=>o.name),d.org)}</select></label><label class="sq-field"><span>업무 분야</span><select name="category">${options(['공통 업무','제조','장비','기술'],d.category)}</select></label><label class="sq-field"><span>담당자 *</span><input name="owner" value="${esc(d.owner)}" required></label><label class="sq-field"><span>목록 공개 범위</span><select name="visibility">${options(['전체 공개','선택 조직'],d.visibility)}</select></label><div class="sq-field wide" id="sq-audience" ${d.visibility==='선택 조직'?'':'hidden'}><span>열람할 수 있는 조직</span><div class="sq-choice-row">${organizations.map(o=>`<label><input type="checkbox" name="audience" value="${esc(o.name)}" ${d.audience.includes(o.name)?'checked':''}>${esc(o.name)}</label>`).join('')}</div></div><div class="sq-field wide"><span>사용 승인</span><label class="sq-choice-row"><input type="checkbox" name="approval" ${d.approval?'checked':''}>사용 전 담당자의 승인이 필요합니다.</label><small>목록을 볼 수 있는 사람과 실제 사용할 수 있는 사람을 따로 정합니다.</small></div></div><div class="sq-callout">Skill에는 지침 문서뿐 아니라 Python 코드와 참고 자료도 포함할 수 있습니다. 함께 쓰는 파일은 ZIP으로 묶어주세요.</div>`;
- if(step===2)content=`<div class="sq-choice-row"><label><input type="radio" name="mode" value="file" ${d.mode==='file'?'checked':''}>파일 등록</label><label><input type="radio" name="mode" value="url" ${d.mode==='url'?'checked':''}>URL 연결</label></div>${d.mode==='file'?`<div class="sq-upload">${icon('upload-cloud')}<h3>${d.file?esc(d.file.name):'공유할 파일을 선택하세요.'}</h3><p>ZIP · EXE · MSI · PS1 / 게시할 때 서버로 전송합니다.</p><input type="file" name="artifact" accept=".zip,.exe,.msi,.ps1" aria-label="공유 파일 선택"></div>`:`<label class="sq-field" style="margin-top:20px"><span>연결 주소 *</span><input name="url" type="url" value="${esc(d.url)}" placeholder="https://mcp.example.internal/team"></label><div class="sq-callout">서버 연결형 MCP나 웹 서비스 주소를 등록합니다. 웹이 임의로 EXE로 변환하지 않습니다.</div>`}<div class="sq-form-grid"><label class="sq-field"><span>사용 환경</span><input name="environment" value="${esc(d.environment)}" placeholder="예: Windows · Claude Code"></label><label class="sq-field"><span>자동 배포 번호</span><input value="v${nextVersion} · 게시할 때 자동 생성" readonly></label><label class="sq-field wide"><span>설치·연결 방법 *</span><textarea name="guide" required placeholder="사용자가 어떤 파일을 받고 어디에 추가하는지 적어주세요.">${esc(d.guide)}</textarea></label><label class="sq-field wide"><span>이번에 바뀐 내용</span><textarea name="changes" placeholder="예: 보고서 양식 선택 기능을 추가했습니다.">${esc(d.changes)}</textarea></label></div>${d.platform==='ChatGPT'?'<div class="sq-callout">ChatGPT 항목은 파일 활용인지 원격 연결인지 구분합니다. 사내 계정에서 확인되지 않은 연결은 ‘조건 확인 필요’로 표시합니다.</div>':''}`;
- if(step===3)content=`<div class="sq-detail-hero"><span class="sq-badge blue">배포 미리보기 · v${nextVersion}</span><h3 style="margin-top:12px">${esc(d.name)}</h3><p>${esc(d.desc)}</p></div><dl class="sq-meta"><dt>프로그램 / 유형</dt><dd>${esc(d.platform)} / ${esc(d.type)}</dd><dt>조직 / 담당자</dt><dd>${esc(d.org)} / ${esc(d.owner)}</dd><dt>공개 / 사용</dt><dd>${esc(d.visibility)}${d.visibility==='선택 조직'?' · '+esc(d.audience.join(', ')):''} / ${d.approval?'승인 후 사용':'바로 안내'}</dd><dt>관련 업무</dt><dd>${tagChips(Core.normalizeTags(d.workTags))||'미입력'}</dd><dt>등록 대상</dt><dd>${esc(d.mode==='url'?d.url:d.file?.name)}</dd><dt>지원 수준</dt><dd>${d.platform==='ChatGPT'?(d.mode==='url'?'연결 조건 확인 필요':'파일 활용 안내'):d.mode==='url'?'서버 연결 안내':/\.(exe|msi|ps1)$/i.test(d.file?.name||'')?'수동 설치 · 자동 업데이트 미검증':'패키지 설치 안내'}</dd></dl><div class="sq-callout"><strong>게시하면 서버에서 기본 파일 검사를 진행합니다.</strong><br>파일 크기·확장자·기본 형식·ZIP 경로를 확인하고 배포 번호를 발급합니다. 악성코드 검사와 실행 검증은 포함하지 않습니다. 등록한 코드를 서버에서 실행하거나 EXE로 변환하지 않습니다.</div>`;
+ if(step===1)content=`<div class="sq-form-grid"><label class="sq-field wide"><span>도구 이름 *</span><input name="name" value="${esc(d.name)}" maxlength="50" placeholder="예: 주간 보고서 작성" required></label><label class="sq-field wide"><span>한 줄 소개 *</span><textarea name="desc" maxlength="200" placeholder="어떤 업무를 어떻게 도와주는지 적어주세요." required>${esc(d.desc)}</textarea></label>${workTagField(d.workTags)}<label class="sq-field"><span>사용 프로그램</span><select name="platform">${options(['Claude','ChatGPT','기타'],d.platform)}</select></label><label class="sq-field"><span>공유 유형</span><select name="type">${options(['MCP/Tool','Skill','플러그인/하네스'],d.type)}</select></label><label class="sq-field"><span>등록 조직</span><select name="org">${options(organizations.filter(o=>server.user.role==='admin'||o.name==='공통'||o.name===server.user.org).map(o=>o.name),d.org)}</select></label><label class="sq-field"><span>업무 분야</span><select name="category">${options(['공통 업무','제조','장비','기술'],d.category)}</select></label><label class="sq-field"><span>담당자 *</span><input name="owner" value="${esc(d.owner)}" required></label><label class="sq-field"><span>목록 공개 범위</span><select name="visibility">${options(['전체 공개','선택 조직'],d.visibility)}</select></label><div class="sq-field wide" id="sq-audience" ${d.visibility==='선택 조직'?'':'hidden'}><span>열람할 수 있는 조직</span><div class="sq-choice-row">${organizations.map(o=>`<label><input type="checkbox" name="audience" value="${esc(o.name)}" ${d.audience.includes(o.name)?'checked':''}>${esc(o.name)}</label>`).join('')}</div></div><div class="sq-field wide"><span>사용 승인</span><label class="sq-choice-row"><input type="checkbox" name="approval" ${d.approval?'checked':''}>사용 전 담당자의 승인이 필요합니다.</label><small>목록을 볼 수 있는 사람과 실제 사용할 수 있는 사람을 따로 정합니다.</small></div></div><div class="sq-callout">Skill에는 지침 문서뿐 아니라 Python 코드와 참고 자료도 포함할 수 있습니다. 함께 쓰는 파일은 ZIP으로 묶어주세요.</div>`;
+ if(step===2)content=`<div class="sq-choice-row"><label><input type="radio" name="mode" value="file" ${d.mode==='file'?'checked':''}>파일 등록</label><label><input type="radio" name="mode" value="url" ${d.mode==='url'?'checked':''}>URL 연결</label></div>${d.mode==='file'?`<div class="sq-upload">${icon('upload-cloud')}<h3>${d.file?esc(d.file.name):'공유할 파일을 선택하세요.'}</h3><p>ZIP · EXE · MSI · PS1 / 게시할 때 서버로 전송합니다.</p><input type="file" name="artifact" accept=".zip,.exe,.msi,.ps1" aria-label="공유 파일 선택"></div>`:`<label class="sq-field" style="margin-top:20px"><span>연결 주소 *</span><input name="url" type="url" value="${esc(d.url)}" placeholder="https://mcp.example.internal/team"></label><div class="sq-callout">서버 연결형 MCP나 웹 서비스 주소를 등록합니다. 웹이 임의로 EXE로 변환하지 않습니다.</div>`}<div class="sq-form-grid"><label class="sq-field"><span>사용 환경</span><input name="environment" value="${esc(d.environment)}" placeholder="예: Windows · Claude Code"></label><label class="sq-field"><span>자동 배포 번호</span><input value="v${nextVersion} · 게시할 때 자동 생성" readonly></label><label class="sq-field wide"><span>설치·연결 방법 *</span><small>받은 파일이나 URL로 실제 사용을 시작하는 순서입니다. EXE도 실행할 파일과 설치 후 확인 방법을 적어주세요.</small><textarea name="guide" required placeholder="예: EXE 실행 후 Claude를 다시 시작하세요. / ZIP을 풀어 Skills 폴더에 넣으세요. / MCP URL을 연결 설정에 추가하세요.">${esc(d.guide)}</textarea></label><label class="sq-field wide"><span>이번에 바뀐 내용</span><textarea name="changes" placeholder="예: 보고서 양식 선택 기능을 추가했습니다.">${esc(d.changes)}</textarea></label></div>${d.platform==='ChatGPT'?'<div class="sq-callout">ChatGPT 항목은 파일 활용인지 원격 연결인지 구분합니다. 사내 계정에서 확인되지 않은 연결은 ‘조건 확인 필요’로 표시합니다.</div>':''}`;
+ if(step===3)content=`<div class="sq-detail-hero"><span class="sq-badge blue">배포 미리보기 · v${nextVersion}</span><h3 style="margin-top:12px">${esc(d.name)}</h3><p>${esc(d.desc)}</p></div><dl class="sq-meta"><dt>프로그램 / 유형</dt><dd>${esc(d.platform)} / ${esc(d.type)}</dd><dt>조직 / 담당자</dt><dd>${esc(d.org)} / ${esc(d.owner)}</dd><dt>공개 / 사용</dt><dd>${esc(d.visibility)}${d.visibility==='선택 조직'?' · '+esc(d.audience.join(', ')):''} / ${d.approval?'승인 후 사용':'바로 안내'}</dd><dt>관련 업무</dt><dd>${tagChips(Core.normalizeTags(d.workTags))||'미입력'}</dd><dt>등록 대상</dt><dd>${esc(d.mode==='url'?d.url:d.file?.name)}</dd><dt>지원 수준</dt><dd>${d.platform==='ChatGPT'?(d.mode==='url'?'연결 조건 확인 필요':'파일 활용 안내'):d.mode==='url'?'서버 연결 안내':/\.(exe|msi|ps1)$/i.test(d.file?.name||'')?'수동 설치 · 자동 업데이트 미검증':'패키지 설치 안내'}</dd></dl><div class="sq-callout"><strong>게시하면 서버에서 기본 파일 검사를 진행합니다.</strong><br>올린 파일 형식 그대로 저장하고 v1, v2처럼 배포 번호를 발급합니다. EXE 설치 파일을 배포하려면 완성된 EXE를 선택하세요. ZIP은 ZIP으로 배포됩니다. 기본 파일 검사에는 악성코드 검사와 실행 검증이 포함되지 않습니다.</div>`;
  openModal(x?'새 버전 등록':'도구 등록',x?`${x.name} · 버전은 자동으로 관리합니다.`:'잘 만든 도구를 동료들과 나눠보세요.',`${steps}<form id="sq-register-form" novalidate>${content}<p id="sq-register-error" class="sq-error" role="alert"></p><div class="sq-actions">${step>1?button('wizard-back','이전'):button('creator-guide','작성 가이드','sq-link')}${step<3?'<button class="sq-primary cursor-interaction">다음</button>':button('publish','게시','sq-primary')}</div></form>`);
 }
 async function publish(){
@@ -173,7 +173,6 @@ const actions={
  'new-release':b=>register(b.dataset.id||runtime.detailId),
  'resume-draft':wizard,
  'wizard-back':()=>{captureDraft();runtime.step=Math.max(1,runtime.step-1);wizard();},
- 'sample-file':()=>{captureDraft();runtime.draft.file={name:'team-skill-example.zip',size:18432};runtime.draft.sample=true;if(!runtime.draft.guide)runtime.draft.guide='ZIP을 풀고 README.md의 안내를 따라 Skill 폴더를 추가하세요. 포함된 예시 입력으로 실행 결과를 확인합니다.';wizard();},
  publish,
  'published-detail':()=>detail(runtime.newId),
  'creator-guide':()=>{captureDraft();resourceGuide();},
@@ -181,7 +180,6 @@ const actions={
  'download-skill':()=>downloadResource('skill'),
  'download-guide':()=>downloadResource('guide'),
  'request-access':requestAccess,
- 'download-demo':()=>{const x=getItem(runtime.detailId);if(x.approval&&x.access!=='approved'){requestAccess();return;}runtime.downloaded??=new Set();if(!runtime.downloaded.has(x.id)){x.downloads++;runtime.downloaded.add(x.id);}render();detail(x.id,'connect');announce('다운로드 완료 화면을 체험했습니다. 실제 파일은 내려받지 않았습니다. 반복 클릭은 다운로드 수에 더하지 않습니다.');},
  'version-download':b=>{const x=getItem(runtime.detailId),v=x.versions.find(v=>v.n===+b.dataset.version);if(!v||v.deleted||v.withdrawn)return;if(x.approval&&x.access!=='approved'){requestAccess();return;}announce(`${x.name} v${v.n} 다운로드를 선택했습니다. 이 시안에서는 파일을 받지 않습니다.`);},
  'connection-check':()=>announce('연결 확인 결과 예시: 계정 인증 및 테스트 요청을 확인했습니다. 실제 서비스에는 연결하지 않았습니다.'),
  manage:()=>manage(),
@@ -212,7 +210,7 @@ async function refresh(){
  const data=await requestAPI('/api/bootstrap');Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
  if($('#sq-server-error'))$('#sq-server-error').hidden=true;
  organizations.splice(0,organizations.length,...data.organizations);requests.splice(0,requests.length,...data.requests);Object.assign(policy,data.policy);audit.splice(0,audit.length,...data.audit);
- $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.authMode==='mock'?'로컬 시험':data.authMode==='sso'?'사내 SSO':'사내 공유';
+ $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.authMode==='mock'?'SSO 미사용':'SSO 사용';
  $('[data-action=logout]').hidden=data.authMode==='mock';render();
 }
 async function mutate(url,method,body,after){await requestAPI(url,method,body);await refresh();after?.();}
@@ -230,7 +228,7 @@ actions.like=async b=>{const id=+b.dataset.id,liked=!state.liked.has(id);const r
  if(result.pending){showError({message:result.notice});return;}
  await refresh();announce(liked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');};
 actions['rank-refresh']=async()=>{await refresh();closeModal();announce('서버 집계 기준으로 갱신했습니다.');};
-actions['download-demo']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
+actions['download-file']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
 actions['version-download']=b=>downloadVersion(runtime.detailId,+b.dataset.version);
 actions['connection-check']=()=>detail(runtime.detailId,'connect');
 actions['toggle-hidden']=b=>{const x=getItem(b.dataset.id);ask(x.hidden?'다시 공개할까요?':'공개를 중단할까요?',x.name+' · 설치된 PC의 파일은 변경하지 않습니다.',()=>mutate(`/api/tools/${x.id}`,'PATCH',{hidden:!x.hidden,expectedRevision:x.revision},()=>manage()));};
@@ -262,7 +260,7 @@ root.addEventListener('submit',event=>{
   if(form.id==='sq-comment-form'){await requestAPI(`/api/tools/${id}/comments`,'POST',{kind:data.kind,text:data.comment});await refresh();detail(id,'comments');}
   if(form.id==='sq-access-form'){await requestAPI(`/api/tools/${id}/requests`,'POST',{reason:data.reason});await refresh();detail(id,'connect');}
   if(form.id==='sq-policy-form'){await requestAPI('/api/storage/policy','PUT',{keep:+data.keep,days:+data.days});await refresh();manage('storage');}
-  if(form.id==='sq-edit-tool-form'){await requestAPI(`/api/tools/${id}`,'PATCH',{...data,approval:data.approval==='true',audience:values.getAll('audience'),expectedRevision:getItem(id).revision});await refresh();manage();}
+  if(form.id==='sq-edit-tool-form'){await requestAPI(`/api/tools/${id}`,'PATCH',{...data,approval:form.elements.approval.checked,audience:values.getAll('audience'),expectedRevision:getItem(id).revision});await refresh();manage();}
   if(form.id==='sq-org-form'){await requestAPI('/api/organizations','POST',{...data,previous:organizations[runtime.orgIndex]?.name});await refresh();manage('orgs');}
   if(form.id==='sq-reject-form'){await requestAPI(`/api/requests/${form.dataset.request}/decision`,'POST',{status:'반려',reason:data.reason});await refresh();manage('requests');}
   if(form.id==='sq-idea-form'){await requestAPI('/api/ideas','POST',data);openModal('아이디어를 남겼습니다.','제안 등록 완료',`<div class="sq-success"><h3>${esc(data.name)}</h3><p>운영 관리의 아이디어 목록에 저장했습니다.</p>${button('close-dialog','확인','sq-primary')}</div>`);}
@@ -288,10 +286,6 @@ const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('requ
 $('.sq-header-actions [data-action="manage"]').remove();
 $('.sq-header-actions').insertAdjacentHTML('afterbegin',`<button class="sq-quiet ws-bell" data-action="inbox" aria-label="내 알림" title="내 알림">${icon('bell')}<span id="ws-unread" hidden></span></button>`);
 render=function(){
- let demoBanner=$('#ws-demo-banner');
- if(server.demo&&!demoBanner){demoBanner=document.createElement('div');demoBanner.id='ws-demo-banner';demoBanner.className='ws-demo-banner';demoBanner.setAttribute('role','status');demoBanner.innerHTML='<strong>화면 체험 모드</strong><span>예시 데이터입니다. 등록·좋아요·권한 변경은 저장되지 않습니다. 실제 사용은 MongoDB 연결 후 가능합니다.</span>';$('.sq-shell').prepend(demoBanner);}
- if(demoBanner)demoBanner.hidden=!server.demo;
- if(server.demo){$('.sq-demo').textContent='데모 · 저장 안 됨';$('[data-action=logout]').hidden=true;}
  const categories=server.categories||[];
  $('#sq-category').innerHTML=options(['모든 업무',...categories.filter(x=>x.enabled||x.name===state.category).map(x=>x.name)],state.category);
  originalRender();const special=['manage','admin','ideas'].includes(state.route);
@@ -305,7 +299,7 @@ render=function(){
  }
  enhanceSelects();
 };
-openModal=function(title,kicker,html){originalModal(title,kicker,(server.demo?'<p class="ws-demo-note">데모 미리보기 · 입력·변경 내용은 저장되지 않으며 예시 도구 파일은 내려받을 수 없습니다.</p>':'')+html);decorateForms();enhanceSelects();};
+openModal=function(title,kicker,html){originalModal(title,kicker,html);decorateForms();enhanceSelects();};
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -315,8 +309,13 @@ function decorateForms(){
  if(!cat&&form.id==='sq-edit-tool-form'){const label=document.createElement('label');label.className='sq-field';label.innerHTML='<span>업무 분야</span><select name="category"></select>';form.querySelector('.sq-form-grid').append(label);cat=label.querySelector('select');cat.dataset.previous=getItem(runtime.detailId).category;}
  if(cat){const old=cat.dataset.previous||cat.value;cat.innerHTML=options((server.categories||[]).filter(c=>c.enabled||c.name===old).map(c=>c.name),old);}
  const approval=form.querySelector('[name=approval]');
- if(approval?.type==='checkbox'){const box=approval.closest('.sq-field');box.querySelector('span').textContent='조회 권한';approval.parentNode.lastChild.textContent='상세 내용을 보려면 등록자·관리자 승인이 필요합니다.';box.querySelector('small').textContent='목록에는 표시됩니다. 승인 전에는 상세 내용·파일·피드백을 열 수 없습니다.';}
- if(approval?.tagName==='SELECT'){approval.closest('label').querySelector('span').textContent='조회 권한';approval.options[0].text='모두 조회 가능';approval.options[1].text='승인 후 조회';}
+ if(approval){
+  const checked=approval.type==='checkbox'?approval.checked:approval.value==='true';
+  const box=approval.closest('.sq-field');
+  box.outerHTML=`<div class="sq-field wide ws-access-field"><span>조회 권한 설정</span><label class="ws-access-card"><span class="ws-access-icon">${icon('shield-check')}</span><span class="ws-access-copy"><strong>승인받은 사용자만 상세 조회</strong><small>켜면 등록자·관리자의 승인 후 상세 내용과 파일을 볼 수 있습니다.</small></span><input type="checkbox" role="switch" name="approval" aria-label="승인받은 사용자만 상세 조회" ${checked?'checked':''}></label><small>끄면 사내 사용자가 바로 조회합니다. 목록은 모두에게 보이며 등록자와 관리자는 항상 조회할 수 있습니다.</small></div>`;
+ }
+ const upload=form.querySelector('.sq-upload');if(upload)upload.outerHTML=uploadArea('artifact',runtime.draft.file?[runtime.draft.file]:[]);
+
 }
 
 // Searchable, keyboard-accessible select surface. Native select remains the form source.
@@ -365,7 +364,7 @@ function renderWorkspace(){
  if(work.tab==='feedback'){const feedback=list.flatMap(x=>x.comments.map(c=>({...c,toolName:x.name}))).sort((a,b)=>b.created-a.created);html+=`<div class="ws-panel-head"><div><h2>동료들의 피드백</h2><p>의견을 확인하고 답변과 처리 상태를 남겨주세요.</p></div></div>${feedback.map(c=>`<button class="ws-row ws-click" data-action="feedback-open" data-id="${c.tool}"><span class="ws-avatar">${icon('message-square')}</span><span class="ws-row-main"><strong>${esc(c.toolName)}</strong><span>${esc(c.author)} · ${esc(c.text)}</span></span>${badge(c.status)}${icon('chevron-right')}</button>`).join('')||blank('messages-square','아직 피드백이 없습니다.','사용자가 남긴 의견을 이곳에서 확인할 수 있습니다.')}`;}
  if(work.tab==='taxonomy')html+=taxonomyPanel();
  if(work.tab==='admins')html+=`<div class="ws-panel-head"><div><h2>함께 운영하는 관리자</h2><p>기본 관리자는 설정 파일에서, 추가 관리자는 이 화면에서 관리합니다.</p></div>${server.user.baseAdmin?button('add-admin',icon('user-plus')+' 관리자 추가','sq-primary'):''}</div>${(work.admins||[]).map(a=>`<div class="ws-row"><span class="ws-avatar">${esc(a.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(a.name)}</strong><p>${esc(a.id)}</p></div>${badge(a.base?'기본 관리자':'추가 관리자')}${!a.base&&server.user.baseAdmin?button('remove-admin','해제','sq-secondary',`data-user="${esc(a.id)}"`):''}</div>`).join('')||blank('users','관리자 목록을 불러오는 중입니다.','잠시만 기다려 주세요.')}`;
- if(work.tab==='storage')html+=`<div class="ws-panel-head"><div><h2>배포 파일 저장 공간</h2><p>파일만 서버 디스크에 저장합니다. 모든 서비스 정보는 MongoDB에 저장됩니다.</p></div>${button('storage-dialog','보관 정책·이전 버전 정리','sq-primary')}</div><div class="ws-storage">${((server.storage?.used||0)/1048576).toFixed(1)} <small>MB 사용 / ${((server.storage?.quota||0)/1073741824).toFixed(1)} GB</small></div>`;
+ if(work.tab==='storage')html+=`<div class="ws-panel-head"><div><h2>배포 파일 저장 공간</h2><p>배포 파일과 기능 요청 첨부파일은 서버 디스크에 저장합니다. 요청·버전·권한·이력과 파일 정보는 MongoDB에 저장됩니다.</p></div>${button('storage-dialog','보관 정책·이전 버전 정리','sq-primary')}</div><div class="ws-storage">${((server.storage?.used||0)/1048576).toFixed(1)} <small>MB 사용 / ${((server.storage?.quota||0)/1073741824).toFixed(1)} GB</small></div>`;
  if(work.tab==='activity')html+=activityPanel();
  workspace.innerHTML=html+'</div>';mountIcons();enhanceSelects();
 }
@@ -392,7 +391,7 @@ function renderIdeas(){
 async function loadIdeas(){work.ideas=(await requestAPI('/api/ideas')).ideas;}
 async function ideaDetail(id){await loadIdeas();const i=work.ideas.find(x=>x.id===+id);if(!i)throw Error('요청을 찾을 수 없습니다.');work.idea=i;
  const owner=server.user.role==='admin'||i.assignee===server.user.id;
- openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p><div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div><form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options([i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
+ openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div><form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options([i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
 }
 
 async function inbox(loadMore=false){
@@ -411,7 +410,7 @@ Object.assign(actions,{
  'requests-board':async()=>{await loadIdeas();closeModal();navigate('ideas');},
  'idea-filter':b=>{work.ideaFilter=b.dataset.filter;renderIdeas();},
  'idea-open':b=>ideaDetail(b.dataset.id),
- 'idea':()=>openModal('어떤 기능이 필요하세요?','새 기능 요청',`<form data-work-form="idea"><div class="sq-form-grid"><label class="sq-field wide"><span>요청 제목</span><input name="name" required maxlength="100" placeholder="예: 여러 장비의 점검 이력을 한 번에 비교하고 싶어요."></label><label class="sq-field wide"><span>현재 불편한 점과 원하는 결과</span><textarea name="desc" required maxlength="4000" placeholder="지금은 어떻게 일하고 있나요? 어떤 결과가 나오면 도움이 될까요?"></textarea></label><label class="sq-field"><span>관련 업무</span><select name="category">${options((server.categories||[]).filter(c=>c.enabled).map(c=>c.name),'공통 업무')}</select></label></div><div class="sq-actions"><button class="sq-primary">요청 등록</button></div></form>`),
+ 'idea':()=>{work.ideaFiles=[];openModal('어떤 기능이 필요하세요?','새 기능 요청',`<form data-work-form="idea"><div class="sq-form-grid"><label class="sq-field wide"><span>요청 제목</span><input name="name" required maxlength="100" placeholder="예: 여러 장비의 점검 이력을 한 번에 비교하고 싶어요."></label><label class="sq-field wide"><span>현재 불편한 점과 원하는 결과</span><textarea name="desc" required maxlength="4000" placeholder="지금은 어떻게 일하고 있나요? 어떤 결과가 나오면 도움이 될까요?"></textarea></label><label class="sq-field"><span>관련 업무</span><select name="category">${options((server.categories||[]).filter(c=>c.enabled).map(c=>c.name),'공통 업무')}</select></label></div>${uploadArea('attachments',work.ideaFiles)}<div class="sq-actions"><button class="sq-primary">요청 등록</button></div></form>`);},
  'idea-claim':b=>ask('이 요청의 개발을 맡으시겠어요?','내 이름이 개발 담당자로 표시되고 요청자에게 알림이 전달됩니다.',async()=>{await requestAPI(`/api/ideas/${b.dataset.id}`,'PATCH',{claim:true,expectedRevision:work.idea.revision});await ideaDetail(b.dataset.id);},'제가 구현할게요'),
  'feedback-open':b=>detail(b.dataset.id,'comments'),
  'feedback-reply':b=>{const x=getItem(runtime.detailId),c=x.comments.find(c=>c.id===+b.dataset.id);work.feedback=c;openModal('피드백에 답변하기',x.name,`<div class="sq-callout"><strong>${esc(c.author)}</strong><br>${esc(c.text)}</div><form data-work-form="feedback"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="검토 결과나 진행 상황을 알려주세요."></textarea></label>${x.canManage?`<label class="sq-field"><span>처리 상태</span><select name="status">${options(['접수','검토 중','반영 중','반영 완료','보류'],c.status)}</select></label>`:''}<div class="sq-actions"><button class="sq-primary">답변 저장</button></div></form>`);},
@@ -439,7 +438,7 @@ root.addEventListener('submit',event=>{
  form.dataset.busy='true';const data=Object.fromEntries(new FormData(form));form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   switch(form.dataset.workForm){
-   case 'idea':{const r=await requestAPI('/api/ideas','POST',data);await loadIdeas();navigate('ideas');await ideaDetail(r.id);break;}
+   case 'idea':{const body=new FormData();delete data.attachments;body.append('metadata',JSON.stringify(data));for(const file of work.ideaFiles||[])body.append('attachments',file);const r=await requestAPI('/api/ideas','POST',body);await loadIdeas();navigate('ideas');await ideaDetail(r.id);break;}
    case 'idea-reply':{const i=work.idea;await requestAPI(`/api/ideas/${i.id}`,'PATCH',{...data,tool:data.tool?+data.tool:null,expectedRevision:i.revision});await ideaDetail(i.id);await loadIdeas();if(state.route==='ideas')renderIdeas();break;}
    case 'feedback':{const c=work.feedback;await requestAPI(`/api/feedback/${c.id}/reply`,'POST',data);await refresh();await detail(c.tool,'comments');break;}
    case 'taxonomy':await requestAPI('/api/taxonomy','POST',{...data,...work.taxonomy,order:+data.order,enabled:data.enabled==='true'});closeModal();await refresh();break;
@@ -452,6 +451,38 @@ root.addEventListener('submit',event=>{
 const originalError=showError;
 showError=function(error){if($('#sq-dialog').open){let e=$('#ws-dialog-error');if(!e){e=document.createElement('p');e.id='ws-dialog-error';e.className='sq-error';e.setAttribute('role','alert');$('#sq-dialog-body').prepend(e);}e.textContent=error.message;e.scrollIntoView({block:'nearest'});announce(error.message);}else originalError(error);};
 setInterval(()=>{if(document.hidden||runtime.requestBusy)return;requestAPI('/api/notifications?unread=true').then(r=>{server.unread=r.unread;$('#ws-unread').hidden=!r.unread;$('#ws-unread').textContent=r.unread>99?'99+':r.unread;}).catch(()=>{});},30000);
+
+function fileSize(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
+function uploadArea(kind,files=[]){
+ const multi=kind==='attachments';
+ return `<section class="ws-upload-area" data-upload="${kind}"><div class="ws-drop-zone"><span class="ws-upload-icon">${icon(multi?'paperclip':'cloud-upload')}</span><h3>${multi?'요청을 설명할 자료를 첨부하세요':'공유할 파일을 여기에 놓으세요'}</h3><p>${multi?'이미지·PDF·문서·ZIP · 최대 5개, 파일당 20MB':'ZIP · EXE · MSI · PS1 · 최대 128MB · 원본 형식으로 배포'}</p><button type="button" class="sq-secondary" data-file-pick="${kind}">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" name="${kind}" aria-label="${multi?'요청 첨부파일':'공유 파일'} 선택" ${multi?'multiple':''} accept="${multi?'.png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.xlsx,.docx,.zip':'.zip,.exe,.msi,.ps1'}"></div><div class="ws-selected-files" aria-live="polite">${files.map((f,i)=>`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)} · 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="${kind}" data-index="${i}" aria-label="${esc(f.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div></section>`;
+}
+function attachmentLinks(files){return files.length?`<section class="ws-attachments"><h3>첨부 자료 <span>${files.length}</span></h3>${files.map(f=>`<a class="ws-selected-file" href="${esc(f.url)}" download>${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)}</small></span>${icon('download')}</a>`).join('')}</section>`:'';}
+function selectFiles(kind,files){
+ if(!files.length)return;
+ if(kind==='artifact'){
+  if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
+  if(!/\.(zip|exe|msi|ps1)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
+  captureDraft();runtime.draft.file=files[0];wizard();
+ }else{
+  const combined=[...(work.ideaFiles||[]),...files];
+  if(combined.length>5||files.some(f=>f.size>20*1048576||!f.size||! /\.(png|jpe?g|webp|pdf|txt|csv|xlsx|docx|zip)$/i.test(f.name)))throw Error('이미지·PDF·TXT·CSV·XLSX·DOCX·ZIP을 최대 5개, 파일당 20MB까지 첨부하세요.');
+  work.ideaFiles=combined;refreshAttachments();
+ }
+}
+function refreshAttachments(){const area=$('[data-upload="attachments"]');if(area){area.outerHTML=uploadArea('attachments',work.ideaFiles);mountIcons();}}
+root.addEventListener('click',e=>{
+ const pick=e.target.closest('[data-file-pick]');if(pick){e.preventDefault();pick.closest('[data-upload]').querySelector('input[type=file]').click();return;}
+ const remove=e.target.closest('[data-file-remove]');if(!remove)return;e.preventDefault();
+ if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
+});
+// Capture before the legacy file input handler so validation and drops share one path.
+root.addEventListener('change',e=>{const input=e.target;if(input.type!=='file'||!input.closest('[data-upload]'))return;e.stopImmediatePropagation();try{selectFiles(input.name,[...input.files]);}catch(error){input.value='';showError(error);}},true);
+for(const type of ['dragenter','dragover','dragleave','drop'])root.addEventListener(type,e=>{
+ const area=e.target.closest('[data-upload]');if(!area)return;e.preventDefault();
+ area.classList.toggle('is-dragging',type==='dragenter'||type==='dragover');
+ if(type==='drop')try{selectFiles(area.dataset.upload,[...e.dataTransfer.files]);}catch(error){showError(error);}
+});
 
 // END WORKSPACE EXTENSION
 refresh().catch(showError);setInterval(()=>{if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);},300000);
