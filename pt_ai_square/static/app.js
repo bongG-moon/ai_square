@@ -205,7 +205,7 @@ async function requestAPI(url,method='GET',body){
  runtime.requestBusy=(runtime.requestBusy||0)+1;
  try{const headers={'X-CSRF-Token':server.csrf};if(body&&!(body instanceof FormData))headers['Content-Type']='application/json';
  const response=await fetch(url,{method,credentials:'same-origin',headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
- const result=await response.json();if(!response.ok){if(response.status===401)location.assign('/login');const error=Error(result.error||'요청을 처리하지 못했습니다.');error.status=response.status;throw error;}return result;
+ const result=await response.json();if(!response.ok){if(response.status===401)location.assign(result.login||'/login');const error=Error(result.error||'요청을 처리하지 못했습니다.');error.status=response.status;throw error;}return result;
  }finally{runtime.requestBusy--;}
 }
 async function refresh(){

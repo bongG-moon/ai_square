@@ -126,6 +126,8 @@ MONGODB_DATABASE = 'pt_ai_square'
 
 SSO는 기존 Flask Portal과 같은 `hcputil.auth.sso.SSO` 인터페이스를 사용합니다. 모듈 설치와 회사 프록시·쿠키 전달 설정이 필요합니다. 인증 실패 시 다른 인증 모드로 자동 전환하지 않습니다. 현재 검증은 SSO 인터페이스 대역으로 수행했으며 실제 사내 SSO 접속은 별도 확인이 필요합니다.
 
+회사 기본 `web_main.py` 포맷과의 대응은 배포 폴더의 `HCP_DEPLOYMENT.md`(회사 운영 배포 안내)를 확인하세요. `web_main:app`으로 불러오는 Flask 앱에 홈과 `/login`, `/login/<경로>`가 등록되어 있습니다. SSO 주석을 해제하는 대신 `PTAI_AUTH_MODE='sso'`를 지정합니다. `ORIGIN` 전달과 사번·이름·부서 등 6개 세션 필드 및 `logFlag`를 사용합니다.
+
 비밀번호가 포함된 URI나 세션 키를 공유 문서·Git에 넣지 마세요. `runtime_config.py`는 배포 ZIP에서 제외됩니다.
 
 ## 5. 권한 신청부터 승인까지 따라 하기

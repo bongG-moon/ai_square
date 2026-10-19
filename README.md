@@ -64,3 +64,7 @@ SSO와 mock에서 같은 등록·수정·업데이트·다운로드·롤백 흐�
 ## 파일 직접 실행
 
 VS Code에서 pt_ai_square/web_main.py를 열어 Python 파일 실행을 누르거나, 해당 폴더에서 python web_main.py를 실행할 수 있습니다. 기존 모듈 실행과 같은 설정·Waitress 서버를 사용합니다. WSGI 진입점 pt_ai_square.web_main:app도 유지합니다. 직접 실행 HTTP 시작, 패키지/독립 WSGI 로딩, mock 로컬 바인딩 제한에 대한 추가 테스트 4개를 통과했습니다.
+
+## HCP 운영 Flask / SSO 연결
+
+회사 실행기에서 `web_main:app`으로 Flask 앱을 불러오는 방식을 지원합니다. SSO는 코드 주석 대신 `PTAI_AUTH_MODE`로 선택합니다. `/login?ORIGIN=원래주소`, `/login/<경로>`, 6개 사용자 세션 필드와 `logFlag`를 반영했습니다. [회사 기본 포맷과 운영 설정 안내](pt_ai_square/HCP_DEPLOYMENT.md)를 확인하세요. 실제 회사 hcputil·인증 서버·프록시를 통한 로그인은 운영환경 확인이 필요합니다.

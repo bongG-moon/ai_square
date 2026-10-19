@@ -1,4 +1,10 @@
-"""Direct execution: python web_main.py; WSGI: pt_ai_square.web_main:app."""
+"""HCP Flask entry (web_main:app) and direct execution (python web_main.py).
+
+create_app() constructs the Flask app and registers the homepage and HCP SSO
+routes. Set PTAI_AUTH_MODE='sso' or 'mock' in runtime_config.py; do not duplicate
+the sample's '/' or '/login' routes here. Importing this module exports `app`
+without starting a second server. Only direct execution starts Waitress.
+"""
 import sys
 from pathlib import Path
 

@@ -12,6 +12,7 @@ from .activity import init_activity
 
 def create_app(overrides=None):
     app=Flask(__name__)
+    app.config['TEMPLATES_AUTO_RELOAD']=True
     app.config.update(settings())
     if overrides: app.config.update(overrides)
     if app.config['AUTH_MODE'] not in {'sso','mock'}:

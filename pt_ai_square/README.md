@@ -5,6 +5,7 @@ Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비
 - [초보자용 실행·사용 안내](GUIDE_V3.md)
 - [최신 상세 기획서](PLAN_V3.md)
 - [설정 파일 예시](runtime_config.example.py)
+- [회사 Flask 포맷 / HCP SSO 배포 안내](HCP_DEPLOYMENT.md)
 
 ## 빠른 실행
 
