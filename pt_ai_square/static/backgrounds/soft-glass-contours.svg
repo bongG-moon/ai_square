@@ -1,6 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" fill="none">
-  <!-- Quiet edges leave the centre clear for the existing page content. -->
-  <g stroke="#0071e3" stroke-width="1" stroke-opacity=".16">
+  <!-- Neutral translucent ribbons and paired edges suggest frosted glass.
+       The original page gray remains visible; the centre stays clear. -->
+  <defs>
+    <linearGradient id="glass-light" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff" stop-opacity=".04"/>
+      <stop offset=".5" stop-color="#fff" stop-opacity=".52"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".06"/>
+    </linearGradient>
+    <g id="contours">
+  <g>
     <path d="M960-100C1100-40 1080 65 1240 92S1490 18 1670-8"/>
     <path d="M1020-100C1140-35 1120 95 1270 120S1500 52 1670 28"/>
     <path d="M1080-100C1195-22 1160 124 1300 148S1510 87 1670 64"/>
@@ -9,13 +17,13 @@
     <path d="M1260-100C1360 20 1280 214 1390 232S1540 192 1670 172"/>
     <path d="M1320-100C1415 34 1320 244 1420 260S1550 227 1670 208"/>
   </g>
-  <g stroke="#0071e3" stroke-width="1" stroke-opacity=".12">
+  <g opacity=".7">
     <path d="M-120 115C140-10 150 190 220 230S345 252 420 330"/>
     <path d="M-120 155C130 40 135 220 210 262S335 282 400 365"/>
     <path d="M-120 195C120 90 120 250 200 294S325 312 380 400"/>
     <path d="M-120 235C110 140 105 280 190 326S315 342 360 435"/>
   </g>
-  <g stroke="#0071e3" stroke-width="1" stroke-opacity=".17">
+  <g>
     <path d="M-100 460C140 500 140 770 330 838S590 812 760 1035"/>
     <path d="M-100 510C125 545 120 802 300 871S565 848 700 1050"/>
     <path d="M-100 560C110 590 100 834 270 904S540 884 640 1065"/>
@@ -23,10 +31,18 @@
     <path d="M-100 660C80 680 60 898 210 970S490 956 520 1095"/>
     <path d="M-100 710C65 725 40 930 180 1003S465 992 460 1110"/>
   </g>
-  <g stroke="#0071e3" stroke-width="1" stroke-opacity=".11">
+  <g opacity=".65">
     <path d="M1360 540C1420 670 1510 650 1700 790"/>
     <path d="M1340 590C1405 710 1500 695 1700 835"/>
     <path d="M1320 640C1390 750 1490 740 1700 880"/>
     <path d="M1300 690C1375 790 1480 785 1700 925"/>
   </g>
+    </g>
+  </defs>
+  <g fill="url(#glass-light)">
+    <path d="M1020-100C1140-35 1120 95 1270 120S1500 52 1670 28L1670 100C1520 122 1460 198 1330 176S1250-8 1140-100Z"/>
+    <path d="M-100 510C125 545 120 802 300 871S565 848 700 1050L580 1080C515 920 410 1006 240 937S95 635-100 610Z"/>
+  </g>
+  <use href="#contours" stroke="#8e8e93" stroke-width="1" stroke-opacity=".19"/>
+  <use href="#contours" transform="translate(0 -1.5)" stroke="#fff" stroke-width="1.3" stroke-opacity=".82"/>
 </svg>

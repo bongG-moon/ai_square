@@ -1715,7 +1715,7 @@ html,body{margin:0;padding:0;min-height:100%;background:#f5f5f7;color-scheme:lig
   letter-spacing: 0;
 }
 #square-app .sq-heading p {font-size:14px;line-height:1.55;letter-spacing:0}
-#square-app .sq-heading h1 .sq-heading-continuation {color:#6e6e73;font:inherit;letter-spacing:inherit}
+#square-app .sq-heading h1 .sq-heading-continuation {color:var(--sq-blue);font:inherit;letter-spacing:inherit}
 /* SF Pro KR 600 and Pretendard 600 have different perceived stroke weights.
    Use the variable Korean face at 650 for display text only. */
 #square-app .sq-tool-icon[data-type="MCP"],#square-app .sq-type-label[data-type="MCP"]{--type-color:#2468d5;--type-tint:#eaf2ff}
@@ -1759,9 +1759,9 @@ html,body{margin:0;padding:0;min-height:100%;background:#f5f5f7;color-scheme:lig
 }
 #square-app .sq-server-error{margin:16px 0;padding:13px 17px;border-radius:12px;color:#9b3b13;background:#fff1e9;font-size:13px}
 
-/* Background only: pale primary-blue contours, with no foreground changes. */
+/* Neutral glass contours keep the existing gray page background. */
 #square-app {
-  background-image: url('backgrounds/soft-blue-contours.svg');
+  background-image: url('backgrounds/soft-glass-contours.svg');
   background-repeat: no-repeat;
   background-position: center top;
   background-size: cover;
