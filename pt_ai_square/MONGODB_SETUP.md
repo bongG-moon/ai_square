@@ -1,6 +1,6 @@
 # MongoDB 설정 — v3.3
 
-로컬과 회사 환경 모두 실제 MongoDB를 사용합니다. URI와 DB 이름을 입력해야 시작할 수 있으며, 예시 데이터나 SQLite로 대체하지 않습니다.
+기본 PTAI_DATA_MODE='mongodb'에서는 로컬과 회사 환경 모두 실제 MongoDB를 사용합니다. URI와 DB 이름이 필요하며 장애 시 다른 저장소로 대체하지 않습니다. 화면 확인만 필요하면 PTAI_AUTH_MODE='mock', PTAI_DATA_MODE='dummy'를 직접 설정할 수 있습니다. 이때 dummy/catalog.json의 가짜 자료만 읽고 MongoDB에는 연결하지 않습니다. 실제 업로드·다운로드 검증은 mongodb 모드를 사용하세요.
 
 현재는 좋아요·다운로드뿐 아니라 기능 목록, 버전, 사용자, 권한, 요청, 피드백, 알림, 관리자, 운영 이력까지 모두 MongoDB에 저장합니다. SQLite 대체 모드는 없습니다.
 

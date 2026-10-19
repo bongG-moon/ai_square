@@ -117,7 +117,7 @@
 
 ## 인증 방식과 로컬 동등성
 
-sso와 mock만 지원하며 비밀번호 로그인·계정 생성 CLI는 제공하지 않는다. mock은 설정한 사번을 사용자 ID로 사용하고 요청·세션에서 임의로 바꿀 수 없다. 사용자 ID를 얻은 뒤에는 동일한 Flask API와 MongoDB 저장소를 사용하므로 로컬 업로드·수정·새 버전 게시·다운로드·롤백·승인·알림이 실제 저장된다. 사번은 문자열로 유지한다. MongoDB URI와 DB 이름은 필수이며 미설정 시 실행 전에 설정을 요청한다. 데모 실행 분기는 제공하지 않는다.
+sso와 mock만 지원하며 비밀번호 로그인·계정 생성 CLI는 제공하지 않는다. mock은 설정한 사번을 사용자 ID로 사용하고 요청·세션에서 임의로 바꿀 수 없다. 사용자 ID를 얻은 뒤에는 동일한 Flask API와 MongoDB 저장소를 사용하므로 로컬 업로드·수정·새 버전 게시·다운로드·롤백·승인·알림이 실제 저장된다. 사번은 문자열로 유지한다. 기본 DATA_MODE='mongodb'에서는 MongoDB URI와 DB 이름이 필수이며 미설정 시 실행 전에 설정을 요청한다. 명시적인 DATA_MODE='dummy' 설정은 별도 샘플 파일만 읽는 로컬 화면 확인용이며, 실제 DB 연결과 쓰기는 모두 차단한다.
 
 ## v3.3 등록 경험과 자료 저장
 
@@ -128,3 +128,9 @@ sso와 mock만 지원하며 비밀번호 로그인·계정 생성 CLI는 제공�
 웹 가이드는 사용자·등록자의 버튼 사용법만 담는다. 설정·실행·백업은 별도 실행·운영 HTML에 담고 웹 다운로드에 노출하지 않는다.
 
 [Shopify Polaris Drop zone](https://polaris-react.shopify.com/components/selection-and-input/drop-zone)과 [Atlassian Toggle](https://atlassian.design/components/toggle)의 파일 선택·끌어넣기와 설정 패턴을 참고하여 기존 중립색 글래스 디자인에 맞춘다.
+
+## 18. 명시적인 샘플 조회 모드
+
+PTAI_DATA_MODE는 mongodb(기본)와 dummy를 지원한다. 기본 모드의 SSO·mock 실제 저장 동작은 동일하다. dummy는 AUTH_MODE=mock일 때만 허용하고 dummy/catalog.json에서 10개 도구·조직·업무·기능 요청을 읽어 화면을 구성한다. 버전·순위·좋아요·다운로드 수는 예시다. 샘플을 MongoDB에 삽입하지 않으며 실제 DB·파일 저장소에 접근하지 않는다. 쓰기 및 배포 파일 다운로드는 409로 거절한다. DB 장애 시 자동 전환하지 않는다.
+
+runtime_config.example.py와 로컬 runtime_config.py에는 각 값의 한국어 설명·단위·예시를 제공한다. 실제 도구 다운로드 성공 시 하단의 다운로드 시작 안내는 표시하지 않으며 실패 안내는 유지한다. EXE 자동 변환은 미구현이며 업로드한 원본 파일과 서버 발급 배포 번호를 관리한다.

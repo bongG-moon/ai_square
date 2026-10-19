@@ -11,16 +11,17 @@ async function refresh(){
  const data=await requestAPI('/api/bootstrap');Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
  if($('#sq-server-error'))$('#sq-server-error').hidden=true;
  organizations.splice(0,organizations.length,...data.organizations);requests.splice(0,requests.length,...data.requests);Object.assign(policy,data.policy);audit.splice(0,audit.length,...data.audit);
- $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.authMode==='mock'?'SSO 미사용':'SSO 사용';
+ $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.dataMode==='dummy'?'샘플 데이터 · 조회 전용':data.authMode==='mock'?'SSO 미사용':'SSO 사용';
  $('[data-action=logout]').hidden=data.authMode==='mock';render();
 }
 async function mutate(url,method,body,after){await requestAPI(url,method,body);await refresh();after?.();}
 async function downloadVersion(id,n){
+ if(server.dataMode==='dummy')throw Error('샘플 데이터는 조회 전용입니다. 실제 데이터 모드에서 다운로드해 주세요.');
  const x=getItem(id);if(x.approval&&x.access!=='approved'){requestAccess();return;}
  const v=x.versions.find(v=>v.n===n);if(!v?.filename){if(v?.url)openModal(`v${n} 연결 안내`,x.name,`<div class="sq-callout"><a href="${esc(v.url)}" target="_blank" rel="noopener noreferrer">${esc(v.url)}</a></div><p class="sq-note">이 버전에 저장된 연결 주소입니다. 원격 서버 프로그램의 버전을 되돌리는 기능은 아닙니다.</p>`);else detail(id,'connect');return;}
  // HEAD checks access without counting an event; browser streams the GET to disk.
  const check=await fetch(`/download/${id}/${n}`,{method:'HEAD'});if(!check.ok)throw Error('파일을 받을 수 없습니다. 권한 또는 배포 상태를 확인해 주세요.');
- const a=document.createElement('a');a.href=`/download/${id}/${n}`;a.download=v.filename;document.body.append(a);a.click();a.remove();announce('다운로드를 시작했습니다. 브라우저 다운로드 목록을 확인하세요.');setTimeout(()=>refresh().catch(showError),1500);
+ const a=document.createElement('a');a.href=`/download/${id}/${n}`;a.download=v.filename;document.body.append(a);a.click();a.remove();setTimeout(()=>refresh().catch(showError),1500);
 }
 actions.like=async b=>{const id=+b.dataset.id,liked=!state.liked.has(id);const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked});const x=getItem(id);x.likes=result.count-(liked?1:0);liked?state.liked.add(id):state.liked.delete(id);
  $$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.setAttribute('aria-pressed',String(liked));const count=control.querySelector('[data-like-count]')||(control.classList.contains('sq-like')?control.querySelector('span'):null);if(count)count.textContent=num(result.count);const label=control.querySelector('[data-like-label]');if(label)label.textContent=liked?'좋아요 취소':'좋아요';});

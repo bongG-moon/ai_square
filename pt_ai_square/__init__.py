@@ -20,23 +20,31 @@ def create_app(overrides=None):
     app.config['MOCK_USER']=str(app.config['MOCK_USER']).strip()
     if app.config['AUTH_MODE']=='mock' and (not app.config['MOCK_USER'] or len(app.config['MOCK_USER'])>100):
         raise ValueError('PTAI_MOCK_USER에 시험할 사번을 문자열로 입력하세요.')
-    if not app.config['MONGODB_URI'].strip() or not app.config['MONGODB_DATABASE'].strip():
-        raise ValueError('runtime_config.py에 MONGODB_URI와 MONGODB_DATABASE를 입력하세요. 로컬에서도 같은 MongoDB 저장 기능을 사용합니다.')
-    data=Path(app.config['DATA_DIR']).resolve();data.mkdir(parents=True,exist_ok=True)
-    (data/'artifacts').mkdir(exist_ok=True)
-    app.config['DATA_DIR']=str(data)
-    init_db(app);init_activity(app)
-    @app.before_request
-    def migration_guard():
-        if db().migrations.find_one({'state':'running'}, {'_id':1}):
-            return jsonify(error='데이터 이전 중입니다. 이전 작업을 완료한 후 다시 접속해 주세요.'),503
-    install_auth(app);app.register_blueprint(api)
+    if app.config['DATA_MODE'] not in {'mongodb','dummy'}:
+        raise ValueError('PTAI_DATA_MODE는 mongodb 또는 dummy만 지원합니다.')
+    if app.config['DATA_MODE']=='dummy':
+        if app.config['AUTH_MODE']!='mock':
+            raise ValueError('dummy는 로컬 화면 확인용입니다. PTAI_AUTH_MODE를 mock으로 설정하세요. 회사 SSO에서는 mongodb를 사용하세요.')
+        from .dummy_api import install_dummy
+        install_dummy(app)
+    else:
+        if not app.config['MONGODB_URI'].strip() or not app.config['MONGODB_DATABASE'].strip():
+            raise ValueError('runtime_config.py에 MONGODB_URI와 MONGODB_DATABASE를 입력하세요. 로컬에서도 같은 MongoDB 저장 기능을 사용합니다.')
+        data=Path(app.config['DATA_DIR']).resolve();data.mkdir(parents=True,exist_ok=True)
+        (data/'artifacts').mkdir(exist_ok=True)
+        app.config['DATA_DIR']=str(data)
+        init_db(app);init_activity(app)
+        @app.before_request
+        def migration_guard():
+            if db().migrations.find_one({'state':'running'}, {'_id':1}):
+                return jsonify(error='데이터 이전 중입니다. 이전 작업을 완료한 후 다시 접속해 주세요.'),503
+        install_auth(app);app.register_blueprint(api)
     @app.get('/')
     def index(): return render_template('index.html')
     @app.get('/health')
     def health():
-        db().command('ping')
-        return jsonify(status='ok',service='P&T AI SQUARE',storage='mongodb',version='3.3')
+        if app.config['DATA_MODE']=='mongodb': db().command('ping')
+        return jsonify(status='ok',service='P&T AI SQUARE',storage=app.config['DATA_MODE'],version='3.3')
     @app.errorhandler(HTTPException)
     def http_error(error): return jsonify(error=error.description),error.code
     @app.errorhandler(PyMongoError)

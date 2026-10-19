@@ -37,3 +37,9 @@ MongoDB에는 도구·버전·권한·사용 이력·요청·첨부 정보·알�
 ## 검증
 
 테스트는 저장소 상위에서 `python -m pytest pt_ai_square/tests -q`로 실행합니다. MongoDB 시험 주소는 `PTAI_TEST_MONGO_URI` 또는 기본 `mongodb://127.0.0.1:27018/`이며 임시 DB만 생성·삭제합니다. 파일 UI 단위 검증은 `node pt_ai_square/tests/test_upload_ui.cjs`입니다.
+
+## 샘플 데이터 화면
+
+실제 MongoDB를 연결하지 않고 화면만 보려면 runtime_config.py에서 `PTAI_DATA_MODE = 'dummy'`, `PTAI_AUTH_MODE = 'mock'`으로 설정하고 서버를 재시작합니다. 별도 `pt_ai_square/dummy/catalog.json`의 가짜 데이터로 목록·순위·상세 화면을 표시하며 쓰기·파일 다운로드는 차단합니다. 실제 DB 연결 정보는 남겨 두어도 사용하지 않습니다.
+
+실제 저장·업로드·버전 관리는 기본값 `PTAI_DATA_MODE = 'mongodb'`를 사용합니다. DB 장애 시 가짜 데이터로 자동 전환하지 않습니다. 설정 파일 예시에는 각 값의 용도·단위·입력 예시를 한국어 주석으로 제공합니다.

@@ -1,27 +1,80 @@
-# Copy to runtime_config.py. HCP Secret/process environment overrides these values.
-# sso: HCP-verified company identity / mock: configured employee ID on loopback
-# mock: loopback-only development, NEVER an authentication method for deployment.
+# runtime_config.py로 복사하여 값을 입력하세요. .env 파일은 읽지 않습니다.
+# 우선순위: 프로세스 환경변수 > 이 파일 > 기본값. 값을 바꾼 뒤 서버를 재시작하세요.
+# 실제 runtime_config.py는 비밀정보가 있을 수 있으므로 Git에 올리지 않습니다.
+
+# 데이터를 어디서 읽을지 선택합니다. 기본값 'mongodb': 실제 DB·파일 저장/다운로드/버전 관리.
+# 'dummy': dummy/catalog.json의 가짜 목록·순위·버전으로 화면 확인만 합니다. MongoDB에 연결하거나 쓰지 않습니다.
+# 더미에서는 업로드·좋아요·수정·다운로드가 불가능합니다. AUTH_MODE='mock'과 함께 로컬에서 사용하세요.
+# 실제 DB 연결 장애 시 dummy로 자동 전환하지 않습니다. 설정 변경 후 서버를 다시 실행하세요.
+PTAI_DATA_MODE = 'mongodb'
+
+# 사용자 신원 확인 방식: 'mock'=SSO 없이 아래 MOCK_USER 사번 사용, 'sso'=회사 hcputil SSO 사용.
+# mock은 로컬 확인용이며 명령 실행 시 127.0.0.1에서만 열립니다. 별도 로그인 화면은 없습니다.
+# 인증 방식과 데이터 방식은 별개입니다. mock + mongodb이면 실제 업로드·다운로드가 동작합니다.
 PTAI_AUTH_MODE = 'mock'
-PTAI_SECRET_KEY = ''  # Empty: generated once and retained in MongoDB settings.
-PTAI_ADMIN_IDS = ''   # Base administrator employee IDs for SSO and mock, comma-separated.
-PTAI_COOKIE_SECURE = False  # Set True behind production HTTPS, including non-SSO use.
-PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'  # Use a different name for parallel instances on one host.
+
+# Flask 세션 쿠키의 위조를 막는 비밀 문자열입니다. 다른 사람에게 공개하거나 Git에 올리지 마세요.
+# mongodb 모드에서 비워두면 처음 한 번 생성하여 DB에 보존합니다. 여러 서버는 같은 키를 써야 합니다.
+# 운영 중 키를 바꾸면 기존 로그인 세션이 무효화될 수 있습니다.
+PTAI_SECRET_KEY = ''
+
+# 처음부터 관리자 권한을 줄 사번 목록입니다. 예: '1000001,1000002' (쉼표 구분).
+# 기본 관리자는 설정에서 관리하며, 추가 관리자는 웹의 관리자 메뉴에서 등록합니다.
+PTAI_ADMIN_IDS = ''
+
+# True이면 HTTPS 접속에만 세션 쿠키를 전송합니다. 운영 HTTPS에서는 True로 설정하세요.
+# http://127.0.0.1 로컬 실행은 False로 설정해야 쿠키·인증이 정상 동작합니다.
+PTAI_COOKIE_SECURE = False
+
+# 브라우저에 저장하는 이 서비스의 세션 쿠키 이름입니다. 보통 변경할 필요가 없습니다.
+# 같은 주소에서 앱을 여러 개 실행하면 앱마다 다른 이름을 사용해 로그인 충돌을 피하세요.
+PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'
+
+# 한 HTTP 업로드 요청 전체의 최대 용량(MB)입니다. 128이면 약 128MB입니다.
+# 여러 파일과 입력 정보가 함께 계산됩니다. 요청 첨부에는 별도로 파일당 20MB·최대 5개 제한이 있습니다.
 PTAI_MAX_UPLOAD_MB = 128
+
+# 앱이 관리하는 배포 파일 + 기능 요청 첨부의 총 허용 용량(MB)입니다. 5120=5GB.
+# 서버 디스크를 늘리는 설정은 아닙니다. 실제 여유 공간을 확인하고 정리·증설하세요.
 PTAI_STORAGE_QUOTA_MB = 5120
+
+# 직접 실행 시 접속을 받을 주소입니다. '127.0.0.1'은 이 PC에서만 접속 가능합니다.
+# '0.0.0.0'은 외부 접속도 받으므로 회사 배포/SSO 구성 시에만 사용하세요. WSGI 실행기는 자체 설정을 따릅니다.
 PTAI_HOST = '127.0.0.1'
+
+# 직접 실행 시 사용할 포트 번호입니다. 5080이면 http://127.0.0.1:5080 으로 접속합니다.
+# 이미 사용 중이라는 오류가 나오면 기존 서버를 종료하거나 번호를 바꾸세요.
 PTAI_PORT = 5080
 
-# .env is not read. Enter all deployment settings directly in runtime_config.py.
-# Same Mongo variable names as the reference Flask Portal.
-# URI and database are required in both local mock and SSO modes.
-# Actual local trial: 'mongodb://127.0.0.1:27018/'
-# Missing settings or connection failures stop startup; no alternate database.
+# 실제 MongoDB 서버 연결 주소입니다. 예: 'mongodb://127.0.0.1:27018/' (이 PC 테스트 서버 예시).
+# 운영 환경에서는 발급받은 주소·계정 정보를 입력하세요. 비밀번호 포함 주소는 공유하지 마세요.
+# DATA_MODE='mongodb'일 때 필수이며, 'dummy'일 때는 이 값이 있어도 연결하지 않습니다.
 MONGODB_URI = ''
+
+# MongoDB 서버 안에서 사용할 DB 이름입니다. 예: 'pt_ai_square'. 연결 주소와는 별도 값입니다.
+# 시험 자료를 분리하려면 'pt_ai_square_test'처럼 다른 이름을 사용하세요. 기존 자료가 이동되지는 않습니다.
 MONGODB_DATABASE = 'pt_ai_square'
-PTAI_ACTIVITY_COLLECTION = 'square_activity_events'  # Legacy activity collection, migration input only.
+
+# 이전 버전의 활동 이력을 가져올 때 참조하는 기존 컬렉션 이름입니다. 일반 운영은 기본값 유지.
+# 현재 좋아요·다운로드 이력의 저장 위치 전체를 바꾸는 설정이 아닙니다.
+PTAI_ACTIVITY_COLLECTION = 'square_activity_events'
+
+# MongoDB 연결 응답을 기다리는 제한 시간(밀리초)입니다. 3000=3초.
+# 시간 초과 시 오류를 표시하며 다른 DB나 가짜 자료로 대체하지 않습니다.
 PTAI_MONGODB_TIMEOUT_MS = 3000
-# Optional local trial settings (AUTH_MODE must be 'mock'):
+
+# AUTH_MODE='mock'일 때 사용할 사번입니다. 숫자처럼 보여도 따옴표로 감싼 문자열로 입력하세요.
+# 실제 MongoDB 모드에서는 이 사번이 등록자·권한·좋아요·알림의 사용자 식별자가 됩니다.
 PTAI_MOCK_USER = '1000001'
+
+# SSO 없이 확인할 때 표시할 사용자 이름입니다. 실제 회사 SSO에서는 SSO의 이름을 사용합니다.
 PTAI_MOCK_NAME = '개발 사용자'
+
+# True이면 위 MOCK_USER를 로컬 확인용 관리자로 취급합니다. 일반 사용자 권한 점검 시 False.
+# SSO 사용자에게 관리자 권한을 주는 설정이 아닙니다. 기본 관리자 사번 목록도 함께 확인하세요.
 PTAI_MOCK_ADMIN = True
-# PTAI_DATA_DIR = r'C:\data\pt_ai_square'  # Preserve this folder when updating code.
+
+# 파일 원본을 보관할 서버 폴더의 절대 경로입니다. 기본값은 앱 폴더 아래 instance.
+# artifacts에는 배포 파일, request_attachments에는 요청 첨부를 보관합니다. 설명·권한·이력은 MongoDB에 저장됩니다.
+# 이 폴더와 DB를 함께 백업하고 코드 업데이트 때 삭제하지 마세요. dummy에서는 생성·사용하지 않습니다.
+# PTAI_DATA_DIR = r'C:\data\pt_ai_square'

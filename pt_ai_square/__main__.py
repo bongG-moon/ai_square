@@ -18,6 +18,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try: app=create_app()
     except ValueError as error: parser.error(str(error))
+    if app.config['DATA_MODE']=='dummy' and args.command!='run':
+        parser.error('dummy에서는 DB 이전·이력 동기화를 실행하지 않습니다. PTAI_DATA_MODE를 mongodb로 변경하세요.')
     if args.command=='migrate-legacy':
         from .migrate_legacy import migrate
         with app.app_context(): print(migrate(args.path))
@@ -31,6 +33,7 @@ def main(argv=None):
     args.host=args.host or app.config['HOST'];args.port=args.port or app.config['PORT']
     if app.config['AUTH_MODE']=='mock' and args.host not in {'127.0.0.1','localhost','::1'}: parser.error('mock 모드는 로컬 주소로만 실행하세요.')
     mode='SSO 미사용' if app.config['AUTH_MODE']=='mock' else 'SSO 사용'
+    if app.config['DATA_MODE']=='dummy': mode+=' · 샘플 데이터 (조회 전용)'
     use_flask=args.dev
     if not use_flask:
         try: from waitress import serve

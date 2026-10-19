@@ -49,3 +49,9 @@ MongoDB 통합 테스트는 별도 임시 DB에서 실행합니다. `tests/legac
 실제 사내 SSO, 운영 배포, PC 설치·자동 업데이트 연동은 별도 검증 범위입니다. 새 메뉴·권한·알림의 세부 동작은 GUIDE_V3.md를 확인하세요.
 
 실행 시 **버전만 확인**하는 읽기 전용 API(`/api/tools/{id}/version-check?release=1`)와 배포 Skill의 Python 예제를 제공합니다. 새 버전·서버 롤백을 알리고 파일은 교체하지 않습니다. 개별 도구 실행 지점과 운영 인증 클라이언트 연결이 필요합니다. [연결 안내](static/guides/pt-file-distribution/assets/VERSION_CHECK_GUIDE.md)를 확인하세요.
+
+## 샘플 데이터 화면
+
+runtime_config.py에서 `PTAI_DATA_MODE = 'dummy'`, `PTAI_AUTH_MODE = 'mock'`으로 설정하고 재시작하면 별도 dummy 폴더의 가짜 데이터로 화면을 볼 수 있습니다. 조회 전용이며 실제 DB에 연결하거나 저장하지 않습니다. 실제 업로드·다운로드·버전 관리는 기본값 `PTAI_DATA_MODE = 'mongodb'`를 사용하세요. 연결 장애 시 자동으로 샘플 모드가 되지는 않습니다.
+
+ZIP·EXE 등은 업로드한 원본으로 배포합니다. MCP·소스를 EXE로 자동 변환하는 빌드 기능은 현재 없습니다.

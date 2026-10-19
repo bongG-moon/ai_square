@@ -21,6 +21,7 @@ def settings():
         return os.environ.get(name) or private.get(name, default)
     backend='mongodb'
     return dict(HOST=str(get('HOST','127.0.0.1')),PORT=int(get('PORT',5080)),ACTIVITY_BACKEND=backend,
+                DATA_MODE=str(get('DATA_MODE','mongodb')).strip().lower(),
                 MONGODB_URI=str(named('MONGODB_URI','')).strip(),
                 MONGODB_DATABASE=str(named('MONGODB_DATABASE','pt_ai_square')),
                 ACTIVITY_COLLECTION=str(get('ACTIVITY_COLLECTION','square_activity_events')),
