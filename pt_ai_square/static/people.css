@@ -13,6 +13,10 @@
 #square-app .sq-key-link svg{width:18px;height:18px}
 #square-app .sq-key-link:hover{background:#eceef6;color:var(--sq-blue);transform:translateY(-1px)}
 #square-app .sq-key-link:focus-visible{outline:2px solid var(--sq-blue);outline-offset:3px}
+#square-app .sq-header-icon-group{display:flex;align-items:center;gap:4px;flex-shrink:0}
+#square-app .sq-header-icon-group>.sq-quiet{width:36px;min-width:36px;height:36px;min-height:36px;padding:0}
+#square-app .sq-header-icon-group .ws-bell #ws-unread{right:0}
+@media(pointer:coarse){#square-app .sq-header-icon-group>.sq-quiet{width:44px;min-width:44px;height:44px;min-height:44px}}
 #square-app .sq-tool .sq-tool-summary{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;line-height:1.55;font-size:12px;margin:7px 0 0;color:#707078;min-height:calc(1.55em * 2)}
 #square-app .sq-shelf-grid .sq-tool .sq-tool-summary{display:-webkit-box;-webkit-line-clamp:1;line-clamp:1;min-height:1.55em;font-size:11px;margin-top:6px}
 #square-app .sq-rank-modes button{white-space:nowrap;padding-inline:10px}
