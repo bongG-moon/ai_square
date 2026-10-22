@@ -1,6 +1,6 @@
 from urllib.parse import parse_qs,urlsplit,quote
 import pytest
-from pt_ai_square.storage import db
+from pt_ai_square.backend.storage import db
 
 @pytest.fixture
 def hcp(app):

@@ -5,10 +5,10 @@ from flask import Flask, jsonify, render_template
 from werkzeug.exceptions import HTTPException
 from pymongo.errors import PyMongoError
 from .config import settings
-from .storage import init_db, db
-from .auth import install_auth
-from .api import api
-from .activity import init_activity
+from .backend.storage import init_db, db
+from .backend.auth import install_auth
+from .backend.api import api
+from .backend.activity import init_activity
 
 def create_app(overrides=None):
     app=Flask(__name__)
@@ -25,7 +25,7 @@ def create_app(overrides=None):
     if app.config['DATA_MODE']=='dummy':
         if app.config['AUTH_MODE']!='mock':
             raise ValueError('dummy는 로컬 화면 확인용입니다. PTAI_AUTH_MODE를 mock으로 설정하세요. 회사 SSO에서는 mongodb를 사용하세요.')
-        from .dummy_api import install_dummy
+        from .backend.dummy_api import install_dummy
         install_dummy(app)
     else:
         if not app.config['MONGODB_URI'].strip() or not app.config['MONGODB_DATABASE'].strip():
@@ -39,6 +39,8 @@ def create_app(overrides=None):
             if db().migrations.find_one({'state':'running'}, {'_id':1}):
                 return jsonify(error='데이터 이전 중입니다. 이전 작업을 완료한 후 다시 접속해 주세요.'),503
         install_auth(app);app.register_blueprint(api)
+        from .backend.local_access import local_access
+        app.register_blueprint(local_access)
     @app.get('/')
     def index(): return render_template('index.html')
     @app.get('/health')

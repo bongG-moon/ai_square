@@ -2,7 +2,7 @@ import io
 import json
 from pathlib import Path
 from .conftest import ready, publish
-from pt_ai_square.storage import db
+from pt_ai_square.backend.storage import db
 
 
 def body(files):

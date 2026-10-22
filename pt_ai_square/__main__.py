@@ -21,11 +21,11 @@ def main(argv=None):
     if app.config['DATA_MODE']=='dummy' and args.command!='run':
         parser.error('dummy에서는 DB 이전·이력 동기화를 실행하지 않습니다. PTAI_DATA_MODE를 mongodb로 변경하세요.')
     if args.command=='migrate-legacy':
-        from .migrate_legacy import migrate
+        from .backend.migrate_legacy import migrate
         with app.app_context(): print(migrate(args.path))
         return
     if args.command=='sync-activity':
-        from .activity import flush, is_mongo
+        from .backend.activity import flush, is_mongo
         with app.app_context():
             if not is_mongo(): parser.error('runtime_config.py에서 PTAI_ACTIVITY_BACKEND=mongodb를 설정하세요.')
             print(f'MongoDB에 {flush()}개 이력을 반영했습니다.')

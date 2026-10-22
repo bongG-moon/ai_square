@@ -21,10 +21,15 @@ python web_main.py
 
 ## 가이드
 
-- [실행·운영 담당자 안내](pt_ai_square/OPERATOR_GUIDE.md)
-- [사용자·등록자 안내](pt_ai_square/USER_GUIDE.md)
-- [회사 Flask / SSO 배포](pt_ai_square/HCP_DEPLOYMENT.md)
-- [상세 기획서](pt_ai_square/PLAN_V3.md)
+- [개발자 폴더 구조와 기존 설치 업데이트 방법](pt_ai_square/docs/PROJECT_STRUCTURE.md)
+- [실행·운영 담당자 안내](pt_ai_square/docs/OPERATOR_GUIDE.md)
+- [사용자·등록자 안내](pt_ai_square/docs/USER_GUIDE.md)
+- [회사 Flask / SSO 배포](pt_ai_square/docs/HCP_DEPLOYMENT.md)
+- [SSO 운영 설정 상세 가이드](pt_ai_square/docs/SSO_OPERATIONS_GUIDE.md)
+- [개인 API 인증키·로컬 연동](pt_ai_square/docs/LOCAL_RECEIVER.md)
+- [상세 기획서](pt_ai_square/docs/PLAN_V3.md)
+
+서버 코드는 `backend/`, 화면 기능별 소스는 `frontend/`, 빌드 도구는 `scripts/`, 문서는 `docs/`로 정리했습니다. 앱 최상위 파일은 45개에서 11개로 줄였습니다. 새 ZIP은 새 폴더에 풀어주세요. 기존 폴더에 겹쳐 풀면 예전 최상위 파일이 남습니다. 기존 `runtime_config.py`와 실제 파일 저장소는 보존해야 합니다.
 
 `docs`에는 별도 실행·운영 HTML이 있습니다. 웹에서 다운로드하는 가이드는 사용자·등록자 내용만 담습니다.
 
@@ -47,3 +52,7 @@ MongoDB에는 도구·버전·권한·사용 이력·요청·첨부 정보·알�
 ## Skill 배포 정보 연결
 
 **도구 등록 → ZIP에서 불러오기**로 Skill이 만든 ai-square.json을 읽어 입력하고 필수 파일을 검사합니다. 게시 후 원본 ZIP과 별도의 배포 정보 JSON(도구 ID·버전·파일 해시·버전 확인 주소)을 제공합니다. 코드 가공·EXE 생성·설치는 수행하지 않습니다. 기존 일반 파일과 URL 등록은 유지합니다. 선언 규칙은 다운로드 Skill의 references/package-format.md에 있습니다.
+
+배포 정보를 읽지 못한 일반 파일도 필요한 등록 정보를 직접 입력해 게시할 수 있습니다. 파일·URL 외에 명령어형 배포를 지원합니다. 배포·자동 등록 Skill은 개인의 **업로드 포함** 인증키로 신규 도구와 관리 가능한 기존 도구의 새 버전을 게시합니다. 조회·다운로드 키는 받기만 가능합니다. 인증키는 `/local-access`에서 본인 사번으로 발급하고 취소할 수 있습니다.
+
+다운로드 집계는 웹·API를 합쳐 같은 사번·도구당 최초 1회만 반영합니다. 반복 수신과 업데이트는 집계에서 제외하며 전송 이력은 남깁니다.

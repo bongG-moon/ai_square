@@ -7,7 +7,16 @@ from package_contract import read_package
 
 def prepare(source,output):
     source=Path(source).resolve();output=Path(output).resolve()
-    if not source.is_dir(): raise ValueError('준비 폴더가 없습니다.')
+    if source.is_file() and source.suffix.lower()=='.md':
+        if source.is_symlink(): raise ValueError('링크 파일은 배포할 수 없습니다.')
+        if output.suffix.lower()!='.md': raise ValueError('단일 Markdown은 .md 출력 경로를 지정하세요. ZIP으로 자동 변환하지 않습니다.')
+        raw=source.read_bytes(); raw.decode('utf-8-sig')
+        if not raw: raise ValueError('빈 Markdown 파일입니다.')
+        output.parent.mkdir(parents=True,exist_ok=True)
+        with output.open('xb') as f: f.write(raw)
+        return {'packageId':source.stem,'type':'Skill','format':'md'}
+    if not source.is_dir(): raise ValueError('준비 폴더 또는 단일 .md 파일을 지정하세요.')
+    if output.suffix.lower()!='.zip': raise ValueError('여러 파일이 든 폴더는 .zip 출력 경로를 지정하세요.')
     if output==source or source in output.parents: raise ValueError('ZIP 출력은 준비 폴더 바깥에 지정하세요.')
     if output.exists(): raise ValueError('같은 이름의 출력 파일이 있습니다. 새 이름을 지정하세요.')
     files=sorted(source.rglob('*'))
@@ -33,9 +42,9 @@ def prepare(source,output):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(description='P&T AI SQUARE 배포 ZIP 준비')
-    parser.add_argument('source',help='ai-square.json과 공유 파일만 넣은 준비 폴더')
-    parser.add_argument('output',help='준비 폴더 바깥의 새 ZIP 파일 경로')
+    parser=argparse.ArgumentParser(description='P&T AI SQUARE 배포 ZIP 또는 단일 MD 준비')
+    parser.add_argument('source',help='ai-square.json과 공유 파일을 넣은 폴더, 또는 단일 .md 파일')
+    parser.add_argument('output',help='폴더는 새 .zip 경로, 단일 Markdown은 새 .md 경로')
     args=parser.parse_args()
     try:package=prepare(args.source,args.output)
     except (ValueError,OSError) as error:parser.error(str(error))

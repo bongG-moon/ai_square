@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>개인 API 연결 · P&T AI SQUARE</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='local_access.css') }}">
+<script defer src="{{ url_for('static', filename='local_access.js') }}"></script>
+</head><body><main class="local-shell">
+<a href="{{ url_for('index') }}">← P&T AI SQUARE</a>
+<h1>필요한 도구를,<br><span>내 PC에서도 편하게.</span></h1>
+<p>내 사번에 연결된 인증키로 도구를 받고, 필요한 경우 새 도구와 버전을 등록하세요.</p>
+<section class="local-card"><h2>1. 로컬 연동 준비</h2>
+<p>Python 3.11 이상이 필요합니다. 압축을 풀면 다운로드용 Skill과 실행 프로그램이 들어 있습니다.</p>
+<a class="sq-primary" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download>다운로드용 Skill 받기</a>
+<a class="sq-secondary" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download>배포·자동 등록 Skill 받기</a>
+<p>배포·자동 등록 Skill에는 파일 준비와 게시 프로그램이 함께 들어 있습니다. 공개·조회 승인 여부를 확인한 뒤 새 도구 또는 새 버전으로 게시합니다. EXE 자동 변환 기능은 아닙니다.</p>
+<p>로컬 SSO 미사용 시험에서는 인증키 없이 이용할 수 있습니다. 사내 SSO 환경에서는 아래 인증키를 사용하세요.</p>
+</section>
+<section class="local-card"><h2>2. 내 사번의 API 인증키</h2>
+<p id="employee"></p>
+<p>조회·다운로드 전용 또는 업로드 포함 권한을 선택하세요. 업로드 포함 키는 새 도구 등록과 본인이 관리할 수 있는 도구의 새 버전 게시를 지원합니다. 삭제·권한 변경은 지원하지 않습니다.</p>
+<form id="token-form"><label>구분할 이름<input id="token-name" value="내 PC" maxlength="60" required></label>
+<label>유효기간<select id="token-days"><option value="1">1일</option><option value="7" selected>7일</option><option value="30">30일</option></select></label>
+<label>허용 작업<select id="token-scope"><option value="read">조회·다운로드</option><option value="publish">업로드 포함</option></select></label>
+<button class="sq-primary" type="submit">인증키 발급</button></form>
+<div id="issued" hidden><p>아래 키는 지금 한 번만 표시됩니다. 대화창에 붙여넣지 말고 로컬 프로그램의 인증키 입력란에 입력하세요.</p>
+<input id="secret" type="password" readonly aria-label="발급된 개인 API 인증키" autocomplete="off">
+<button id="copy-token" class="sq-secondary">인증키 복사</button></div>
+<p id="status" role="status"></p>
+<div class="local-usage"><strong id="usage">이용 건수를 확인하고 있습니다.</strong><button id="refresh-usage" class="sq-secondary" type="button">새로고침</button></div>
+<p>업로드는 게시된 버전마다 1건입니다. 다운로드는 웹·API를 합쳐 같은 사번·도구당 최초 1회만 반영하며, 반복 수신과 업데이트는 제외합니다. 아래에는 제외된 전송 이력도 남습니다.</p>
+<ul id="tokens"></ul><h3>최근 API 이용 이력</h3><ul id="history"></ul></section>
+<section class="local-card"><h2>3. 검색하고 받기</h2>
+<p>압축을 푼 폴더에서 아래 명령을 실행하세요. 주소는 실제 접속한 웹 주소로 설정합니다.</p>
+<pre>python scripts/square_client.py configure --url {{ request.url_root.rstrip('/') }}
+python scripts/square_client.py search "회의록"
+python scripts/square_client.py download 1 --output ./downloads</pre>
+<p>마지막 명령의 1은 검색 결과의 도구 ID로 바꾸세요. 파일의 SHA-256과 크기를 확인해 저장하며, 압축 해제·설치·실행은 하지 않습니다.</p>
+<p>파일 준비와 자동 게시까지 필요하면 배포·자동 등록 Skill을 사용하세요. 인증키가 없으면 프로그램이 발급 화면을 엽니다. 기존 키 원문은 다시 볼 수 없으므로 분실 시 새로 발급하세요.</p>
+</section></main></body></html>

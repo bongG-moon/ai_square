@@ -5,7 +5,7 @@ import uuid
 import zipfile
 import pytest
 from pt_ai_square import create_app
-from pt_ai_square.storage import db, ensure_user
+from pt_ai_square.backend.storage import db, ensure_user
 
 class FixtureSSO:
     """Test-only identity provider, passed through the existing SSO adapter."""

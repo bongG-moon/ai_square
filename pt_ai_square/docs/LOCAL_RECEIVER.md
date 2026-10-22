@@ -1,0 +1,240 @@
+# 로컬에서 도구 검색·다운로드하기
+
+이 기능은 웹에 매번 들어가지 않고 내 PC의 터미널이나 로컬 AI에서 도구를 찾고 파일을 받는 기능입니다.
+함께 제공하는 수신용 Skill과 프로그램은 업로드·설치·압축 해제·실행을 하지 않습니다. EXE도 파일로만 저장합니다.
+웹에서 함께 제공하는 **배포·자동 등록 Skill**에는 파일 준비와 자동 게시 프로그램이 포함되어 있습니다. **업로드 포함** 키로 새 도구·새 버전을 게시할 수 있습니다.
+
+## 1. 준비
+
+웹 상단 **로컬에서 받기**를 누르거나 웹 주소 뒤에 `/local-access`를 붙여 접속합니다.
+**다운로드용 Skill 받기**를 눌러 ZIP을 원하는 폴더에 풀어주세요.
+`pt-square-receiver` 안에 `SKILL.md`와 `scripts/square_client.py`가 있습니다.
+Python 3.11 이상이면 별도 pip 설치가 필요 없습니다.
+
+서버 소스에서 직접 실행할 때는 `receiver/pt-square-receiver` 폴더에서 아래 명령을 실행합니다.
+복사해서 사용하는 패키지에는 서버 소스나 MongoDB 연결 정보가 필요하지 않습니다.
+
+## 2. 서버 주소 지정
+
+압축을 푼 `pt-square-receiver` 폴더에서 터미널을 열고 실행합니다.
+
+```powershell
+python scripts/square_client.py configure --url http://127.0.0.1:5080
+```
+
+아직 운영 주소를 모르면 로컬에서 웹 서버를 실행한 후 위 주소로 시험하면 됩니다.
+운영 서버가 정해지면 같은 명령의 주소를 실제 HTTPS 웹 주소로 바꾸세요.
+주소는 기본적으로 사용자 폴더 아래 `.pt-ai-square/client.json`에 저장합니다.
+이 JSON에는 `baseUrl`만 들어가며 인증키와 MongoDB 정보를 저장하지 않습니다.
+`.env` 파일을 사용하지 않습니다.
+
+서버의 MongoDB 설정은 기존 `runtime_config.py` 그대로입니다.
+MongoDB가 없는 더미 모드는 화면 샘플용이며, 이 수신 기능은 실제 MongoDB 모드에서 사용합니다.
+
+## 3. SSO 사용 여부에 따른 인증
+
+### 같은 PC에서 SSO 미사용(mock) 시험
+
+설정된 시험 사번으로 동작합니다. 인증키 입력 없이 아래 명령을 사용할 수 있습니다.
+이 방식은 같은 PC의 로컬 접속만 허용하며 다른 PC의 사용자를 인증하는 용도로 쓰지 않습니다.
+
+### SSO를 사용하는 운영 서버
+
+1. 웹에서 회사 SSO로 로그인합니다.
+2. **로컬에서 받기 → 내 사번의 API 인증키**에서 PC 구분 이름과 1·7·30일 유효기간, 허용 작업을 선택합니다. 받기만 필요하면 **조회·다운로드**를 선택합니다.
+3. **인증키 발급 → 인증키 복사**를 누릅니다.
+4. 아래처럼 `--authenticate`를 넣으면 터미널에서 키를 화면에 표시하지 않고 입력받습니다.
+
+```powershell
+python scripts/square_client.py --authenticate search "회의록"
+```
+
+키는 파일에 저장하지 않으므로 명령 실행마다 입력할 수 있습니다.
+로컬 AI가 여러 명령을 실행해야 한다면 해당 AI 프로세스가 상속할 환경변수 `PTAI_READ_TOKEN`으로 제공할 수도 있습니다.
+이미 실행 중인 AI는 나중에 별도 터미널에서 설정한 환경변수를 자동으로 받지 않습니다.
+키를 대화창이나 명령 인자에 붙여넣거나 Skill에 적어두지 마세요.
+실제 사내 SSO 연동은 운영 서버에서 확인해야 하며, 로컬 테스트는 동일한 인터페이스의 시험 SSO로 검증합니다.
+
+인증키는 로그인한 본인 사번에 연결됩니다. 임의로 다른 사번을 입력해 발급할 수 없습니다.
+**조회·다운로드** 키는 받기만, **업로드 포함** 키는 새 도구 등록과 기존 관리 권한이 있는 도구의 새 버전 게시까지 허용합니다.
+어떤 키도 삭제·관리자 설정·권한 승인·다른 키 발급에는 사용할 수 없습니다.
+기존에 발급한 키는 조회·다운로드 권한을 유지합니다. 업로드가 필요하면 새 키를 발급하세요.
+도구의 권한을 취소하거나 사용자를 비활성화하면 기존 키로도 받을 수 없습니다.
+키 자체를 취소하려면 같은 화면의 목록에서 **사용 취소**를 누릅니다.
+서버 MongoDB의 `local_tokens`에는 키 원문 대신 SHA-256과 사용자·만료·취소 상태를 저장합니다.
+만료는 매 요청에 확인하므로 DB의 문서 삭제 시점에 의존하지 않습니다.
+사용자의 회사 SSO 로그아웃과 키 만료는 별개입니다. 노출되었거나 사용이 끝난 키는 취소하세요.
+
+## 4. 검색하고 받기
+
+```powershell
+# 이름·설명·관련 업무·업무 분류 검색
+python scripts/square_client.py search "회의록"
+
+# 유형을 좁혀 검색. 다음 페이지는 응답 nextOffset 값을 사용합니다.
+python scripts/square_client.py search "보고" --type Skill --limit 20 --offset 0
+
+# 검색 결과의 id가 12인 도구의 사용 안내 확인
+python scripts/square_client.py show 12
+
+# 현재 배포 중인 파일 받기
+python scripts/square_client.py download 12 --output ./downloads
+
+# 실제 사용 중인 배포 번호가 1일 때 최신 버전 여부만 확인
+python scripts/square_client.py check 12 --release 1
+```
+
+결과는 로컬 AI도 읽을 수 있는 JSON으로 출력합니다. 도구 ID는 예시이며 실제 검색 결과로 바꾸세요.
+조회 권한이 없는 도구는 목록에 `permission_required`로 보이고 상세·파일은 차단됩니다.
+이 경우 웹에서 권한을 신청하세요.
+
+파일은 `tool-12-v1.zip`처럼 도구 ID와 버전으로 저장합니다. 원래 파일명은 결과의 `originalFilename`에 표시합니다.
+전송받은 원본 크기와 SHA-256을 서버 배포 정보와 비교한 뒤 최종 이름으로 저장합니다.
+같은 이름이 있으면 덮어쓰지 않고 중단합니다. 다른 저장 폴더를 지정하세요.
+중단·검증 실패·배포 변경 시 임시 파일은 정리합니다. 프로세스 강제 종료나 전원 종료로 남은 `.square-*.part`는 완성된 배포 파일이 아닙니다.
+서버의 다운로드 이력은 웹 다운로드와 같은 기준으로 기록합니다. 파일 검증 실패 시에도 서버에서 전송을 시작한 이력은 남을 수 있습니다.
+URL·명령어형 도구는 다운로드할 파일이 없으므로 `show`로 안내를 확인하며 외부 URL이나 명령어를 자동 실행하지 않습니다.
+검증 성공은 전송 파일의 일치 확인이며 악성코드 검사나 실행 안전성 검증은 아닙니다.
+
+## 5. 로컬 AI에 요청하기
+
+사용하는 로컬 AI의 Skill 등록 방법에 맞춰 `pt-square-receiver` 폴더를 등록합니다.
+또는 AI에게 해당 폴더의 `SKILL.md`를 읽고 수신 프로그램을 사용하라고 요청할 수 있습니다.
+
+> “P&T AI SQUARE에서 회의록 정리 도구를 찾아줘.”
+>
+> “그중 12번을 지금 폴더의 downloads에 받아줘. 설치는 하지 마.”
+
+Skill 파일을 웹에서 받는 것만으로 AI에 자동 등록되지는 않습니다.
+로컬 파일·터미널을 사용할 수 있는 AI 환경이 필요합니다.
+받은 파일의 `release`는 다운로드한 버전이고, 실제 설치 완료를 뜻하지 않습니다.
+
+## API 및 개발 참고
+
+| 요청 | 용도 |
+|---|---|
+| `GET /api/catalog?q=검색어&type=Skill&orgId=...&offset=0&limit=20` | 페이지 단위 검색, `nextOffset` 반환 |
+| `GET /api/tools/{id}` | 권한 확인 후 상세 안내 |
+| `GET /api/tools/{id}/manifest` | 현재 배포 번호·파일명·경로·SHA-256·크기 |
+| `GET /download/{id}/{release}` | 원본 파일 전송 |
+| `GET /api/tools/{id}/version-check?release=1` | 현재 사용 버전과 배포 버전 비교 |
+| `GET /api/tools/{id}/releases/{release}/deployment` | 유효한 패키지의 배포 정보 |
+
+운영 요청은 `Authorization: Bearer <개인 API 인증키>`를 사용합니다.
+조회·다운로드 키는 위 조회 API만 허용합니다. 업로드 포함 키는 아래 게시 API도 허용합니다.
+키 발급·취소는 웹 SSO/mock 세션과 CSRF 보호가 적용됩니다.
+SSO 세션의 쿠키를 추출하거나 클라이언트에 복제하지 않습니다.
+클라이언트는 HTTPS 인증서를 검증하고 리디렉션을 따라가지 않습니다.
+서버 주소가 경로 접두사를 포함한다면 `https://회사주소/ai-square` 전체를 설정하세요.
+서버의 WSGI/프록시 접두사 설정도 맞아야 합니다.
+
+빌드: `python scripts/build_receiver.py` → `static/guides/pt-square-receiver.zip`
+ZIP은 명시한 두 소스 파일만 담으므로 개인 설정·인증키·데이터 파일은 포함하지 않습니다.
+테스트: `python -m pytest tests/test_receiver.py -q` (로컬 MongoDB 필요)
+
+## 업로드 포함 인증키로 게시하기
+
+| 요청 | 용도 |
+|---|---|
+| `GET /api/catalog/options` | 로그인 사번과 현재 사용 가능한 조직·업무 ID 확인 |
+| `POST /api/packages/inspect` | multipart `artifact`로 배포 정보 사전 확인. 게시 건수에는 포함하지 않음 |
+| `POST /api/tools` | multipart `metadata` JSON과 `artifact` 파일로 새 도구 등록 |
+| `POST /api/tools/{id}/versions` | 같은 형식으로 새 버전 게시. `metadata.expectedRevision` 필수 |
+
+`metadata`에는 이름(name), 설명(desc), 담당자 표시(owner), 조직(orgId), 업무(categoryId), 대상 프로그램(platform), 유형(type), 설치 안내(guide), 관련 업무(workTags), 조회 권한 필요 여부(approval), 등록 방식(mode)을 넣습니다.
+담당자 표시 `owner`는 화면에 보이는 설명일 뿐, 실제 등록자 권한은 인증키에 연결된 사번으로 서버가 결정합니다.
+파일 등록은 `mode: "file"`과 `artifact` 파일을 보냅니다. URL·명령어형 게시도 기존 등록 API의 검증을 동일하게 적용합니다.
+파일 검사·저장 용량·등록 권한·버전 충돌 확인은 웹 등록과 같습니다.
+
+예시(Python `requests`가 있는 환경, 토큰은 실행 환경변수 `PTAI_API_TOKEN`으로 전달):
+
+```python
+import json
+import os
+import requests
+
+base = "https://실제-플랫폼-주소"  # 같은 PC mock 시험은 http://127.0.0.1:5080
+headers = {"Authorization": "Bearer " + os.environ["PTAI_API_TOKEN"]}
+# options 응답의 실제 조직/업무 ID를 확인하여 선택하세요.
+options = requests.get(base + "/api/catalog/options", headers=headers, timeout=30)
+options.raise_for_status()
+metadata = {
+    "name": "회의록 정리", "desc": "회의 내용에서 결정 사항을 정리합니다.",
+    "owner": "업무 담당자", "orgId": "organization-0", "categoryId": "category-0",
+    "platform": "Claude", "type": "Skill", "guide": "대상 환경의 Skill 폴더에 배치하세요.",
+    "workTags": ["회의록"], "approval": False, "mode": "file"
+}
+with open("SKILL.md", "rb") as f:
+    result = requests.post(
+        base + "/api/tools", headers=headers,
+        data={"metadata": json.dumps(metadata, ensure_ascii=False)},
+        files={"artifact": ("SKILL.md", f)}, timeout=120)
+result.raise_for_status()
+print(result.json())  # id, version
+```
+
+응답 시간 초과 시 실제로 게시됐을 수 있으므로 무조건 재전송하지 말고 등록 목록·버전부터 확인하세요.
+이 예시는 API를 직접 호출하는 방법입니다. 자연어로 파일 준비부터 게시까지 연결하려면 아래의 배포·자동 등록 Skill을 사용하세요. 다운로드용 Skill은 계속 수신 전용입니다.
+
+## 내 이용 건수 확인
+
+**로컬에서 받기 → 내 사번의 API 인증키**에서 사번 전체 합계, 키별 건수, 최근 20개 이력을 조회합니다.
+**새로고침**으로 최신 건수를 확인할 수 있습니다. 취소·만료된 키도 이력 확인을 위해 목록에 남습니다.
+
+- API 업로드: 파일 사전 검사나 실패 요청은 제외하고 서버에 게시된 버전마다 1건입니다. 새 도구·새 버전과 URL·명령어형 게시도 포함합니다.
+- API 다운로드: 웹·API를 합쳐 같은 사번·도구당 전체 기간 최초 수신을 한 번만 반영합니다. 최초 수신에 사용한 API 키에 1건을 귀속합니다. 최초 수신이 웹이면 API 키 건수에는 추가하지 않습니다. HEAD·실패 요청·업데이트·반복 수신은 제외합니다.
+- 도구 카드/인기 순위: 같은 사번·도구당 전체 기간 1회만 반영합니다. 최근 7일 순위는 최초 수신일을 기준으로 합니다. 여러 키·다른 버전·다른 날짜에 다시 받아도 증가하지 않습니다.
+- 본인 사번의 이용 내역만 조회할 수 있습니다. 다른 사용자의 키·이력은 보여주지 않습니다.
+- 계측 추가 이전에 키 ID 없이 기록된 다운로드에는 키별 소급 집계를 하지 않습니다.
+
+MongoDB의 `tools.versions.apiUsage`에 게시 사번·키 ID를 버전과 함께 저장합니다.
+다운로드는 기존 `activity_state`의 이벤트 대기열과 `activity`에 사번·키 ID를 기록합니다.
+같은 이벤트를 재처리해도 중복 집계하지 않으며, 파일 정리·배포 철회로 과거 이용 건수가 사라지지 않습니다.
+인증키 원문은 이력에 남기지 않습니다.
+
+## 배포 Skill로 준비한 파일을 자연어로 자동 등록하기
+
+1. **로컬에서 받기 → 배포·자동 등록 Skill 받기**를 누릅니다. 기존 웹 상단의 파일 배포 Skill도 같은 최신 묶음입니다.
+2. 로컬 AI에 해당 Skill을 등록하거나, 압축을 푼 `SKILL.md`를 읽고 작업하도록 요청합니다. 다운로드만으로 AI 환경에 자동 설치되지는 않습니다.
+3. 처음 한 번 플랫폼 주소를 설정합니다. 기존 수신 프로그램과 같은 `~/.pt-ai-square/client.json`을 사용합니다.
+4. **업로드 포함** 인증키를 사용자의 터미널에서 입력하거나 로컬 AI 실행 환경의 `PTAI_API_TOKEN`으로 제공합니다.
+5. “이 도구를 배포 Skill로 준비해서 플랫폼에 등록해줘”라고 요청합니다.
+6. AI가 실제 파일에서 이름·설명·유형·설치 안내를 채우고, 플랫폼의 조직·업무 목록에서 필요한 선택을 물어봅니다.
+7. “전체 사용자가 상세 조회 가능” 또는 “조회 승인 필요”를 선택합니다. 기존 도구도 현재 설정을 유지할지 바꿀지 확인합니다.
+8. AI가 게시 후 도구 ID·버전·조회 권한 설정을 알려줍니다. 다음에 수정한 뒤 “새 버전으로 올려줘”라고 요청하면 같은 도구로 연결합니다.
+
+자동 입력은 로컬 AI의 프로젝트 내용 확인과 ZIP의 `ai-square.json` 읽기를 조합합니다.
+서버에서 LLM을 실행하거나 임의 파일을 EXE로 변환하지 않습니다.
+단일 MD는 원본 MD와 별도 등록 설명 JSON으로 준비하며 억지로 ZIP으로 만들지 않습니다.
+
+직접 실행하는 예시(이 Skill을 푼 폴더 기준):
+
+```powershell
+python scripts/square_client.py configure --url http://127.0.0.1:5080
+python scripts/publish_client.py auth
+python scripts/publish_client.py prepare --artifact ./release.zip --plan ./publish-plan.json
+# 준비 결과의 options를 보고 실제 조직·업무 ID를 선택
+python scripts/publish_client.py prepare --artifact ./release.zip --plan ./publish-plan.json --org-id organization-0 --category-id category-0
+# 사용자가 선택한 공개 범위가 조회 승인 필요일 때
+python scripts/publish_client.py publish --plan ./publish-plan.json --visibility approval
+```
+
+전체 공개는 `--visibility public`을 사용합니다. 공개 범위 인자를 생략하면 게시되지 않습니다.
+MD·URL·명령어 등록은 `--metadata 등록설명.json`으로 이름·유형·설치 안내 등을 전달합니다.
+기존 도구는 준비안 옆 `.ai-square-publish-state.json`의 서버·사번·자료 연결 정보 또는 관리 가능한 동일 packageId로 찾습니다.
+이름이 비슷하다는 이유로 다른 도구를 덮어쓰지 않습니다. 후보가 여러 개면 사용자에게 확인하고 `--tool ID`로 지정합니다.
+준비안·상태 파일에는 인증키를 저장하지 않으며 공유 파일에도 포함하지 않습니다.
+기존 상태 파일을 잃어버린 단일 MD 등 고유 ID가 없는 자료는 `--tool ID`로 기존 도구를 지정하세요.
+
+준비 후 파일이 바뀌면 다시 prepare를 실행합니다. 단순 통신 실패는 같은 준비안으로 다시 publish하면
+`clientRequestId`가 같아 이미 게시된 결과를 반환합니다. 새 버전이 중복 생성되지 않습니다.
+서버의 409 변경 충돌은 최신 버전 정보를 확인하고 새 준비안을 만들어 해결합니다.
+
+인증키가 없거나 만료되어 401이면 기본 브라우저로 설정된 서버의 `/local-access`를 엽니다.
+자동 열기가 차단되면 출력된 링크로 접속하세요. 프로그램은 키를 대신 발급하거나 브라우저에서 추출하지 않습니다.
+원문은 발급 시 한 번만 표시하므로 분실 시 새 키를 발급해야 합니다.
+
+업데이트 수신은 `square_client.py download ID --update` 또는 다운로드 API의 `?purpose=update`를 사용합니다.
+이 요청은 최초 사용 기록이 없더라도 다운로드 건수에서 제외하며, 전송 이력만 남습니다.
+일반 다운로드도 이미 받은 사번이면 버전과 날짜에 관계없이 추가 집계하지 않습니다.
+이전 날짜별 다운로드 자료는 사번·도구별 최초 날짜로 묶어 조회하므로 기존 합계가 줄어들 수 있습니다.

@@ -4,7 +4,7 @@ import io
 import json
 import time
 import zipfile
-from pt_ai_square.storage import db, deliver_notifications, ensure_user
+from pt_ai_square.backend.storage import db, deliver_notifications, ensure_user
 from pt_ai_square import create_app
 from .conftest import ready, publish
 

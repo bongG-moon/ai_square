@@ -33,4 +33,5 @@ def settings():
                 MOCK_ADMIN=str(get('MOCK_ADMIN','false')).lower()=='true',
                 SESSION_COOKIE_SECURE=str(get('COOKIE_SECURE','true' if mode=='sso' else 'false')).lower()=='true',
                 MAX_CONTENT_LENGTH=int(get('MAX_UPLOAD_MB',128))*1024*1024,
-                STORAGE_QUOTA=int(get('STORAGE_QUOTA_MB',5120))*1024*1024)
+                STORAGE_QUOTA=int(get('STORAGE_QUOTA_MB',5120))*1024*1024,
+                STORAGE_RESERVE=int(get('STORAGE_RESERVE_MB',1024))*1024*1024)

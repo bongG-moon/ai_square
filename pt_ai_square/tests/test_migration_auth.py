@@ -2,8 +2,8 @@ import json
 import sqlite3
 from pathlib import Path
 from pt_ai_square import create_app
-from pt_ai_square.storage import db
-from pt_ai_square.migrate_legacy import migrate
+from pt_ai_square.backend.storage import db
+from pt_ai_square.backend.migrate_legacy import migrate
 from .conftest import ready
 
 def test_readonly_legacy_migration_preserves_ids_and_retry(app,tmp_path):

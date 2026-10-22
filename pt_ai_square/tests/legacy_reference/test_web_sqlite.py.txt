@@ -1,0 +1,166 @@
+import io
+import json
+import time
+import zipfile
+from pathlib import Path
+import pytest
+from werkzeug.security import generate_password_hash
+from pt_ai_square import create_app
+from pt_ai_square.storage import db
+
+@pytest.fixture
+def app(tmp_path):
+    return create_app({'DATA_DIR':str(tmp_path),'AUTH_MODE':'mock','MOCK_ADMIN':True,'TESTING':True,'SESSION_COOKIE_SECURE':False,'ACTIVITY_BACKEND':'sqlite'})
+
+def ready(app,user='1000001',admin=True):
+    app.config.update(MOCK_USER=user,MOCK_ADMIN=admin)
+    c=app.test_client();b=c.get('/api/bootstrap').get_json();return c,{'X-CSRF-Token':b['csrf']}
+
+def package(name='SKILL.md'):
+    b=io.BytesIO()
+    with zipfile.ZipFile(b,'w') as z:z.writestr(name,'# Example\n실행 지침')
+    b.seek(0);return b
+
+def publish(c,h,tid=None,revision=None,**extra):
+    m=dict(name='보고서 Skill',desc='보고서를 정리합니다',owner='등록자',org='공통',platform='Claude',type='Skill',category='공통 업무',visibility='전체 공개',guide='ZIP을 풀고 SKILL.md를 확인하세요.',workTags=['주간 보고','실적 정리'],approval=False,audience=[],mode='file',expectedRevision=revision)
+    m.update(extra)
+    data={'metadata':json.dumps(m),'artifact':(package(), 'skill.zip')}
+    return c.post(f'/api/tools/{tid}/versions' if tid else '/api/tools',data=data,headers=h)
+
+def item(c):return c.get('/api/bootstrap').json['items'][0]
+
+def test_publish_persistence_download_dedup_and_modal_like(app):
+    c,h=ready(app);r=publish(c,h);assert r.status_code==201,r.json
+    assert item(c)['active']==1 and item(c)['revision']==1
+    for _ in range(2):assert c.put('/api/tools/1/like',json={'liked':True},headers=h).json['count']==1
+    assert c.head('/download/1/1').status_code==200
+    assert item(c)['downloads']==0
+    for _ in range(2):
+        r=c.get('/download/1/1');assert r.status_code==200;assert zipfile.is_zipfile(io.BytesIO(r.data));r.close()
+    assert item(c)['downloads']==1
+    assert c.put('/api/tools/1/like',json={'liked':False},headers=h).json['count']==0
+    second=create_app({**app.config,'TESTING':True});c2,_=ready(second)
+    assert item(c2)['workTags']==['주간 보고','실적 정리']
+    assert item(c2)['downloads']==1
+
+def test_revision_rollback_protected_delete_and_monotonic_release(app):
+    c,h=ready(app);publish(c,h)
+    assert publish(c,h,1,1,guide='v2 설치 방법').status_code==201
+    assert publish(c,h,1,1).status_code==409
+    assert len(list((Path(app.config['DATA_DIR'])/'artifacts').iterdir()))==2
+    assert c.delete('/api/tools/1/versions/1',headers=h).status_code==409
+    assert c.delete('/api/tools/1/versions/2',headers=h).status_code==409
+    assert c.post('/api/tools/1/rollback',json={'version':1,'expectedRevision':2},headers=h).status_code==200
+    m=c.get('/api/tools/1/manifest').json
+    assert item(c)['guide']=='ZIP을 풀고 SKILL.md를 확인하세요.'
+    assert (m['release'],m['revision'],m['updatePaused'],m['managedInstall'])==(1,3,True,False)
+    assert c.get('/download/1/2').status_code==404
+    assert c.delete('/api/tools/1/versions/2',headers=h).status_code==200
+    assert publish(c,h,1,3).json['version']==3
+    assert len(list((Path(app.config['DATA_DIR'])/'artifacts').iterdir()))==2
+
+def test_permissions_approval_hidden_and_csrf(app):
+    owner,h=ready(app);publish(owner,h,approval=True)
+    member,mh=ready(app,'2000002',False)
+    assert item(member)['guide']==''
+    assert member.get('/download/1/1').status_code==403
+    assert member.get('/api/tools/1/manifest').status_code==403
+    assert member.patch('/api/tools/1',json={'name':'hijack'},headers=mh).status_code==403
+    assert member.put('/api/tools/1/like',json={'liked':True}).status_code==403
+    assert member.post('/api/tools/1/requests',json={'reason':'주간 보고'},headers=mh).status_code==200
+    owner,h=ready(app);rid=owner.get('/api/bootstrap').json['requests'][0]['id']
+    assert owner.post(f'/api/requests/{rid}/decision',json={'status':'승인'},headers=h).status_code==200
+    member,mh=ready(app,'2000002',False)
+    response=member.get('/download/1/1');assert response.status_code==200;response.close()
+    owner,h=ready(app)
+    assert owner.patch('/api/tools/1',json={'hidden':True,'expectedRevision':1},headers=h).status_code==200
+    member,mh=ready(app,'2000002',False)
+    assert not member.get('/api/bootstrap').json['items']
+    assert member.get('/download/1/1').status_code==404
+    assert member.post('/api/organizations',json={'name':'X','owner':'Y'},headers=mh).status_code==403
+
+def test_invalid_artifact_and_url_and_quota(app):
+    c,h=ready(app)
+    m=dict(name='x',desc='x',owner='x',org='공통',platform='Claude',type='Skill',category='공통 업무',visibility='전체 공개',guide='x',mode='file')
+    r=c.post('/api/tools',data={'metadata':json.dumps(m),'artifact':(package('../outside'),'evil.zip')},headers=h)
+    assert r.status_code==400 and not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+    assert publish(c,h,mode='url',url='javascript:alert(1)').status_code==400
+    assert publish(c,h,mode='url',url='https://user:password@example.com').status_code==400
+    app.config['STORAGE_QUOTA']=1
+    assert publish(c,h).status_code==409
+    assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+
+def test_retention_preview_rechecks_and_keeps_history(app):
+    c,h=ready(app)
+    for n in range(5):assert publish(c,h,1 if n else None,n if n else None).status_code==201
+    with app.app_context():db().execute('UPDATE versions SET created=?',(time.time()-200*86400,));db().commit()
+    rows=c.get('/api/storage/candidates').json['candidates'];assert {v['version'] for v in rows}=={1,2}
+    # A stale preview cannot delete a version newly protected by a rollback.
+    c.post('/api/tools/1/rollback',json={'version':1,'expectedRevision':5},headers=h)
+    assert c.post('/api/storage/cleanup',json={'candidates':rows},headers=h).status_code==409
+    rows=c.get('/api/storage/candidates').json['candidates'];assert {v['version'] for v in rows}=={2}
+    assert c.post('/api/storage/cleanup',json={'candidates':rows},headers=h).status_code==200
+    assert len(item(c)['versions'])==5
+    assert next(v for v in item(c)['versions'] if v['n']==2)['deleted']
+
+def test_comments_ideas_org_and_rank_weights(app):
+    c,h=ready(app);publish(c,h)
+    assert c.post('/api/tools/1/comments',json={'kind':'개선 의견','text':'<script>text</script>'},headers=h).status_code==201
+    assert item(c)['comments'][0]['text']=='<script>text</script>'
+    assert c.post('/api/ideas',json={'name':'새 도구','desc':'비교 기능','category':'기술'},headers=h).status_code==201
+    assert c.get('/api/ideas').json['ideas'][0]['name']=='새 도구'
+    assert c.post('/api/organizations',json={'name':'새 조직','owner':'담당'},headers=h).status_code==200
+    c.put('/api/tools/1/like',json={'liked':True},headers=h)
+    cutoff=int(time.time()//300)*300
+    with app.app_context():db().execute('UPDATE likes SET created=?',(cutoff-100,));db().commit()
+    assert item(c)['rankScore']==12
+
+def test_local_login_and_mock_remote_rejection(app):
+    c,_=ready(app);assert c.get('/api/bootstrap',environ_base={'REMOTE_ADDR':'10.1.1.1'}).status_code==403
+    app.config['AUTH_MODE']='local'
+    with app.app_context():db().execute('UPDATE users SET password=? WHERE id=?',(generate_password_hash('long-test-password'),'1000001'));db().commit()
+    c=app.test_client();assert c.get('/api/bootstrap').status_code==401
+    assert c.get('/login').status_code==200
+    with c.session_transaction() as s:csrf=s['csrf']
+    assert c.post('/login',data={'user_id':'1000001','password':'long-test-password','csrf':csrf}).status_code==302
+    assert c.get('/api/bootstrap').json['user']['id']=='1000001'
+
+def test_sso_valid_cookie_mapping_and_fail_closed(app):
+    class SSO:
+        redirect_url='https://sso.example.internal/login'
+        def __init__(self,request):pass
+        def check_day_cookie(self,cookie):return 'HCP=valid' in cookie
+        def get_sso_info(self,cookie):return '1234567','홍길동','Hong','기술팀','h@example.internal','D1'
+    app.config.update(AUTH_MODE='sso',SSO_FACTORY=SSO,ADMIN_IDS='1234567')
+    c=app.test_client();assert c.get('/api/bootstrap').status_code==401
+    assert c.get('/login').location=='https://sso.example.internal/login'
+    c.set_cookie('HCP','valid');b=c.get('/api/bootstrap').json
+    assert b['user']=={'id':'1234567','name':'홍길동','org':'기술팀','role':'admin'}
+    app.config['SSO_FACTORY']=lambda request: (_ for _ in ()).throw(RuntimeError('unavailable'))
+    assert c.get('/api/bootstrap').status_code==503
+
+def test_static_delivery_and_no_demo_seed(app):
+    c,h=ready(app)
+    html=c.get('/').get_data(as_text=True)
+    assert 'P&amp;T AI SQUARE' in html and 'sq-rank-list' in html
+    assert c.get('/static/app.js').status_code==200
+    assert c.get('/static/guides/PT_AI_SQUARE_파일배포_Skill.zip').status_code==200
+    assert c.get('/api/bootstrap').json['items']==[]
+
+def test_concurrent_publications_use_one_revision(app):
+    from concurrent.futures import ThreadPoolExecutor
+    c,h=ready(app);publish(c,h)
+    c1,h1=ready(app);c2,h2=ready(app)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs=[pool.submit(publish,client,headers,1,1) for client,headers in [(c1,h1),(c2,h2)]]
+        assert sorted(job.result().status_code for job in jobs)==[201,409]
+    assert item(c)['active']==2
+    assert len(list((Path(app.config['DATA_DIR'])/'artifacts').iterdir()))==2
+
+def test_chatgpt_file_support_and_organization_visibility(app):
+    c,h=ready(app);assert publish(c,h,platform='ChatGPT',visibility='선택 조직',audience=['제조팀']).status_code==201
+    assert item(c)['support']=='파일 활용 안내'
+    member,mh=ready(app,'2000002',False)
+    assert member.get('/api/bootstrap').json['items']==[]
+    with app.app_context():db().execute("UPDATE users SET org='제조팀' WHERE id='2000002'");db().commit()
+    assert len(member.get('/api/bootstrap').json['items'])==1

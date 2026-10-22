@@ -149,5 +149,21 @@
         "교육"
       ]
     }
-  ]
+  ],
+  "storage": {
+    "used": 2147483648,
+    "quota": 5368709120,
+    "configuredQuota": 5368709120,
+    "available": 3221225472,
+    "reserve": 10737418240,
+    "mode": "manual",
+    "limitRevision": 0,
+    "source": "dummy",
+    "diskKnown": true,
+    "diskTotal": 536870912000,
+    "diskUsed": 322122547200,
+    "diskFree": 214748364800,
+    "overLimit": false,
+    "pending": 0
+  }
 }

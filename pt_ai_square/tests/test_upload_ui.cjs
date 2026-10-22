@@ -7,7 +7,7 @@ const context={runtime:{draft:{file:null}},work:{ideaFiles:[]},
  $:()=>area,esc:s=>String(s).replace(/</g,'&lt;').replace(/"/g,'&quot;'),icon:()=>'<svg></svg>',
  captureDraft:()=>{},wizard:()=>renders++,mountIcons:()=>{},showError:e=>errors.push(e.message)};
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend_upload.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/frontend_upload.js'),'utf8'),context);
 const file={name:'report.zip',size:2048};
 context.selectFiles('artifact',[file]);assert.equal(context.runtime.draft.file,file);assert.equal(renders,1);
 assert.throws(()=>context.selectFiles('artifact',[{name:'bad.txt',size:12}]));assert.equal(context.runtime.draft.file,file);

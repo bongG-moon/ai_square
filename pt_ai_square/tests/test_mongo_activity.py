@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import time
-from pt_ai_square.storage import db
-from pt_ai_square import activity
+from pt_ai_square.backend.storage import db
+from pt_ai_square.backend import activity
 from .conftest import ready, publish
 
 def test_concurrent_like_idempotence_and_history(app):
@@ -14,7 +14,7 @@ def test_concurrent_like_idempotence_and_history(app):
     member,mh=ready(app,'member');member.put('/api/tools/1/like',json={'liked':False},headers=mh)
     assert c.get('/api/bootstrap').json['items'][0]['likes']==0
 
-def test_download_daily_unique_and_repeated_events(app):
+def test_download_lifetime_unique_and_repeated_events(app):
     c,h=ready(app);publish(c,h)
     member,mh=ready(app,'member')
     assert member.head('/download/1/1').status_code==200
@@ -43,7 +43,7 @@ def test_seven_day_scores_and_same_timestamp_cursor(app):
 
 
 def test_like_toggle_does_not_refresh_ranking_date(app,monkeypatch):
-    from pt_ai_square import mongo_activity
+    from pt_ai_square.backend import mongo_activity
     c,h=ready(app);publish(c,h)
     clock=[1_800_000_000.0]
     monkeypatch.setattr(mongo_activity.time,'time',lambda:clock[0])
@@ -63,7 +63,7 @@ def test_like_toggle_does_not_refresh_ranking_date(app,monkeypatch):
 
 
 def test_download_windows_and_formula(app,monkeypatch):
-    from pt_ai_square import mongo_activity
+    from pt_ai_square.backend import mongo_activity
     c,h=ready(app);publish(c,h)
     clock=[1_800_000_000.0]
     monkeypatch.setattr(mongo_activity.time,'time',lambda:clock[0])
@@ -75,6 +75,6 @@ def test_download_windows_and_formula(app,monkeypatch):
         activity.record_download(1,'other',1)
         activity.set_like(1,'member',True)
         stats=activity.statistics([1],'member',clock[0])[1]
-        assert (stats['recentDownloads'],stats['downloads'])==(2,3)
-        assert (stats['rankScore'],stats['totalRankScore'])==(4,5)
+        assert (stats['recentDownloads'],stats['downloads'])==(1,2)
+        assert (stats['rankScore'],stats['totalRankScore'])==(3,4)
         assert activity.statistics([99],'member',clock[0])[99]['totalRankScore']==0

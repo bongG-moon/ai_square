@@ -8,7 +8,7 @@ from urllib.request import Request,build_opener,HTTPCookieProcessor
 from pathlib import Path
 import pytest
 from pt_ai_square import create_app
-from pt_ai_square.storage import db
+from pt_ai_square.backend.storage import db
 from .conftest import ready,publish
 
 @pytest.mark.parametrize('mode',['mock','sso'])

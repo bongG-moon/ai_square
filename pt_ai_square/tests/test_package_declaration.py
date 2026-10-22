@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 import pytest
-from pt_ai_square.storage import db
+from pt_ai_square.backend.storage import db
 from .conftest import ready
 
 BASE=Path(__file__).resolve().parents[1]
@@ -70,7 +70,7 @@ def test_inspect_publish_original_bytes_versions_and_rollback(app):
 
 
 @pytest.mark.parametrize('case',['missing','path','nested','schema','duplicate','unknown','wrong-kind','empty-guide'])
-def test_invalid_declaration_rejected_without_residual_files(app,case):
+def test_invalid_declaration_warns_but_manual_publish_succeeds(app,case):
     c,h=ready(app);raw=declaration()
     if case=='path':raw['entryPoint']='../private.py'
     if case=='schema':raw['schemaVersion']=2
@@ -88,11 +88,14 @@ def test_invalid_declaration_rejected_without_residual_files(app,case):
                 z.writestr('ai-square.json',json.dumps(raw));z.writestr('EMPTY.md','')
                 z.writestr('main.py','x');z.writestr('requirements.txt','x')
         blob=b.getvalue()
-    for url in ['/api/packages/inspect','/api/tools']:
-        result=post(c,h,blob,url)
-        assert result.status_code==400,(case,result.json)
-        assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
-    with app.app_context():assert db().tools.count_documents({})==0
+    result=post(c,h,blob,'/api/packages/inspect')
+    assert result.status_code==200 and not result.json['recognized'],(case,result.json)
+    assert result.json['warning']
+    assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+    result=post(c,h,blob,name='직접 작성',desc='수동 등록',platform='Claude',type='Skill',guide='수동 설치 안내')
+    assert result.status_code==201 and result.json['packageWarning'],(case,result.json)
+    assert c.get(f'/download/{result.json["id"]}/1').data==blob
+    with app.app_context():assert db().tools.count_documents({})==1
 
 
 def test_declaration_cannot_grant_access_or_skip_actual_validation(app):
@@ -105,17 +108,19 @@ def test_declaration_cannot_grant_access_or_skip_actual_validation(app):
     card=next(x for x in member.get('/api/bootstrap').json['items'] if x['id']==tid)
     assert card['versions']==[] and 'package' not in card
     assert member.get(f'/api/tools/{tid}/manifest').status_code==403
-    forged=declaration();forged['entryPoint']='absent.py'
-    assert post(c,h,bundle(forged),f'/api/tools/{tid}/versions',expectedRevision=1,packageInspection={'recognized':True}).status_code==400
     different=declaration();different['packageId']='different-tool'
     assert post(c,h,bundle(different),f'/api/tools/{tid}/versions',expectedRevision=1).status_code==400
     assert post(c,h,blob,f'/api/tools/{tid}/versions',expectedRevision=1,type='Skill').status_code==400
     no_manifest=io.BytesIO()
     with zipfile.ZipFile(no_manifest,'w') as z:z.writestr('README.md','# legacy')
-    assert post(c,h,no_manifest.getvalue(),f'/api/tools/{tid}/versions',expectedRevision=1).status_code==400
     assert len(list((Path(app.config['DATA_DIR'])/'artifacts').iterdir()))==1
     assert c.get(r.json['deploymentUrl']).json['release']==1
     assert c.patch(f'/api/tools/{tid}',headers=h,json={'type':'Skill','expectedRevision':1}).status_code==400
+    forged=declaration();forged['entryPoint']='absent.py'
+    updated=post(c,h,bundle(forged),f'/api/tools/{tid}/versions',expectedRevision=1,packageInspection={'recognized':True},name='수동 업데이트',desc='설명',platform='Claude',type='MCP/Tool',guide='수동 안내')
+    assert updated.status_code==201 and not updated.json['packageRecognized']
+    assert updated.json['packageWarning']
+    assert post(c,h,no_manifest.getvalue(),f'/api/tools/{tid}/versions',expectedRevision=2,name='수동 업데이트',desc='설명',platform='Claude',type='MCP/Tool',guide='수동 안내').status_code==201
 
 
 def test_legacy_inspection_remains_supported(app):
@@ -128,7 +133,7 @@ def test_legacy_inspection_remains_supported(app):
 
 def test_downloadable_skill_builds_accepted_package(app,tmp_path):
     skill=BASE/'static/guides/pt-file-distribution'
-    assert (skill/'scripts/package_contract.py').read_bytes()==(BASE/'package_contract.py').read_bytes()
+    assert (skill/'scripts/package_contract.py').read_bytes()==(BASE/'backend/package_contract.py').read_bytes()
     source=tmp_path/'prepared';source.mkdir()
     with zipfile.ZipFile(io.BytesIO(bundle())) as z:z.extractall(source)
     output=tmp_path/'release.zip'

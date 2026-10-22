@@ -1,0 +1,153 @@
+import os
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+import pytest
+from pymongo import MongoClient
+from werkzeug.exceptions import ServiceUnavailable
+from pt_ai_square import create_app, activity
+from pt_ai_square.storage import db
+from test_web import ready, publish
+
+@pytest.fixture(params=['sqlite','mongodb'])
+def activity_app(request,tmp_path):
+    backend=request.param
+    uri=os.environ.get('PTAI_TEST_MONGODB_URI')
+    if backend=='mongodb' and not uri: pytest.skip('Set PTAI_TEST_MONGODB_URI for real MongoDB integration tests')
+    app=create_app(dict(DATA_DIR=str(tmp_path),AUTH_MODE='mock',MOCK_ADMIN=True,TESTING=True,
+        SESSION_COOKIE_SECURE=False,ACTIVITY_BACKEND=backend,MONGODB_URI=uri or '',
+        MONGODB_DATABASE='ptai_test_'+uuid.uuid4().hex))
+    yield app
+    if backend=='mongodb':
+        client=app.extensions['activity_mongo']
+        client.drop_database(app.config['MONGODB_DATABASE']);client.close()
+
+def test_fresh_ranking_events_and_access(activity_app):
+    app=activity_app;c,h=ready(app);publish(c,h)
+    b=c.get('/api/bootstrap').json
+    assert abs(time.time()-b['rankAsOf'])<3  # no five-minute boundary
+    for _ in range(2): assert c.put('/api/tools/1/like',json={'liked':True},headers=h).status_code==200
+    b=c.get('/api/bootstrap').json['items'][0]
+    assert (b['likes'],b['rankScore'])==(1,12)
+    c.head('/download/1/1')
+    for _ in range(2):
+        r=c.get('/download/1/1');assert r.status_code==200;r.close()
+    b=c.get('/api/bootstrap').json['items'][0]
+    assert (b['downloads'],b['rankScore'])==(1,16)
+    c.put('/api/tools/1/like',json={'liked':False},headers=h)
+    b=c.get('/api/bootstrap').json['items'][0]
+    assert (b['likes'],b['rankScore'],b['liked'])==(0,4,False)
+    events=c.get('/api/activity').json['events']
+    assert [e['kind'] for e in events]==['unlike','download','download','like']
+    assert sorted(e['counted'] for e in events if e['kind']=='download')==[0,1]
+    assert c.get('/api/activity?before=not-a-number').status_code==400
+    member,_=ready(app,'member',False)
+    assert member.get('/api/activity').status_code==403
+
+def test_concurrent_dedup_and_history(activity_app):
+    app=activity_app;c,h=ready(app);publish(c,h)
+    def record(_):
+        with app.app_context():
+            activity.set_like(1,'same-user',True)
+            activity.record_download(1,'same-user',1)
+    with ThreadPoolExecutor(max_workers=5) as pool: list(pool.map(record,range(10)))
+    with app.app_context():
+        activity.flush();s=activity.statistics([1],'same-user',time.time())[1]
+        assert (s['likes'],s['downloads'],s['rankScore'])==(1,1,16)
+        events,_=activity.history()
+        assert len(events)==11
+        assert sum(e['counted'] for e in events if e['kind']=='download')==1
+
+def test_time_weights_and_cursor(activity_app):
+    app=activity_app;c,h=ready(app);publish(c,h)
+    now=time.time()
+    with app.app_context():
+        for i,age in enumerate([10,7200,30000,90000]):
+            db().execute('INSERT INTO likes VALUES (?,?,?)',(1,str(i),now-age))
+            activity.emit(1,str(i),'like',now-age)
+        db().commit();activity.flush()
+        s=activity.statistics([1],'0',now)[1]
+        assert s['likes']==4 and s['rankScore']==21
+        first,cursor=activity.history(limit=2);second,_=activity.history(cursor,limit=2)
+        assert len(first+second)==4
+        assert len({r['seq'] for r in first+second})==4
+
+def test_mongo_outage_queue_recovery_and_destination_guard(activity_app):
+    app=activity_app
+    if app.config['ACTIVITY_BACKEND']!='mongodb': pytest.skip('MongoDB-specific recovery')
+    c,h=ready(app);publish(c,h)
+    col=app.extensions['activity_collection']
+    offline=MongoClient('mongodb://127.0.0.1:1',serverSelectionTimeoutMS=100)
+    app.extensions['activity_collection']=offline['offline']['events']
+    r=c.put('/api/tools/1/like',json={'liked':True},headers=h)
+    assert r.status_code==202 and r.json['pending']
+    assert c.get('/api/bootstrap').status_code==503
+    app.extensions['activity_collection']=col
+    assert c.get('/api/bootstrap').json['items'][0]['rankScore']==12
+    with app.app_context():
+        assert db().execute('SELECT COUNT(*) FROM activity_queue').fetchone()[0]==0
+        # Acknowledged rows cannot be re-created from the old SQL totals in a new DB.
+        # A different database lacks the catalog binding and must be rejected.
+        app.extensions['activity_collection']=col.database.client['ptai_empty_'+uuid.uuid4().hex]['events']
+        with pytest.raises(ServiceUnavailable): activity.flush()
+        app.extensions['activity_collection']=col
+    offline.close()
+
+def test_restart_and_archive_retry(activity_app):
+    app=activity_app;c,h=ready(app);publish(c,h)
+    with app.app_context():
+        activity.set_like(1,'user',True)
+        queued=dict(db().execute('SELECT * FROM activity_queue ORDER BY id DESC LIMIT 1').fetchone())
+        activity.flush()
+        if activity.is_mongo():
+            # Crash after Mongo acknowledgement but before local queue deletion.
+            db().execute('INSERT INTO activity_queue VALUES (?,?,?,?,?,?,?,?)',tuple(queued.values()))
+            db().commit();activity.flush()
+        stats=activity.statistics([1],'user',time.time())
+    second=create_app(dict(app.config))
+    with second.app_context():
+        activity.flush();new=activity.statistics([1],'user',time.time())
+        assert new==stats
+        rows,_=activity.history();assert len(rows)==1
+    if 'activity_mongo' in second.extensions: second.extensions['activity_mongo'].close()
+
+def test_existing_totals_import_once(activity_app):
+    app=activity_app;c,h=ready(app);publish(c,h)
+    now=time.time()-60
+    with app.app_context():
+        db().execute("DELETE FROM settings WHERE key='activity_backfilled'")
+        db().execute('INSERT INTO likes VALUES (?,?,?)',(1,'legacy',now))
+        db().execute('INSERT INTO downloads VALUES (?,?,?,?)',(1,'legacy',int((now+32400)//86400),now))
+        db().commit()
+    migrated=create_app(dict(app.config))
+    with migrated.app_context():
+        activity.flush();assert activity.statistics([1],'legacy',time.time())[1]['rankScore']==16
+        rows,_=activity.history();assert len(rows)==2 and all(r['imported'] for r in rows)
+        activity.flush();assert len(activity.history()[0])==2
+    if 'activity_mongo' in migrated.extensions: migrated.extensions['activity_mongo'].close()
+
+def test_parallel_delivery_is_idempotent(activity_app):
+    app=activity_app
+    if app.config['ACTIVITY_BACKEND']!='mongodb': pytest.skip('MongoDB-specific delivery')
+    c,h=ready(app);publish(c,h)
+    with app.app_context():
+        for i in range(15): activity.set_like(1,f'user{i}',True)
+    def deliver(_):
+        with app.app_context(): activity.flush()
+    with ThreadPoolExecutor(max_workers=4) as pool: list(pool.map(deliver,range(4)))
+    with app.app_context():
+        assert len(activity.history()[0])==15
+        assert activity.statistics([1],'user1',time.time())[1]['likes']==15
+
+def test_native_python_settings_without_dotenv(monkeypatch,tmp_path):
+    from pt_ai_square import config
+    monkeypatch.setattr(config,'BASE',tmp_path)
+    for name in ['PTAI_AUTH_MODE','PTAI_MOCK_ADMIN','MONGODB_URI','MONGODB_DATABASE','PTAI_ACTIVITY_BACKEND']:
+        monkeypatch.delenv(name,raising=False)
+    (tmp_path/'runtime_config.py').write_text("SETTINGS={'PTAI_AUTH_MODE':'local'}\nPTAI_AUTH_MODE='mock'\nPTAI_MOCK_ADMIN=True\nMONGODB_URI='mongodb://localhost:27018/'\nMONGODB_DATABASE='file_database'\nPTAI_ACTIVITY_BACKEND='mongodb'\n",encoding='utf-8')
+    (tmp_path/'.env').write_text('MONGODB_DATABASE=must_not_be_loaded',encoding='utf-8')
+    s=config.settings()
+    assert s['AUTH_MODE']=='mock' and s['MOCK_ADMIN'] is True
+    assert s['MONGODB_DATABASE']=='file_database' and s['ACTIVITY_BACKEND']=='mongodb'
+    monkeypatch.setenv('MONGODB_DATABASE','process_database')
+    assert config.settings()['MONGODB_DATABASE']=='process_database'

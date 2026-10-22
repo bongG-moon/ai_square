@@ -18,6 +18,7 @@ def deployment(tmp_path,app):
     for path in source.glob('*.py'):
         if path.name!='runtime_config.py':shutil.copy2(path,package/path.name)
     shutil.copytree(source/'templates',package/'templates')
+    shutil.copytree(source/'backend',package/'backend',ignore=shutil.ignore_patterns('__pycache__'))
     (package/'static').mkdir()
     (package/'static'/'probe.txt').write_text('standalone asset',encoding='utf-8')
     env={k:v for k,v in os.environ.items() if not k.startswith(('PTAI_','MONGODB_')) and k!='PYTHONPATH'}
