@@ -39,6 +39,8 @@ pt_ai_square/
 | 좋아요·다운로드 집계 | backend/mongo_activity.py |
 | 파일 검사·저장 / 배포 정보 검사 | backend/artifacts.py / backend/package_contract.py |
 | 개인 API 인증키·로컬 다운로드 | backend/local_access.py |
+| 내 프로필 사진·개발자 POWER USER 집계 | backend/people.py |
+| 상단 프로필·KEY 바로가기·개발자 순위·동작 FLOW | frontend/frontend_people.js / static/people.css |
 | 파일 용량 관리 | backend/storage_capacity.py |
 | 등록 관리·관리자 화면 | frontend/frontend_workspace.js |
 | 파일 선택·업로드 화면 | frontend/frontend_upload.js |

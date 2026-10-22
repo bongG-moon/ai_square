@@ -80,10 +80,22 @@ def ensure_user(uid, name, org='공통', org_code=None):
         except DuplicateKeyError: pass
         tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if org_code: db().taxonomy.update_one({'_id': tax['_id']}, {'$set': {'ssoCode': org_code}})
-    values = {'name': name, 'orgId': tax['_id']}
+    # The employee number remains the primary key: existing tool ownership,
+    # grants and connection-key pointers must survive an SSO profile refresh.
+    # Keep the four company SSO fields explicitly as well as the existing UI
+    # aliases. Department display names may change while the SSO code stays.
+    values = {'name': name, 'orgId': tax['_id'], 'emp_no': uid,
+              'emp_name': name, 'dept': org, 'dept_cd': str(org_code or '')}
     db().users.update_one({'_id': uid}, {'$set': values, '$setOnInsert': {'enabled': True, 'created': time.time()}}, upsert=True)
 
 def public_user(row):
     org = db().taxonomy.find_one({'_id': row.get('orgId')})
     uid = row['_id']
-    return {'id': uid, 'name': row['name'], 'org': org['name'] if org else '공통', 'orgId': row.get('orgId'), 'role': 'admin' if uid in all_admin_ids() else 'member', 'baseAdmin': uid in admin_ids(), 'enabled': row.get('enabled', True)}
+    department = row.get('dept') or (org['name'] if org else '공통')
+    # Preserve the administrator-managed catalog organization alias while
+    # exposing the exact SSO department separately for the personal profile.
+    return {'id': uid, 'name': row['name'], 'org': org['name'] if org else department, 'orgId': row.get('orgId'),
+            'emp_no': uid, 'emp_name': row.get('emp_name', row['name']),
+            'dept': department, 'dept_cd': row.get('dept_cd', (org or {}).get('ssoCode', '')),
+            'photoUrl': '/api/me/photo',
+            'role': 'admin' if uid in all_admin_ids() else 'member', 'baseAdmin': uid in admin_ids(), 'enabled': row.get('enabled', True)}

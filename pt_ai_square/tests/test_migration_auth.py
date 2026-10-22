@@ -34,6 +34,8 @@ def test_sso_mapping_and_fail_closed(app):
     org_id=first.json['user']['orgId']
     with app.app_context():db().taxonomy.update_one({'_id':org_id},{'$set':{'name':'장비기술팀'}})
     second=c.get('/api/bootstrap');assert second.json['user']['org']=='장비기술팀'
+    assert second.json['user']['dept']=='장비팀'
+    assert second.json['user']['dept_cd']=='D100'
     class Broken(SSO):
         def get_sso_info(self,cookie):raise RuntimeError('failure')
     app.config['SSO_FACTORY']=Broken

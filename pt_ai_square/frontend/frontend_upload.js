@@ -9,7 +9,7 @@ function selectFiles(kind,files){
  if(kind==='artifact'){
   if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
   if(!/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
-  captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;wizard();
+  captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();
   if(typeof inspectSelectedPackage==='function')inspectSelectedPackage(files[0]);
  }else{
   const combined=[...(work.ideaFiles||[]),...files];
@@ -21,7 +21,7 @@ function refreshAttachments(){const area=$('[data-upload="attachments"]');if(are
 root.addEventListener('click',e=>{
  const pick=e.target.closest('[data-file-pick]');if(pick){e.preventDefault();pick.closest('[data-upload]').querySelector('input[type=file]').click();return;}
  const remove=e.target.closest('[data-file-remove]');if(!remove)return;e.preventDefault();
- if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;runtime.draft.packageInspection=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
+ if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
 });
 // Capture before the legacy file input handler so validation and drops share one path.
 root.addEventListener('change',e=>{const input=e.target;if(input.type!=='file'||!input.closest('[data-upload]'))return;e.stopImmediatePropagation();try{selectFiles(input.name,[...input.files]);}catch(error){input.value='';showError(error);}},true);

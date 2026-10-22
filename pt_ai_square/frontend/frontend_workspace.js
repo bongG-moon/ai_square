@@ -4,6 +4,7 @@ const dated=t=>new Date(t*1000).toLocaleString('ko-KR',{month:'short',day:'numer
 const badge=s=>`<span class="ws-badge" data-status="${esc(s)}">${esc(s)}</span>`;
 const blank=(i,title,body)=>`<div class="ws-empty">${icon(i)}<h3>${esc(title)}</h3><p>${esc(body)}</p></div>`;
 const originalRender=render, originalModal=openModal, originalDetail=detail, originalManage=manage;
+const originalCloseModal=closeModal,originalNavigate=navigate;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
 const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
@@ -22,7 +23,16 @@ render=function(){
  }
  enhanceSelects();
 };
-openModal=function(title,kicker,html){originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+// A late detail response must not replace a newer dialog or reopen one the user dismissed.
+function invalidateDetailLoad(){return runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;}
+openModal=function(title,kicker,html){invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+closeModal=function(){invalidateDetailLoad();return originalCloseModal();};
+navigate=function(route,sort){invalidateDetailLoad();return originalNavigate(route,sort);};
+// This action captured the original function before the workspace extension loaded.
+actions['close-dialog']=closeModal;
+// Escape's cancel event is synchronous. A queued close event could otherwise cancel
+// a newly requested detail after a deliberate close-and-open sequence.
+$('#sq-dialog').addEventListener('cancel',invalidateDetailLoad);
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -95,18 +105,24 @@ function renderWorkspace(){
 function taxonomyPanel(){return `<div class="ws-panel-head"><div><h2>조직과 업무 분류</h2><p>저장하면 검색 필터와 등록·수정 화면에 바로 반영됩니다.</p></div></div><div class="ws-taxonomy">${[['organization','조직',organizations],['category','업무',server.categories||[]]].map(([kind,label,rows])=>`<section><div class="ws-panel-head"><h3>${label}</h3>${button('taxonomy-edit',icon('plus')+' 추가','sq-link',`data-kind="${kind}"`)}</div>${rows.map(x=>`<div class="ws-row"><span class="ws-order">${x.order}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${x.enabled?'선택 가능':'사용 중지 · 기존 기록 유지'}</p></div>${button('taxonomy-edit',icon('pencil'),'sq-icon',`data-kind="${kind}" data-id="${esc(x.id)}" aria-label="${esc(x.name)} 수정"`)}</div>`).join('')}</section>`).join('')}</div>`;}
 
 detail=async function(id,tab='intro'){
- const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;
- if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return;}
+ const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=invalidateDetailLoad();
+ if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return false;}
  // Revalidate on every open; no stale dialog bypass after access revocation.
- try{const fresh=await requestAPI(`/api/tools/${x.id}`);if(token!==runtime.detailLoadToken)return;Object.assign(x,fresh,{likes:fresh.likes-(fresh.liked?1:0)});}
- catch(error){if(error.status!==403)throw error;await refresh();if(token===runtime.detailLoadToken)lockedDetail(getItem(id));return;}
+ try{const fresh=await requestAPI(`/api/tools/${x.id}`);if(token!==runtime.detailLoadToken)return false;Object.assign(x,fresh,{likes:fresh.likes-(fresh.liked?1:0)});}
+ catch(error){
+  if(token!==runtime.detailLoadToken)return false;
+  if(error.status!==403)throw error;
+  try{await refresh();}catch(refreshError){if(token!==runtime.detailLoadToken)return false;throw refreshError;}
+  if(token!==runtime.detailLoadToken)return false;
+  const current=getItem(id);if(current)lockedDetail(current);return false;
+ }
  originalDetail(id,tab);
  deploymentLinks(x,tab);
  $('.sq-detail-top .sq-row-actions')?.insertAdjacentHTML('afterbegin',button('subscribe',icon(x.subscribed?'bell-ring':'bell')+(x.subscribed?'업데이트 알림 켜짐':'업데이트 알림 받기'),'sq-secondary',`data-id="${x.id}" aria-pressed="${x.subscribed}"`));
  if(tab==='comments'){
   const tabs=$('#sq-dialog-body .sq-tabs');while(tabs.nextElementSibling)tabs.nextElementSibling.remove();
   tabs.insertAdjacentHTML('afterend',`<div class="ws-feedback-list">${x.comments.map(c=>`<article class="ws-feedback"><div class="ws-feedback-head"><div><strong>${esc(c.author)}</strong><small>${dated(c.created)} · ${esc(c.kind)}</small></div>${badge(c.status)}</div><p>${esc(c.text)}</p>${c.replies.map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)} · ${esc(r.status||'답변')}</small><p>${esc(r.text||'처리 상태를 변경했습니다.')}</p></div>`).join('')}${x.canManage||c.user===server.user.id?button('feedback-reply','답변·상태 변경','sq-link',`data-id="${c.id}"`):''}</article>`).join('')||blank('message-circle','첫 번째 의견을 남겨주세요.','사용 경험이나 개선할 점을 나눠주세요.')}</div><form id="sq-comment-form" class="ws-compose"><label class="sq-field"><span>피드백 종류</span><select name="kind">${options(['개선 의견','사용 후기','오류 제보','아이디어 제안'],'개선 의견')}</select></label><label class="sq-field"><span>의견</span><textarea name="comment" required maxlength="4000" placeholder="사용해 보니 어떤 점이 좋았나요? 개선이 필요한 부분도 알려주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">피드백 등록</button></div></form>`);
- }mountIcons();enhanceSelects();
+ }mountIcons();enhanceSelects();return true;
 };
 function lockedDetail(x){runtime.detailId=x.id;openModal('조회 권한이 필요합니다.',x.name,`<div class="ws-lock"><span class="ws-lock-icon">${icon('lock-keyhole')}</span><h3>${x.access==='pending'?'신청을 검토하고 있습니다.':'승인 후 상세 내용을 볼 수 있어요.'}</h3><p>목록은 누구나 볼 수 있지만, 상세 내용과 배포 파일은<br>등록자 또는 관리자의 승인 후 이용할 수 있습니다.</p>${x.accessDecision?`<div class="sq-callout">${esc(x.accessDecision)}</div>`:''}<div class="sq-actions">${x.access==='pending'?badge('승인 대기'):button('request-access','조회 권한 신청','sq-primary')}</div><small>처리 결과는 내 알림에서 알려드릴게요.</small></div>`);}
 function renderIdeas(){

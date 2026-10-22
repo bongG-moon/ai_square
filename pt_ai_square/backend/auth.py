@@ -54,7 +54,7 @@ def install_auth(app):
             uid=app.config['MOCK_USER']
             if not db().users.find_one({'_id':uid}): ensure_user(uid,app.config['MOCK_NAME'])
             g.user=public_user(db().users.find_one({'_id':uid}))
-            identity=(uid,g.user['name'],'',g.user['org'],'','')
+            identity=(uid,g.user['name'],'',g.user['org'],'',g.user.get('dept_cd',''))
         elif mode=='sso':
             try:
                 # Same HCP interface as the user's reference Flask Portal.

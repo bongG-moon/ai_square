@@ -40,6 +40,19 @@ def install_dummy(app):
         if not item: raise NotFound()
         return jsonify(item)
 
+    @app.get('/api/people/ranking')
+    def dummy_people_ranking():
+        rows=copy.deepcopy(fixture.get('peopleRanking',[]))
+        for row in rows:
+            row['score']=row['registered']*5+row['likes']*2+row['downloads']
+            row['isMe']=False
+        rows.sort(key=lambda row:(-row['score'],-row['registered'],-row['likes'],-row['downloads'],row['id']))
+        for rank,row in enumerate(rows,1):row['rank']=rank
+        return jsonify(items=rows[:10],me=None,totalUsers=len(rows),period='all',asOf=now,dummy=True,
+                       weights=dict(registered=5,likes=2,downloads=1),
+                       method='등록 도구 × 5 + 받은 좋아요 × 2 + 고유 다운로드 × 1 · 전체 기간',
+                       tieBreak='동점은 등록 수, 좋아요, 다운로드, 사번 순입니다. 샘플 데이터입니다.')
+
     @app.get('/api/<path:path>')
     def dummy_reads(path):
         responses={'ideas':dict(ideas=fixture['ideas']), 'notifications':dict(notifications=[],nextCursor=None,unread=0), 'admins':dict(admins=[dict(id=user['id'],name=user['name'],base=True)] if admin else []), 'activity':dict(events=[],nextCursor=None,backend='dummy'), 'storage/candidates':dict(candidates=[]), 'storage/limits':dict(storage=bootstrap['storage'])}

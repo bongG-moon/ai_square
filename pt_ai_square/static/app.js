@@ -33,7 +33,7 @@ function rankMetrics(x){return state.rankMode==='recent'?{score:x.rankScore||0,l
 function rankItems(){return filtered(true).sort((a,b)=>{const am=rankMetrics(a),bm=rankMetrics(b);return bm.score-am.score||bm.downloads-am.downloads||bm.likes-am.likes||b.created-a.created||a.id-b.id;}).slice(0,10);}
 function tagChips(tags,limit=8,query=''){const all=Core.normalizeTags(tags),q=Core.normalizeSearch(query);return all.length?`<span class="sq-work-tags" aria-label="관련 업무">${all.slice(0,limit).map(t=>`<span class="sq-work-tag${q&&Core.normalizeSearch(t).includes(q)?' is-match':''}">${esc(t)}</span>`).join('')}${all.length>limit?`<span class="sq-work-tag">+${all.length-limit}</span>`:''}</span>`:'';}
 function workTagField(value){return `<label class="sq-field wide"><span>관련 업무 태그</span><input name="workTags" value="${esc(value)}" maxlength="300" placeholder="예: 주간 보고, 실적 정리, 보고서 작성"><small>동료가 검색할 업무명을 쉼표로 구분하세요. 최대 8개, 각 30자까지. 예: 불량 분석, 수율 검토</small></label>`;}
-function card(item,shelf=false){return `<article class="sq-tool" data-tone="${({MCP:'blue',Skill:'violet',Tool:'mint',플러그인:'peach',하네스:'rose'})[item.type]||'blue'}"><button class="sq-tool-main cursor-interaction" data-action="detail" data-id="${item.id}" aria-label="${esc(item.name)} 상세 보기"><div class="sq-tool-top"><span class="sq-tool-icon" data-type="${esc(item.type)}">${icon(item.icon)}</span><span class="sq-tool-kind">${esc(item.platform)} · <span class="sq-type-label" data-type="${esc(item.type)}">${esc(item.type)}</span></span></div><h3>${esc(item.name)}</h3><p>${esc(item.desc)}</p>${shelf?'':tagChips([...(item.workTags||[])].sort((a,b)=>Number(!!state.query&&Core.normalizeSearch(b).includes(Core.normalizeSearch(state.query)))-Number(!!state.query&&Core.normalizeSearch(a).includes(Core.normalizeSearch(state.query)))),3,state.query)}</button><div class="sq-tool-footer"><span>${esc(item.org)}</span><div class="sq-tool-metrics"><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${item.id}" aria-label="${esc(item.name)} 좋아요" aria-pressed="${state.liked.has(item.id)}">${icon('heart')}<span>${num(item.likes+(state.liked.has(item.id)?1:0))}</span></button><span class="sq-count" aria-label="다운로드 ${num(item.downloads)}건">${icon('arrow-down-to-line')}${num(item.downloads)}</span></div></div></article>`;}
+function card(item,shelf=false){return `<article class="sq-tool" data-tone="${({MCP:'blue',Skill:'violet',Tool:'mint',플러그인:'peach',하네스:'rose'})[item.type]||'blue'}"><button class="sq-tool-main cursor-interaction" data-action="detail" data-id="${item.id}" aria-label="${esc(item.name)} 상세 보기"><div class="sq-tool-top"><span class="sq-tool-icon" data-type="${esc(item.type)}">${icon(item.icon)}</span><span class="sq-tool-kind">${esc(item.platform)} · <span class="sq-type-label" data-type="${esc(item.type)}">${esc(item.type)}</span></span></div><h3>${esc(item.name)}</h3><p class="sq-tool-summary">${esc(item.desc||"등록된 설명이 없습니다.")}</p>${shelf?'':tagChips([...(item.workTags||[])].sort((a,b)=>Number(!!state.query&&Core.normalizeSearch(b).includes(Core.normalizeSearch(state.query)))-Number(!!state.query&&Core.normalizeSearch(a).includes(Core.normalizeSearch(state.query)))),3,state.query)}</button><div class="sq-tool-footer"><span>${esc(item.org)}</span><div class="sq-tool-metrics"><button class="sq-count sq-like cursor-interaction" data-action="like" data-id="${item.id}" aria-label="${esc(item.name)} 좋아요" aria-pressed="${state.liked.has(item.id)}">${icon('heart')}<span>${num(item.likes+(state.liked.has(item.id)?1:0))}</span></button><span class="sq-count" aria-label="다운로드 ${num(item.downloads)}건">${icon('arrow-down-to-line')}${num(item.downloads)}</span></div></div></article>`;}
 const toolTypes=['전체','MCP/Tool','Skill','플러그인/하네스'];
 const typeLabel=type=>({'MCP/Tool':'MCP/TOOL',Skill:'SKILL'})[type]||type;
 function renderFilterTabs(){
@@ -319,6 +319,7 @@ const dated=t=>new Date(t*1000).toLocaleString('ko-KR',{month:'short',day:'numer
 const badge=s=>`<span class="ws-badge" data-status="${esc(s)}">${esc(s)}</span>`;
 const blank=(i,title,body)=>`<div class="ws-empty">${icon(i)}<h3>${esc(title)}</h3><p>${esc(body)}</p></div>`;
 const originalRender=render, originalModal=openModal, originalDetail=detail, originalManage=manage;
+const originalCloseModal=closeModal,originalNavigate=navigate;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
 const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
@@ -337,7 +338,16 @@ render=function(){
  }
  enhanceSelects();
 };
-openModal=function(title,kicker,html){originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+// A late detail response must not replace a newer dialog or reopen one the user dismissed.
+function invalidateDetailLoad(){return runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;}
+openModal=function(title,kicker,html){invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+closeModal=function(){invalidateDetailLoad();return originalCloseModal();};
+navigate=function(route,sort){invalidateDetailLoad();return originalNavigate(route,sort);};
+// This action captured the original function before the workspace extension loaded.
+actions['close-dialog']=closeModal;
+// Escape's cancel event is synchronous. A queued close event could otherwise cancel
+// a newly requested detail after a deliberate close-and-open sequence.
+$('#sq-dialog').addEventListener('cancel',invalidateDetailLoad);
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -410,18 +420,24 @@ function renderWorkspace(){
 function taxonomyPanel(){return `<div class="ws-panel-head"><div><h2>조직과 업무 분류</h2><p>저장하면 검색 필터와 등록·수정 화면에 바로 반영됩니다.</p></div></div><div class="ws-taxonomy">${[['organization','조직',organizations],['category','업무',server.categories||[]]].map(([kind,label,rows])=>`<section><div class="ws-panel-head"><h3>${label}</h3>${button('taxonomy-edit',icon('plus')+' 추가','sq-link',`data-kind="${kind}"`)}</div>${rows.map(x=>`<div class="ws-row"><span class="ws-order">${x.order}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${x.enabled?'선택 가능':'사용 중지 · 기존 기록 유지'}</p></div>${button('taxonomy-edit',icon('pencil'),'sq-icon',`data-kind="${kind}" data-id="${esc(x.id)}" aria-label="${esc(x.name)} 수정"`)}</div>`).join('')}</section>`).join('')}</div>`;}
 
 detail=async function(id,tab='intro'){
- const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;
- if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return;}
+ const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=invalidateDetailLoad();
+ if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return false;}
  // Revalidate on every open; no stale dialog bypass after access revocation.
- try{const fresh=await requestAPI(`/api/tools/${x.id}`);if(token!==runtime.detailLoadToken)return;Object.assign(x,fresh,{likes:fresh.likes-(fresh.liked?1:0)});}
- catch(error){if(error.status!==403)throw error;await refresh();if(token===runtime.detailLoadToken)lockedDetail(getItem(id));return;}
+ try{const fresh=await requestAPI(`/api/tools/${x.id}`);if(token!==runtime.detailLoadToken)return false;Object.assign(x,fresh,{likes:fresh.likes-(fresh.liked?1:0)});}
+ catch(error){
+  if(token!==runtime.detailLoadToken)return false;
+  if(error.status!==403)throw error;
+  try{await refresh();}catch(refreshError){if(token!==runtime.detailLoadToken)return false;throw refreshError;}
+  if(token!==runtime.detailLoadToken)return false;
+  const current=getItem(id);if(current)lockedDetail(current);return false;
+ }
  originalDetail(id,tab);
  deploymentLinks(x,tab);
  $('.sq-detail-top .sq-row-actions')?.insertAdjacentHTML('afterbegin',button('subscribe',icon(x.subscribed?'bell-ring':'bell')+(x.subscribed?'업데이트 알림 켜짐':'업데이트 알림 받기'),'sq-secondary',`data-id="${x.id}" aria-pressed="${x.subscribed}"`));
  if(tab==='comments'){
   const tabs=$('#sq-dialog-body .sq-tabs');while(tabs.nextElementSibling)tabs.nextElementSibling.remove();
   tabs.insertAdjacentHTML('afterend',`<div class="ws-feedback-list">${x.comments.map(c=>`<article class="ws-feedback"><div class="ws-feedback-head"><div><strong>${esc(c.author)}</strong><small>${dated(c.created)} · ${esc(c.kind)}</small></div>${badge(c.status)}</div><p>${esc(c.text)}</p>${c.replies.map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)} · ${esc(r.status||'답변')}</small><p>${esc(r.text||'처리 상태를 변경했습니다.')}</p></div>`).join('')}${x.canManage||c.user===server.user.id?button('feedback-reply','답변·상태 변경','sq-link',`data-id="${c.id}"`):''}</article>`).join('')||blank('message-circle','첫 번째 의견을 남겨주세요.','사용 경험이나 개선할 점을 나눠주세요.')}</div><form id="sq-comment-form" class="ws-compose"><label class="sq-field"><span>피드백 종류</span><select name="kind">${options(['개선 의견','사용 후기','오류 제보','아이디어 제안'],'개선 의견')}</select></label><label class="sq-field"><span>의견</span><textarea name="comment" required maxlength="4000" placeholder="사용해 보니 어떤 점이 좋았나요? 개선이 필요한 부분도 알려주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">피드백 등록</button></div></form>`);
- }mountIcons();enhanceSelects();
+ }mountIcons();enhanceSelects();return true;
 };
 function lockedDetail(x){runtime.detailId=x.id;openModal('조회 권한이 필요합니다.',x.name,`<div class="ws-lock"><span class="ws-lock-icon">${icon('lock-keyhole')}</span><h3>${x.access==='pending'?'신청을 검토하고 있습니다.':'승인 후 상세 내용을 볼 수 있어요.'}</h3><p>목록은 누구나 볼 수 있지만, 상세 내용과 배포 파일은<br>등록자 또는 관리자의 승인 후 이용할 수 있습니다.</p>${x.accessDecision?`<div class="sq-callout">${esc(x.accessDecision)}</div>`:''}<div class="sq-actions">${x.access==='pending'?badge('승인 대기'):button('request-access','조회 권한 신청','sq-primary')}</div><small>처리 결과는 내 알림에서 알려드릴게요.</small></div>`);}
 function renderIdeas(){
@@ -503,7 +519,7 @@ function selectFiles(kind,files){
  if(kind==='artifact'){
   if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
   if(!/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
-  captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;wizard();
+  captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();
   if(typeof inspectSelectedPackage==='function')inspectSelectedPackage(files[0]);
  }else{
   const combined=[...(work.ideaFiles||[]),...files];
@@ -515,7 +531,7 @@ function refreshAttachments(){const area=$('[data-upload="attachments"]');if(are
 root.addEventListener('click',e=>{
  const pick=e.target.closest('[data-file-pick]');if(pick){e.preventDefault();pick.closest('[data-upload]').querySelector('input[type=file]').click();return;}
  const remove=e.target.closest('[data-file-remove]');if(!remove)return;e.preventDefault();
- if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;runtime.draft.packageInspection=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
+ if(remove.dataset.fileRemove==='artifact'){captureDraft();runtime.draft.file=null;runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();}else{work.ideaFiles.splice(+remove.dataset.index,1);refreshAttachments();}
 });
 // Capture before the legacy file input handler so validation and drops share one path.
 root.addEventListener('change',e=>{const input=e.target;if(input.type!=='file'||!input.closest('[data-upload]'))return;e.stopImmediatePropagation();try{selectFiles(input.name,[...input.files]);}catch(error){input.value='';showError(error);}},true);
@@ -532,7 +548,7 @@ function packagePanel(d){
  if(p.state==='error')return `<div class="ws-package is-error" role="alert"><strong>배포 정보를 읽지 못했습니다.</strong><p>${esc(p.error)}</p><p>입력 항목을 직접 작성하면 그대로 게시할 수 있습니다. 게시 시 기본 파일 검사는 다시 진행합니다.</p><button type="button" class="sq-link" data-package-retry>다시 검사</button></div>`;
  if(!p.result.recognized)return `<div class="ws-package"><strong>${p.result.warning?'배포 정보를 읽지 못했습니다':'일반 파일 등록'}</strong><p>${esc(p.result.warning||p.result.notice)}</p><p>이름·유형·설치 안내를 직접 입력하고 게시하세요.</p></div>`;
  const info=p.result.package;
- return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small><div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'ZIP 정보 다시 적용':'ZIP 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
+ return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'ZIP 정보 다시 적용':'ZIP 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
 }
 function decoratePackageForm(form){
  if(form.id!=='sq-register-form')return;
@@ -548,6 +564,7 @@ function decoratePackageForm(form){
 }
 function applyPackageFields(d,result){
  for(const key of ['name','desc','platform','type','environment','changes','guide'])d[key]=result.metadata[key];
+ d.workflow=result.metadata.workflow||null;
  d.workTags=result.metadata.workTags.join(', ');
  d.mode='file';d.packageInspection.applied=true;
 }
@@ -647,6 +664,93 @@ root.addEventListener('submit',e=>{
  .catch(error=>{message.textContent=error.message;})
  .finally(()=>{delete form.dataset.busy;button.disabled=false;});
 },true);
+
+// People, connection entry and declared workflows share the existing page shell.
+let peopleRanks=null,peopleRanksError='',peopleRanksLoading=false,peopleLoadSerial=0,profileSignature='';
+const baseRankItems=rankItems,baseRankRow=rankRowHTML,baseRenderRanks=renderRanks;
+const basePeopleRender=render,basePeopleRefresh=refresh,baseRankInfo=actions['rank-info'];
+const peopleModes=$('.sq-rank-modes');
+peopleModes.setAttribute('aria-label','도구·개발자 순위');
+peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','POWER USER','','type="button" data-mode="people" aria-pressed="false"'));
+$('.sq-chart-controls').insertAdjacentHTML('beforeend','<span id="sq-my-rank" class="sq-my-rank" hidden></span>');
+$('#sq-session').classList.add('sq-profile');
+$('#sq-session').insertAdjacentHTML('afterend',`<a id="sq-connection-key" class="sq-quiet sq-key-link" href="/local-access" aria-label="내 연결 KEY 발급·관리" title="연결 KEY 발급·관리">${icon('key-round')}</a>`);
+$('#sq-connection-key').addEventListener('click',event=>{
+ if(server.dataMode==='dummy'){
+  event.preventDefault();openModal('나의 연결 KEY','개인 연결',`<div class="sq-detail-hero"><h3>내 사번으로, 안전하게 연결.</h3><p>실제 데이터 모드에서 연결 KEY를 발급할 수 있습니다. 사번당 활성 키는 하나이며 재발급하면 이전 키는 즉시 사용할 수 없습니다.</p></div>`);
+ }
+});
+root.addEventListener('error',event=>{
+ if(event.target.matches?.('.sq-profile-photo')){event.target.hidden=true;event.target.closest('.sq-profile-avatar')?.classList.add('is-fallback');}
+},true);
+function renderProfile(){
+ const u=server.user||{},name=u.emp_name||u.name||'사용자',org=u.dept||u.org||'공통';
+ const photo=server.dataMode!=='dummy'&&u.photoUrl==='/api/me/photo'?u.photoUrl:'';
+ const signature=JSON.stringify([u.id,name,org,photo]);
+ // Base refresh writes the session label, so rebuild only if that text replaced the profile.
+ if(signature===profileSignature&&$('#sq-session .sq-profile-name'))return;
+ profileSignature=signature;
+ $('#sq-session').innerHTML=`<span class="sq-profile-copy"><strong class="sq-profile-name">${esc(name)}${/\bTL$/.test(name)?'':' <span>TL</span>'}</strong><small>${esc(org)}</small></span><span class="sq-profile-avatar"><span aria-hidden="true">${esc([...name][0]||'?')}</span>${photo?`<img class="sq-profile-photo" src="${photo}" width="34" height="34" alt="" referrerpolicy="no-referrer">`:''}</span>`;
+ $('#sq-session').setAttribute('aria-label',`${name} · ${org}`);
+}
+async function loadPeopleRanks(){
+ const serial=++peopleLoadSerial;peopleRanksLoading=true;peopleRanksError='';
+ try{const result=await requestAPI('/api/people/ranking');if(serial===peopleLoadSerial)peopleRanks=result;}
+ catch(error){if(serial===peopleLoadSerial){peopleRanks=null;peopleRanksError=error.message;}}
+ finally{if(serial===peopleLoadSerial)peopleRanksLoading=false;}
+}
+rankItems=function(){return state.rankMode==='people'?(peopleRanks?.items||[]):baseRankItems();};
+rankRowHTML=function(row,rank){
+ if(state.rankMode!=='people')return baseRankRow(row,rank);
+ return `<div class="sq-rank-row sq-person-rank${row.isMe?' is-me':''}" data-rank="${rank}"><span class="sq-rank-number">${rank}</span><div class="sq-person-info"><strong>${esc(row.name)}${row.isMe?'<span class="sq-me-badge">나</span>':''}</strong><small>${esc(row.org)}</small><span class="sq-person-counts"><span title="등록한 도구">${icon('package')}${num(row.registered)}</span><span title="받은 좋아요">${icon('heart')}${num(row.likes)}</span><span title="고유 다운로드">${icon('arrow-down-to-line')}${num(row.downloads)}</span></span></div><span class="sq-person-score"><strong>${num(row.score)}</strong><small>점</small></span></div>`;
+};
+renderRanks=function(){
+ baseRenderRanks();const isPeople=state.rankMode==='people';
+ $('.sq-chart').dataset.rankType=isPeople?'people':'tools';
+ $('#sq-chart-title').innerHTML=isPeople?'함께 만드는 <span lang="en">TOP 10</span>':'인기 <span lang="en">TOP 10</span>';
+ $('.sq-chart-labels>span:last-child').textContent=isPeople?'공유 기여도':'좋아요 · 다운로드';
+ const me=$('#sq-my-rank');me.hidden=!isPeople;
+ if(!isPeople)return;
+ $('#sq-rank-range').textContent='POWER USER · 전체 기간';$('#sq-rank-period').textContent='전체 기간 · 개발자 순위';
+ const own=peopleRanks?.me;me.textContent=own?.rank?`내 순위 ${num(own.rank)}위 · ${num(own.score)}점`:'도구를 공유하고 함께 성장해요';
+ if(peopleRanks?.asOf)$('#sq-chart-time').textContent=new Date(peopleRanks.asOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});
+ if(peopleRanksLoading&&!peopleRanks)$('#sq-rank-list').innerHTML='<div class="sq-empty" role="status">공유 기여도를 집계하고 있어요.</div>';
+ else if(peopleRanksError)$('#sq-rank-list').innerHTML=`<div class="sq-empty" role="status"><p>${esc(peopleRanksError)}</p>${button('rank-retry','다시 불러오기','sq-link')}</div>`;
+ else if(!peopleRanks?.items?.length)$('#sq-rank-list').innerHTML='<div class="sq-empty">첫 번째 도구를 공유하고<br>POWER USER가 되어 보세요.</div>';
+};
+render=function(){basePeopleRender();renderProfile();};
+refresh=async function(){
+ if(state.rankMode==='people')await loadPeopleRanks();
+ await basePeopleRefresh();
+};
+actions['rank-mode']=async b=>{
+ const mode=b.dataset.mode;if(!['recent','total','people'].includes(mode)||mode===state.rankMode)return;
+ runtime.token++;runtime.busy=false;stopAuto();state.rankMode=mode;state.rankPage=0;
+ if(mode==='people'){
+  const pending=loadPeopleRanks();render();await pending;
+  if(state.rankMode==='people')render();
+ }else render();
+};
+actions['rank-retry']=async()=>{const pending=loadPeopleRanks();render();await pending;render();};
+actions['rank-info']=()=>{
+ if(state.rankMode!=='people')return baseRankInfo();
+ const weights=peopleRanks?.weights||{registered:5,likes:2,downloads:1};
+ openModal('함께 쓰는 도구를 만든 사람들.','POWER USER · 전체 기간',`<div class="sq-detail-hero"><h3>나눈 노하우가 쌓이는 순위.</h3><p>등록한 도구와 그 도구를 이용한 동료들의 반응을 모아 공유 기여도를 보여드립니다.</p></div><div class="sq-power-formula"><span>등록 도구 <strong>× ${weights.registered}</strong></span><span>받은 좋아요 <strong>× ${weights.likes}</strong></span><span>고유 다운로드 <strong>× ${weights.downloads}</strong></span></div><div class="sq-callout">전체 기간을 기준으로 집계합니다. 도구는 버전 수와 관계없이 한 번만 반영합니다. 좋아요 취소·삭제된 도구·비활성 사용자는 순위에 반영하지 않습니다.<br><br>본인 도구에 대한 좋아요·다운로드, 같은 사람이 같은 도구를 반복 다운로드하거나 업데이트한 이력은 추가 점수가 없습니다. 조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다.</div><p class="sq-note">${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 고유 다운로드 수 → 사번 순으로 정렬합니다.')}</p>${button('rank-refresh','집계 새로고침','sq-primary')}`);
+};
+function workflowDiagram(workflow){
+ const steps=Array.isArray(workflow?.steps)?workflow.steps.slice(0,8):[];
+ if(!steps.length)return '';
+ return `<section class="sq-workflow" aria-labelledby="sq-workflow-title"><div class="sq-workflow-heading"><div><span>HOW IT WORKS</span><h3 id="sq-workflow-title">이렇게 동작해요.</h3></div><span class="sq-workflow-source">배포 정보 기반</span></div><ol class="sq-workflow-steps">${steps.map((step,i)=>`<li><span class="sq-workflow-number">${String(i+1).padStart(2,'0')}</span><div><strong>${esc(step.title)}</strong>${step.description?`<p>${esc(step.description)}</p>`:''}</div>${i<steps.length-1?`<span class="sq-workflow-arrow" aria-hidden="true">${icon('arrow-right')}</span>`:''}</li>`).join('')}</ol><p class="sq-note">등록자가 배포 Skill로 정리한 동작 흐름입니다. 실제 실행 상태를 표시하는 화면은 아닙니다.</p></section>`;
+}
+const basePeopleDetail=detail;
+detail=async function(id,tab='intro'){
+ const rendered=await basePeopleDetail(id,tab);
+ if(!rendered||tab!=='intro'||!$('#sq-dialog').open||runtime.detailId!==+id||runtime.detailTab!=='intro')return;
+ const x=getItem(id);if(x?.access!=='approved')return;
+ $('#sq-workflow-title')?.closest('.sq-workflow').remove();
+ const diagram=workflowDiagram(x.workflow);
+ if(diagram){const anchor=$('#sq-dialog-body .sq-detail-hero');anchor?.insertAdjacentHTML('afterend',diagram);mountIcons();}
+};
 
 // END WORKSPACE EXTENSION
 refresh().catch(showError);setInterval(()=>{if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);},300000);

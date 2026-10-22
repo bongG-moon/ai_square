@@ -41,6 +41,8 @@ def create_app(overrides=None):
         install_auth(app);app.register_blueprint(api)
         from .backend.local_access import local_access
         app.register_blueprint(local_access)
+        from .backend.people import people
+        app.register_blueprint(people)
     @app.get('/')
     def index(): return render_template('index.html')
     @app.get('/health')

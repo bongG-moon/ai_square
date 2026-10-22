@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 
 MANIFEST_NAME = 'ai-square.json'
 FIELDS = {'schemaVersion','packageId','name','desc','platform','type','workTags',
-          'environment','changes','entryPoint','guideFile','requiredFiles','requirements'}
+          'environment','changes','entryPoint','guideFile','requiredFiles','requirements','workflow'}
 
 
 def fail(message):
@@ -35,6 +35,27 @@ def relative_file(value):
     return value
 
 
+def normalize_workflow(value):
+    """A small ordered text diagram, never executable markup or inferred code."""
+    if value is None:
+        return None
+    if not isinstance(value,dict) or set(value)!={'steps'}:
+        fail('workflow는 steps 목록만 가진 객체여야 합니다.')
+    steps=value['steps']
+    if not isinstance(steps,list) or not 1<=len(steps)<=8:
+        fail('workflow.steps는 1~8개 단계입니다.')
+    normalized=[]
+    for step in steps:
+        if not isinstance(step,dict) or set(step)-{'title','description'}:
+            fail('동작 단계에는 title과 description만 사용할 수 있습니다.')
+        title=field(step,'title',60)
+        description=field(step,'description',240,False)
+        if any(ord(c)<32 and c not in '\n\t' for c in title+description):
+            fail('동작 단계에 제어 문자를 넣을 수 없습니다.')
+        normalized.append({'title':title,'description':description})
+    return {'steps':normalized}
+
+
 def read_package(archive):
     """Return None for a legacy ZIP, or a validated declaration with guide text."""
     entries=archive.infolist()
@@ -61,6 +82,7 @@ def read_package(archive):
     if not re.fullmatch(r'[a-z][a-z0-9.-]{2,79}',result['packageId']): fail('packageId는 영문 소문자로 시작하는 3~80자의 소문자·숫자·점·하이픈입니다.')
     if result['platform'] not in {'Claude','ChatGPT','기타'}: fail('platform은 Claude / ChatGPT / 기타 중 선택하세요.')
     if result['type'] not in {'MCP/Tool','Skill','플러그인/하네스'}: fail('type은 MCP/Tool / Skill / 플러그인/하네스 중 선택하세요.')
+    result['workflow']=normalize_workflow(raw.get('workflow'))
     for key,count,limit in [('workTags',8,30),('requirements',20,200),('requiredFiles',100,240)]:
         values=raw.get(key,[])
         if not isinstance(values,list) or len(values)>count or any(not isinstance(x,str) or not x.strip() or len(x)>limit for x in values):
@@ -80,4 +102,5 @@ def read_package(archive):
 
 
 def registration_fields(package):
-    return {k:package[k] for k in ['name','desc','platform','type','workTags','environment','changes','guide']}
+    return {**{k:package[k] for k in ['name','desc','platform','type','workTags','environment','changes','guide']},
+            'workflow':package.get('workflow')}

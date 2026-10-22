@@ -59,7 +59,23 @@
       "tags": [
         "보고서",
         "주간 회의"
-      ]
+      ],
+      "workflow": {
+        "steps": [
+          {
+            "title": "업무 자료 입력",
+            "description": "정리할 자료와 보고 목적을 전달합니다."
+          },
+          {
+            "title": "핵심 내용 정리",
+            "description": "주요 내용과 확인이 필요한 항목을 나눕니다."
+          },
+          {
+            "title": "보고서 초안 작성",
+            "description": "팀 양식에 맞는 초안을 만듭니다. 결과를 검토한 뒤 사용합니다."
+          }
+        ]
+      }
     },
     {
       "name": "[예시] 개발 워크플로 도우미",
@@ -165,5 +181,87 @@
     "diskFree": 214748364800,
     "overLimit": false,
     "pending": 0
-  }
+  },
+  "peopleRanking": [
+    {
+      "id": "sample-person-1",
+      "name": "[예시] 김하늘",
+      "org": "공통",
+      "registered": 7,
+      "likes": 34,
+      "downloads": 92
+    },
+    {
+      "id": "sample-person-2",
+      "name": "[예시] 이서준",
+      "org": "기술팀",
+      "registered": 7,
+      "likes": 31,
+      "downloads": 85
+    },
+    {
+      "id": "sample-person-3",
+      "name": "[예시] 박지우",
+      "org": "장비팀",
+      "registered": 6,
+      "likes": 28,
+      "downloads": 78
+    },
+    {
+      "id": "sample-person-4",
+      "name": "[예시] 최도윤",
+      "org": "제조팀",
+      "registered": 6,
+      "likes": 25,
+      "downloads": 71
+    },
+    {
+      "id": "sample-person-5",
+      "name": "[예시] 정수민",
+      "org": "공통",
+      "registered": 5,
+      "likes": 22,
+      "downloads": 64
+    },
+    {
+      "id": "sample-person-6",
+      "name": "[예시] 강유진",
+      "org": "기술팀",
+      "registered": 5,
+      "likes": 19,
+      "downloads": 57
+    },
+    {
+      "id": "sample-person-7",
+      "name": "[예시] 조민서",
+      "org": "장비팀",
+      "registered": 4,
+      "likes": 16,
+      "downloads": 50
+    },
+    {
+      "id": "sample-person-8",
+      "name": "[예시] 윤지호",
+      "org": "제조팀",
+      "registered": 4,
+      "likes": 13,
+      "downloads": 43
+    },
+    {
+      "id": "sample-person-9",
+      "name": "[예시] 장서연",
+      "org": "공통",
+      "registered": 3,
+      "likes": 10,
+      "downloads": 36
+    },
+    {
+      "id": "sample-person-10",
+      "name": "[예시] 임현우",
+      "org": "기술팀",
+      "registered": 3,
+      "likes": 7,
+      "downloads": 29
+    }
+  ]
 }

@@ -4,7 +4,7 @@ import re
 import secrets
 import time
 from flask import Blueprint, g, jsonify, render_template, request, session
-from werkzeug.exceptions import BadRequest, Forbidden, Unauthorized
+from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Unauthorized
 from .storage import db, public_user, audit
 
 local_access = Blueprint('local_access', __name__)
@@ -12,6 +12,28 @@ READ_ENDPOINTS = {
     'local_access.search', 'api.details', 'api.manifest', 'api.version_check',
     'api.deployment_info', 'api.download', 'local_access.options', 'local_access.publish_targets',
 }
+
+
+def current_connection_key(uid):
+    """Resolve one authoritative key per employee, including pre-upgrade keys.
+
+    The user document is the atomic authority. Historical token rows remain for
+    usage attribution but can never authorize unless this pointer matches.
+    A missing pointer migrates once to the latest valid legacy key using CAS.
+    An explicit null pointer means revoked/no key and must never revive history.
+    """
+    user = db().users.find_one({'_id': uid})
+    if not user:
+        return None
+    if 'activeConnectionKeyId' not in user:
+        candidate = db().local_tokens.find_one(
+            {'user': uid, 'revoked': False, 'expires': {'$gt': time.time()}},
+            sort=[('created', -1), ('id', -1)])
+        db().users.update_one({'_id': uid, 'activeConnectionKeyId': {'$exists': False}},
+                              {'$set': {'activeConnectionKeyId': candidate['id'] if candidate else None,
+                                        'connectionKeyUpdatedAt': time.time()}})
+        user = db().users.find_one({'_id': uid})
+    return user.get('activeConnectionKeyId') if user else None
 
 
 def token_user():
@@ -22,7 +44,8 @@ def token_user():
     digest = hashlib.sha256(value[7:].encode()).hexdigest()
     row = db().local_tokens.find_one({'_id': digest, 'revoked': False, 'expires': {'$gt': time.time()}})
     user = db().users.find_one({'_id': row['user']}) if row else None
-    if not user or not user.get('enabled', True):
+    if (not user or not user.get('enabled', True)
+            or current_connection_key(row['user']) != row['id']):
         raise Unauthorized('인증키가 만료·취소되었거나 사용자가 비활성 상태입니다.')
     read = request.method in {'GET', 'HEAD'} and request.endpoint in READ_ENDPOINTS
     publish = (row.get('scope', 'read') == 'publish' and request.method == 'POST'
@@ -43,7 +66,8 @@ def tokens():
     from . import activity
     activity.flush()
     uid = g.user['id']
-    rows = list(db().local_tokens.find({'user': uid}, {'_id': 0, 'id': 1, 'name': 1, 'created': 1, 'expires': 1, 'revoked': 1, 'scope': 1}).sort('created', -1))
+    current_id = current_connection_key(uid)
+    rows = list(db().local_tokens.find({'user': uid}, {'_id': 0, 'id': 1, 'name': 1, 'created': 1, 'expires': 1, 'revoked': 1, 'scope': 1, 'replacedBy': 1}).sort('created', -1))
     # Upload provenance is committed atomically with the release. Download
     # provenance uses the existing durable activity outbox, so retries of flush
     # cannot inflate counts.
@@ -63,8 +87,10 @@ def tokens():
     download_counts = {x['_id']: x['count'] for x in downloads}
     for row in rows:
         row.update(scope=row.get('scope', 'read'),
-                   status='revoked' if row.get('revoked') else 'expired' if row['expires'] <= time.time() else 'active',
+                   status=('replaced' if row.get('replacedBy') else 'revoked' if row.get('revoked')
+                           else 'expired' if row['expires'] <= time.time() else 'active' if row['id'] == current_id else 'replaced'),
                    uploads=upload_counts.get(row['id'], 0), downloads=download_counts.get(row['id'], 0))
+        row.pop('replacedBy', None)
     uploads = list(db().tools.aggregate([
         {'$match': upload_match}, {'$unwind': '$versions'}, {'$match': upload_match},
         {'$sort': {'versions.created': -1}}, {'$limit': 20},
@@ -76,7 +102,9 @@ def tokens():
     for row in recent:
         row['action'] = 'download'
     history = sorted(uploads + recent, key=lambda x: x['created'], reverse=True)[:20]
-    return jsonify(tokens=rows, csrf=session['csrf'], employee=dict(id=uid, name=g.user['name']),
+    return jsonify(tokens=rows, currentKeyId=current_id,
+                   connectionKey=next((r for r in rows if r['id'] == current_id), None),
+                   csrf=session['csrf'], employee=dict(id=uid, name=g.user['name']),
                    usage=dict(uploads=sum(upload_counts.values()), downloads=sum(download_counts.values())), history=history)
 
 
@@ -85,25 +113,46 @@ def issue():
     raw = request.get_json(silent=True)
     if not isinstance(raw, dict):
         raise BadRequest('이름과 유효기간을 확인하세요.')
-    name = raw.get('name', '내 PC')
+    name = raw.get('name', '내 연결 KEY')
     days = raw.get('days', 7)
     scope = raw.get('scope', 'read')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or type(days) is not int or days not in {1, 7, 30}:
         raise BadRequest('이름은 1~60자, 유효기간은 1·7·30일입니다.')
     if not isinstance(scope, str) or scope not in {'read', 'publish'}:
         raise BadRequest('조회·다운로드 또는 업로드 포함 권한을 선택하세요.')
+    current_connection_key(g.user['id'])
     token = 'ptsq_' + secrets.token_urlsafe(32)
     now = time.time()
     row = dict(_id=hashlib.sha256(token.encode()).hexdigest(), id=secrets.token_hex(16),
                user=g.user['id'], name=name.strip(), created=now, expires=now + days * 86400, revoked=False, scope=scope)
     db().local_tokens.insert_one(row)
-    audit('개인 API 인증키 발급: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드'))
-    return jsonify(token=token, id=row['id'], expires=row['expires'], scope=scope), 201
+    # A single document update is the cutover point. Never revoke all other rows
+    # here: a concurrent reissue may already have created the next valid key.
+    previous = db().users.find_one_and_update(
+        {'_id': row['user'], 'enabled': {'$ne': False}},
+        {'$set': {'activeConnectionKeyId': row['id'], 'connectionKeyUpdatedAt': now}})
+    if not previous:
+        db().local_tokens.update_one({'_id': row['_id']}, {'$set': {'revoked': True}})
+        raise Unauthorized('현재 사용자 상태를 확인하세요.')
+    previous_id = previous.get('activeConnectionKeyId')
+    if previous_id:
+        db().local_tokens.update_one({'user': row['user'], 'id': previous_id},
+                                    {'$set': {'revoked': True, 'revokedAt': now, 'replacedBy': row['id']}})
+    audit('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드'))
+    if current_connection_key(row['user']) != row['id']:
+        raise Conflict('다른 화면에서 KEY가 다시 발급되었습니다. 현재 화면을 새로고침하세요.')
+    return jsonify(token=token, id=row['id'], expires=row['expires'], scope=scope,
+                   replaced=bool(previous_id)), 201
 
 
 @local_access.delete('/api/local-tokens/<token_id>')
 def revoke(token_id):
-    db().local_tokens.update_one({'id': token_id, 'user': g.user['id']}, {'$set': {'revoked': True}})
+    uid = g.user['id']
+    current_connection_key(uid)
+    # CAS preserves a newer key if revoke races with reissue.
+    db().users.update_one({'_id': uid, 'activeConnectionKeyId': token_id},
+                          {'$set': {'activeConnectionKeyId': None, 'connectionKeyUpdatedAt': time.time()}})
+    db().local_tokens.update_one({'id': token_id, 'user': uid}, {'$set': {'revoked': True, 'revokedAt': time.time()}})
     audit('개인 API 인증키 취소')
     return jsonify(ok=True)
 

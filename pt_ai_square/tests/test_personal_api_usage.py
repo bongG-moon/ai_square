@@ -37,15 +37,16 @@ def test_publish_token_scope_employee_and_counts(app):
     assert member.get('/api/local-tokens').json['history'] == []
 
 
-def test_multiple_keys_download_counts_and_lifetime_ranking(app):
+def test_reissued_key_keeps_download_counts_and_lifetime_ranking(app):
     owner, h = ready(app)
     publish(owner, h, approval=True)
     t1, a1 = issue(owner, h, 'read')
-    t2, a2 = issue(owner, h, 'publish')
     c = app.test_client()
     assert c.head('/download/1/1', headers=a1).status_code == 200
     assert c.get('/download/1/1', headers=a1).status_code == 200
     assert c.get('/download/1/1', headers=a1).status_code == 200
+    t2, a2 = issue(owner, h, 'publish')
+    assert c.get('/download/1/1', headers=a1).status_code == 401
     assert c.get('/download/1/1', headers=a2).status_code == 200
     assert c.get('/download/1/99', headers=a2).status_code == 404
     assert owner.get('/download/1/1').status_code == 200  # web download isn't API usage
@@ -63,7 +64,8 @@ def test_multiple_keys_download_counts_and_lifetime_ranking(app):
     assert c.get('/download/1/1', headers=a1).status_code == 401
     data = owner.get('/api/local-tokens').json
     assert data['usage']['downloads'] == 1
-    assert next(t for t in data['tokens'] if t['id']==t1['id'])['status'] == 'revoked'
+    assert next(t for t in data['tokens'] if t['id']==t1['id'])['status'] == 'replaced'
+    assert c.get('/api/catalog', headers=a2).status_code == 200
 
 
 def test_legacy_keys_remain_read_only_and_failed_access_not_counted(app):

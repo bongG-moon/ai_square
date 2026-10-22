@@ -135,12 +135,15 @@ def test_downloadable_skill_builds_accepted_package(app,tmp_path):
     skill=BASE/'static/guides/pt-file-distribution'
     assert (skill/'scripts/package_contract.py').read_bytes()==(BASE/'backend/package_contract.py').read_bytes()
     source=tmp_path/'prepared';source.mkdir()
-    with zipfile.ZipFile(io.BytesIO(bundle())) as z:z.extractall(source)
+    workflow={'steps':[{'title':'입력 확인','description':'선택한 자료를 확인합니다.'},
+                       {'title':'결과 제공','description':'처리한 결과를 제공합니다.'}]}
+    with zipfile.ZipFile(io.BytesIO(bundle(declaration(workflow=workflow)))) as z:z.extractall(source)
     output=tmp_path/'release.zip'
     built=subprocess.run([sys.executable,str(skill/'scripts/prepare_package.py'),str(source),str(output)],capture_output=True)
     assert built.returncode==0,built.stderr
     c,h=ready(app);r=post(c,h,output.read_bytes())
     assert r.status_code==201,r.json
+    assert c.get(f'/api/tools/{r.json["id"]}').json['workflow']==workflow
     assert c.get(f'/download/{r.json["id"]}/1').data==output.read_bytes()
     again=subprocess.run([sys.executable,str(skill/'scripts/prepare_package.py'),str(source),str(output)],capture_output=True)
     assert again.returncode!=0 and output.exists()

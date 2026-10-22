@@ -31,7 +31,33 @@ def test_hcp_origin_redirect_nested_login_and_six_session_fields(app,hcp):
         assert [session[k] for k in ['emp_no','emp_name','emp_name_en','dept','email','dept_cd']]==['0012345','시험 직원','Test Employee','시험 부서','employee@example.test','D001']
     bootstrap=client.get('/api/bootstrap').json
     assert bootstrap['user']['id']=='0012345' and bootstrap['user']['org']=='시험 부서'
+    assert [bootstrap['user'][k] for k in ['emp_no','emp_name','dept','dept_cd']]==['0012345','시험 직원','시험 부서','D001']
+    with app.app_context():
+        row=db().users.find_one({'_id':'0012345'})
+        assert [row[k] for k in ['emp_no','emp_name','dept','dept_cd']]==['0012345','시험 직원','시험 부서','D001']
     assert app.config['TEMPLATES_AUTO_RELOAD'] is True
+
+
+def test_sso_profile_refresh_keeps_employee_references_and_connection_key(app,hcp):
+    client,_,SSO=hcp
+    client.set_cookie('company','valid');client.get('/api/bootstrap')
+    with app.app_context():
+        old=db().users.find_one({'_id':'0012345'})
+        db().users.update_one({'_id':'0012345'},{'$set':{'activeConnectionKeyId':'keep-key'}})
+        db().tools.insert_one({'_id':77,'owner':'0012345','deleted':False})
+        db().access.insert_one({'tool':77,'user':'0012345','granted':True})
+    SSO.get_sso_info=lambda self,cookie: ('0012345','바뀐 이름','Test Employee','변경 부서','employee@example.test','D001')
+    # Use the profile-only endpoint so the deliberately minimal ownership
+    # fixture is not rendered as a catalog item.
+    response=client.get('/login')
+    assert response.status_code==302
+    with app.app_context():
+        row=db().users.find_one({'_id':'0012345'})
+        assert row['orgId']==old['orgId']
+        assert row['dept']=='변경 부서' and row['dept_cd']=='D001'
+        assert row['name']=='바뀐 이름' and row['activeConnectionKeyId']=='keep-key'
+        assert db().tools.find_one({'_id':77})['owner']=='0012345'
+        assert db().access.find_one({'tool':77})['user']=='0012345'
 
 def test_session_flag_cannot_replace_valid_sso_cookie(app,hcp):
     client,_,_=hcp

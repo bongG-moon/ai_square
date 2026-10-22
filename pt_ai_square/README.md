@@ -13,6 +13,8 @@ Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비
 
 ## 빠른 실행
 
+최근 반영: SSO 사번·이름·부서명·부서코드를 기존 사용자와 연결하고, 상단에 이름 TL·프로필 사진과 연결 KEY 바로가기를 표시합니다. POWER USER는 개발자가 등록한 도구 5점 + 받은 좋아요 2점 + 고유 다운로드 1점으로 전체 기간을 집계합니다. 연결 KEY는 사번당 하나만 활성화되며 재발급하면 이전 키가 즉시 무효화됩니다. 배포 Skill이 작성한 `workflow.steps`는 도구 상세에서 순서도로 표시합니다. 기존 설정·업로드 파일·MongoDB 데이터를 지우거나 초기화할 필요는 없습니다.
+
 `runtime_config.example.py`를 `runtime_config.py`로 복사하고 실제 `MONGODB_URI`, `MONGODB_DATABASE`를 입력합니다. SSO 기본값은 미사용(mock)입니다. 로컬에서도 같은 MongoDB와 파일 저장소로 실제 업로드·다운로드·버전 관리를 수행합니다. DB 미설정 시 설정 오류를 표시합니다. .env는 사용하지 않습니다.
 
 ```powershell

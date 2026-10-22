@@ -9,13 +9,14 @@ const context={runtime:{draft:{file:null}},work:{ideaFiles:[]},
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/frontend_upload.js'),'utf8'),context);
 const file={name:'report.zip',size:2048};
-context.selectFiles('artifact',[file]);assert.equal(context.runtime.draft.file,file);assert.equal(renders,1);
+context.runtime.draft.workflow={steps:[{title:'Previous file workflow'}]};
+context.selectFiles('artifact',[file]);assert.equal(context.runtime.draft.file,file);assert.equal(renders,1);assert.equal(context.runtime.draft.workflow,null);
 assert.throws(()=>context.selectFiles('artifact',[{name:'bad.txt',size:12}]));assert.equal(context.runtime.draft.file,file);
 const dropArea={dataset:{upload:'artifact'},classList:{toggle(){}}};
 callbacks.drop[0].fn({target:{closest:()=>dropArea},preventDefault(){},dataTransfer:{files:[{name:'replace.zip',size:30}]}});
-assert.equal(context.runtime.draft.file.name,'replace.zip');
+assert.equal(context.runtime.draft.file.name,'replace.zip');context.runtime.draft.workflow={steps:[{title:'Stale'}]};
 callbacks.click[0].fn({target:{closest:s=>s==='[data-file-remove]'?{dataset:{fileRemove:'artifact',index:'0'}}:null},preventDefault(){}});
-assert.equal(context.runtime.draft.file,null);
+assert.equal(context.runtime.draft.file,null);assert.equal(context.runtime.draft.workflow,null);
 context.selectFiles('attachments',[{name:'example.csv',size:100},{name:'capture.png',size:90}]);
 assert.equal(context.work.ideaFiles.length,2);assert.ok(area.outerHTML.includes('capture.png'));
 callbacks.click[0].fn({target:{closest:s=>s==='[data-file-remove]'?{dataset:{fileRemove:'attachments',index:'0'}}:null},preventDefault(){}});

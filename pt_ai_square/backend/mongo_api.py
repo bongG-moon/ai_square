@@ -11,7 +11,7 @@ from pymongo.errors import DuplicateKeyError
 from .storage import db, next_id, audit, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
 from .request_files import stage_attachments, attachment_path, public_attachments
-from .package_contract import registration_fields
+from .package_contract import registration_fields, normalize_workflow
 from .storage_capacity import snapshot as storage_snapshot
 
 api = Blueprint('api', __name__)
@@ -70,6 +70,8 @@ def metadata(raw, existing=None):
     if not isinstance(tags, list) or any(not isinstance(x, str) for x in tags): raise BadRequest('관련 업무를 확인해 주세요.')
     data['workTags'] = list(dict.fromkeys(' '.join(x.split()) for x in tags if x.strip()))
     if len(data['workTags']) > 8 or any(len(x) > 30 for x in data['workTags']): raise BadRequest('관련 업무는 최대 8개, 각 30자입니다.')
+    try: data['workflow']=normalize_workflow(raw.get('workflow'))
+    except ValueError as error: raise BadRequest(str(error)) from None
     return data
 
 def resolved(t):
@@ -108,7 +110,7 @@ def serialize(t, stats, now):
     versions = []
     if can_read:
         for v in reversed(t.get('versions', [])):
-            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
+            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
     subscription = db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
     return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
@@ -164,6 +166,9 @@ def publish(tid=None):
         if package:
             # Preview is advisory. Re-read and validate the actual upload at publish time.
             raw={**registration_fields(package),**raw}
+            # The inspected package describes this release. Do not carry a prior
+            # draft's flow into a new ZIP that changed or omitted its workflow.
+            raw['workflow']=package.get('workflow')
             if any(raw.get(k)!=package[k] for k in ['platform','type']):
                 raise BadRequest('프로그램·유형이 ZIP 배포 정보와 다릅니다. ai-square.json 또는 입력값을 맞춰 주세요.')
             previous=next((v.get('package') for v in reversed(t['versions']) if v.get('package')),None) if t else None
@@ -183,7 +188,7 @@ def publish(tid=None):
             if previous_response: return previous_response
         if t: check_revision(t,raw)
         n=max([v['n'] for v in t['versions']],default=0)+1 if t else 1
-        version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type']})
+        version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type','workflow']})
         if getattr(g, 'api_token_id', None):
             version['apiUsage'] = dict(user=g.user['id'], tokenId=g.api_token_id)
         if request_key:
@@ -230,6 +235,8 @@ def edit(tid):
     for k in ['org','category']:
         if k in raw and k+'Id' not in raw: merged.pop(k+'Id',None)
     data=metadata(merged,t['data'])
+    if data['workflow']!=t['data'].get('workflow'):
+        raise BadRequest('동작 흐름은 배포 버전에 연결됩니다. 변경한 흐름을 새 버전으로 등록하세요.')
     current_package=next((v.get('package') for v in t['versions'] if v['n']==t['active']),None)
     if current_package and any(data[k]!=current_package[k] for k in ['platform','type']):
         raise BadRequest('프로그램·유형은 현재 배포 정보와 일치해야 합니다. 변경한 패키지를 새 버전으로 등록하세요.')
@@ -453,7 +460,7 @@ def rollback(tid):
     if v['path'] and not artifact_path(v['path']).is_file(): raise Conflict('복구 파일이 없습니다.')
     for x in vs:
         if x['n']==t['active']: x['withdrawn']=True
-    data={**t['data'],**v['data']};e=event(followers(t),f'{data["name"]} v{n}으로 복구되었습니다.',{'type':'tool','id':tid},'release')
+    data={**t['data'],**v['data'],'workflow':v['data'].get('workflow')};e=event(followers(t),f'{data["name"]} v{n}으로 복구되었습니다.',{'type':'tool','id':tid},'release')
     cas(t,{'$set':{'data':data,'versions':vs,'active':n,'fallback':n,'paused':True},'$push':{'outbox':e}});audit(f'도구 {tid} v{n} 복구');deliver_notifications();return jsonify(ok=True)
 
 def delete_version(tid,n):
@@ -537,7 +544,7 @@ def manifest(tid):
     t=tool(tid);usable(t);v=next(v for v in t['versions'] if v['n']==t['active'])
     if v.get('deleted') or v.get('withdrawn'):
         raise NotFound('현재 배포 가능한 버전이 없습니다.')
-    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
+    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow'),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
 
 @api.get('/api/tools/<int:tid>/releases/<int:n>/deployment')
 def deployment_info(tid,n):
@@ -549,7 +556,7 @@ def deployment_info(tid,n):
         package=v['package'],filename=v['name'],sha256=v['sha'],bytes=v['size'],
         downloadUrl=f'/download/{tid}/{n}',versionCheckUrl=f'/api/tools/{tid}/version-check?release={n}',
         authenticationRequired=True,managedInstall=False,
-        installationGuide=v['data']['guide'],environment=v['data']['environment'],
+        installationGuide=v['data']['guide'],environment=v['data']['environment'],workflow=v['data'].get('workflow'),
         notice='상대 주소는 이 웹 서비스 주소 기준입니다. 실제 설치 후 이 배포 번호를 기록하세요. SSO 인증 연결과 실행 시 확인 코드는 도구 제작자가 연결해야 합니다.')
     response.headers['Content-Disposition']=f'attachment; filename="ai-square-{tid}-v{n}.json"'
     return response
