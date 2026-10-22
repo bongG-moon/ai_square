@@ -45,29 +45,43 @@
 #square-app .sq-power-formula{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:20px 0}
 #square-app .sq-power-formula>span{display:flex;flex-direction:column;gap:9px;padding:18px 14px;border:1px solid #eeeef2;border-radius:16px;background:#f8f9fc;font-size:12px;color:var(--sq-muted)}
 #square-app .sq-power-formula strong{font-size:24px;color:var(--sq-blue)}
-#square-app .sq-workflow{margin:26px 0 30px;padding:22px;border-radius:20px;background:linear-gradient(145deg,#fafbfd,#f4f5f8);border:1px solid #e9ebf1;box-shadow:inset 0 1px #fff}
-#square-app .sq-workflow-heading{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:18px}
-#square-app .sq-workflow-heading>div>span{font:500 9px var(--sq-en);letter-spacing:.12em;color:var(--sq-muted)}
-#square-app .sq-workflow-heading h3{margin:5px 0 0;font-size:18px;font-weight:600}
-#square-app .sq-workflow-source{font-size:10px;color:var(--sq-muted);border:1px solid #e2e5ec;border-radius:20px;padding:5px 9px;white-space:nowrap}
-#square-app .sq-workflow-steps{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
-#square-app .sq-workflow-steps>li{position:relative;background:#ffffffd9;border:1px solid #fff;box-shadow:0 3px 12px #1f293b05;border-radius:14px;padding:16px;min-width:0;transition:transform .2s,box-shadow .2s}
-#square-app .sq-workflow-number{display:inline-block;font:600 12px var(--sq-en);color:var(--sq-blue);padding-bottom:13px}
-#square-app .sq-workflow-steps strong{display:block;font-size:13px;line-height:1.45;font-weight:600;overflow-wrap:anywhere}
-#square-app .sq-workflow-steps p{font-size:11px;color:var(--sq-muted);line-height:1.65;margin-top:8px;overflow-wrap:anywhere}
-#square-app .sq-workflow-arrow{position:absolute;right:-14px;top:23px;color:#a4acbb;z-index:1}
-#square-app .sq-workflow-arrow svg{width:13px;height:13px}
-#square-app .sq-workflow-steps>li:nth-child(3n) .sq-workflow-arrow{right:calc(50% - 7px);top:auto;bottom:-15px;transform:rotate(90deg)}
-#square-app .sq-workflow>.sq-note{font-size:10px;margin:15px 0 0;color:var(--sq-muted)}
-@media(hover:hover){#square-app .sq-workflow-steps>li:hover{transform:translateY(-2px);box-shadow:0 5px 16px #1f293b08}}
+#square-app .sq-workflow{margin:26px 0 30px;border-radius:20px;background:linear-gradient(145deg,#fafbfd,#f4f5f8);border:1px solid #e9ebf1;box-shadow:inset 0 1px #fff;overflow:hidden}
+#square-app .sq-workflow-heading{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:21px 22px;list-style:none;cursor:pointer;user-select:none;transition:background .2s}
+#square-app .sq-workflow-heading::-webkit-details-marker{display:none}
+#square-app .sq-workflow-heading::marker{content:''}
+#square-app .sq-workflow-heading:focus-visible{outline:2px solid var(--sq-blue);outline-offset:-4px;border-radius:18px}
+#square-app .sq-workflow-heading-copy{display:grid;gap:5px;min-width:0}
+#square-app .sq-workflow-eyebrow{font:500 9px var(--sq-en);letter-spacing:.12em;color:var(--sq-muted)}
+#square-app .sq-workflow-heading-copy>strong{font-size:18px;line-height:1.45;font-weight:600;color:var(--sq-text)}
+#square-app .sq-workflow-toggle{display:flex;align-items:center;gap:9px;flex-shrink:0;font-size:11px;color:var(--sq-muted)}
+#square-app .sq-workflow-count{padding-right:9px;border-right:1px solid #dce0e8;font-variant-numeric:tabular-nums}
+#square-app .sq-workflow-chevron{display:grid;place-items:center;width:28px;height:28px;border:1px solid #e5e8ef;border-radius:50%;background:#ffffffa6;transition:transform .25s}
+#square-app .sq-workflow-chevron svg{width:15px;height:15px}
+#square-app .sq-workflow-collapse,#square-app .sq-workflow[open] .sq-workflow-expand{display:none}
+#square-app .sq-workflow[open] .sq-workflow-collapse{display:inline}
+#square-app .sq-workflow[open] .sq-workflow-chevron{transform:rotate(180deg)}
+#square-app .sq-workflow-body{padding:2px 22px 22px}
+#square-app .sq-workflow-steps{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+#square-app .sq-workflow-steps>li{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr);gap:16px;min-width:0}
+#square-app .sq-workflow-steps>li:not(:last-child)::after{content:'';position:absolute;left:17px;top:50px;bottom:-26px;width:2px;background:#e0e5ef}
+#square-app .sq-workflow-number{position:relative;z-index:1;display:grid;place-items:center;width:36px;height:36px;margin-top:14px;border-radius:50%;border:1px solid #dce3f3;background:#f0f3fa;box-shadow:inset 0 1px #fff;font:600 11px var(--sq-en);color:var(--sq-blue);font-variant-numeric:tabular-nums}
+#square-app .sq-workflow-step{position:relative;min-width:0;min-height:64px;padding:17px 19px;border:1px solid #fff;border-radius:14px;background:#ffffffd9;box-shadow:0 3px 12px #1f293b05;transition:box-shadow .2s}
+#square-app .sq-workflow-steps strong{display:block;font-size:13px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
+#square-app .sq-workflow-steps p{font-size:12px;color:var(--sq-muted);line-height:1.7;margin:6px 0 0;overflow-wrap:anywhere}
+#square-app .sq-workflow-body>.sq-note{font-size:10px;margin:18px 0 0 52px;color:var(--sq-muted);line-height:1.8}
+#square-app .sq-workflow-source{display:inline-block;font-size:9px;border:1px solid #e2e5ec;border-radius:20px;padding:2px 8px;margin-right:7px;white-space:nowrap}
+@media(hover:hover){#square-app .sq-workflow-heading:hover{background:#ffffff70}#square-app .sq-workflow-step:hover{box-shadow:0 5px 16px #1f293b09}}
 @media(max-width:680px){
  #square-app .sq-profile-copy{display:none}
  #square-app .sq-session.sq-profile{display:inline-flex;max-width:34px}
- #square-app .sq-workflow{padding:18px}
- #square-app .sq-workflow-steps{grid-template-columns:1fr;gap:12px}
- #square-app .sq-workflow-steps>li{display:flex;gap:13px;padding:14px}
- #square-app .sq-workflow-number{padding-top:1px;flex-shrink:0}
- #square-app .sq-workflow-steps>li .sq-workflow-arrow{right:auto;left:calc(50% - 7px);top:auto;bottom:-14px;transform:rotate(90deg)}
- #square-app .sq-workflow-source{font-size:9px}
+ #square-app .sq-workflow-heading{padding:18px 16px;gap:10px}
+ #square-app .sq-workflow-heading-copy>strong{font-size:16px}
+ #square-app .sq-workflow-toggle{gap:6px;font-size:10px}
+ #square-app .sq-workflow-count{padding-right:6px}
+ #square-app .sq-workflow-body{padding:0 16px 18px}
+ #square-app .sq-workflow-steps>li{gap:10px}
+ #square-app .sq-workflow-step{padding:16px 14px}
+ #square-app .sq-workflow-body>.sq-note{margin-left:46px}
 }
-@media(prefers-reduced-motion:reduce){#square-app .sq-key-link,#square-app .sq-workflow-steps>li{transition:none;transform:none!important}}
+@media(max-width:400px){#square-app .sq-workflow-count{display:none}}
+@media(prefers-reduced-motion:reduce){#square-app .sq-key-link,#square-app .sq-workflow-heading,#square-app .sq-workflow-step,#square-app .sq-workflow-chevron{transition:none}#square-app .sq-key-link{transform:none!important}}

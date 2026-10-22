@@ -117,7 +117,7 @@ async function changeRank(page){
  }finally{if(token===runtime.token){list.removeAttribute('aria-busy');runtime.busy=false;schedule(Math.max(0,5000-(performance.now()-started)));}}
 }
 function navigate(route,sort){runtime.token++;runtime.busy=false;state.route=route;state.page=0;if(sort)state.sort=sort;render();persist();}
-function openModal(title,kicker,html){if(!$('#sq-dialog').open)runtime.returnFocus=document.activeElement;$('#sq-dialog-title').textContent=title;$('#sq-dialog-kicker').textContent=kicker;$('#sq-dialog-body').innerHTML=html;$('#sq-modal-status').textContent='';if(!$('#sq-dialog').open)$('#sq-dialog').showModal();$('#sq-dialog').scrollTop=0;mountIcons();schedule();}
+function openModal(title,kicker,html){if(!$('#sq-dialog').open)runtime.returnFocus=document.activeElement;$('#sq-dialog-title').textContent=title;$('#sq-dialog-kicker').textContent=kicker;$('#sq-dialog-body').innerHTML=html;$('#sq-modal-status').textContent='';if(!$('#sq-dialog').open)$('#sq-dialog').showModal();$('#sq-dialog-body').scrollTop=0;mountIcons();schedule();}
 function closeModal(){if($('#sq-confirm').open)$('#sq-confirm').close();$('#sq-dialog').close();runtime.returnFocus?.isConnected&&runtime.returnFocus.focus({preventScroll:true});schedule();}
 function ask(title,copy,action,label='확인',extra=''){runtime.confirm=action;$('#sq-confirm-title').textContent=title;$('#sq-confirm-copy').textContent=copy;$('#sq-confirm-extra').innerHTML=extra;$('#sq-confirm-go').textContent=label;$('#sq-confirm').showModal();mountIcons();}
 function detail(id,tab='intro'){
@@ -748,7 +748,7 @@ actions['rank-info']=()=>{
 function workflowDiagram(workflow){
  const steps=Array.isArray(workflow?.steps)?workflow.steps.slice(0,8):[];
  if(!steps.length)return '';
- return `<section class="sq-workflow" aria-labelledby="sq-workflow-title"><div class="sq-workflow-heading"><div><span>HOW IT WORKS</span><h3 id="sq-workflow-title">이렇게 동작해요.</h3></div><span class="sq-workflow-source">배포 정보 기반</span></div><ol class="sq-workflow-steps">${steps.map((step,i)=>`<li><span class="sq-workflow-number">${String(i+1).padStart(2,'0')}</span><div><strong>${esc(step.title)}</strong>${step.description?`<p>${esc(step.description)}</p>`:''}</div>${i<steps.length-1?`<span class="sq-workflow-arrow" aria-hidden="true">${icon('arrow-right')}</span>`:''}</li>`).join('')}</ol><p class="sq-note">등록자가 배포 Skill로 정리한 동작 흐름입니다. 실제 실행 상태를 표시하는 화면은 아닙니다.</p></section>`;
+ return `<details class="sq-workflow" aria-labelledby="sq-workflow-title"><summary class="sq-workflow-heading"><span class="sq-workflow-heading-copy"><span class="sq-workflow-eyebrow" lang="en">HOW IT WORKS</span><strong id="sq-workflow-title">이렇게 동작해요.</strong></span><span class="sq-workflow-toggle"><span class="sq-workflow-count">${steps.length}단계</span><span class="sq-workflow-expand">펼치기</span><span class="sq-workflow-collapse">접기</span><span class="sq-workflow-chevron" aria-hidden="true">${icon('chevron-down')}</span></span></summary><div class="sq-workflow-body"><ol class="sq-workflow-steps" aria-label="동작 순서">${steps.map((step,i)=>`<li><span class="sq-workflow-number" aria-hidden="true">${String(i+1).padStart(2,'0')}</span><div class="sq-workflow-step"><strong>${esc(step.title)}</strong>${step.description?`<p>${esc(step.description)}</p>`:''}</div></li>`).join('')}</ol><p class="sq-note"><span class="sq-workflow-source">배포 정보 기반</span>등록자가 정리한 동작 순서입니다. 실제 실행 상태를 표시하지 않습니다.</p></div></details>`;
 }
 const basePeopleDetail=detail;
 detail=async function(id,tab='intro'){
