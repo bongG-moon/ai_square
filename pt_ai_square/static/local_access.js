@@ -5,7 +5,8 @@
   const status = $('#status');
   const scopeName = scope => scope === 'publish' ? '업로드 포함' : '조회·다운로드';
   const date = value => new Date(value * 1000).toLocaleString('ko-KR', {year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'});
-  const stateName = state => ({active:'사용 중', expired:'만료됨', revoked:'사용 취소됨', replaced:'교체됨'}[state] || '발급 전');
+  const lifetime = key => key.status === 'invalid' ? '재발급 필요' : (key.expires === null ? '유효기간 제한 없음' : (typeof key.expires === 'number' && Number.isFinite(key.expires) && key.expires > 0 ? `${date(key.expires)}까지` : '재발급 필요'));
+  const stateName = state => ({active:'사용 중', expired:'만료됨', revoked:'사용 취소됨', replaced:'교체됨', invalid:'재발급 필요'}[state] || '발급 전');
   async function call(path, options = {}) {
     const response = await fetch(path, {...options, headers:{'Content-Type':'application/json', 'X-CSRF-Token':csrf}, cache:'no-store'});
     const data = await response.json();
@@ -20,13 +21,14 @@
     currentKeyId = data.currentKeyId;
     const key = data.connectionKey;
     $('#employee').textContent = `${data.employee.name} · 사번 ${data.employee.id}`;
-    $('#current-key-detail').textContent = key ? `${key.name} · ${scopeName(key.scope)} · ${date(key.expires)}까지` : '로그인한 본인 명의로 하나의 KEY를 발급합니다.';
+    $('#current-key-detail').textContent = key ? `${key.name} · ${scopeName(key.scope)} · ${lifetime(key)}` : '유효기간 제한 없이, 로그인한 본인 명의로 발급합니다.';
     $('#key-state').textContent = stateName(key?.status);
     $('#key-state').dataset.state = key?.status || 'none';
     $('#key-issue').textContent = data.tokens.length ? 'KEY 재발급' : '연결 KEY 발급';
     $('#key-issue').disabled = false;
     $('#key-revoke').hidden = key?.status !== 'active';
     $('#key-rule').textContent = data.tokens.length ? '재발급하면 기존 KEY는 즉시 사용할 수 없습니다. 연결한 프로그램에도 새 KEY를 입력하세요. 기존 이용 이력은 유지됩니다.' : '본인 사번에만 연결됩니다. 업로드 포함 권한도 도구 삭제·권한 변경은 허용하지 않습니다.';
+    if (key && typeof key.expires === 'number') $('#key-rule').textContent += ' 이전에 발급한 KEY의 유효기간은 유지되며, 재발급하면 기간 제한이 없어집니다.';
     if (!loaded && key) {
       $('#token-name').value=key.name; $('#token-scope').value=key.scope;
     }
@@ -62,7 +64,7 @@
     e.preventDefault();const button=$('#key-issue');if(button.disabled)return;button.disabled=true;
     clearIssued(); status.textContent='연결 KEY를 발급하고 있습니다.';
     try {
-      const result=await call(api,{method:'POST',body:JSON.stringify({name:$('#token-name').value,days:Number($('#token-days').value),scope:$('#token-scope').value})});
+      const result=await call(api,{method:'POST',body:JSON.stringify({name:$('#token-name').value,scope:$('#token-scope').value})});
       $('#secret').value=result.token;$('#issued').hidden=false;issuedKeyId=result.id;
       await refresh();
       status.textContent=issuedKeyId ? '발급했습니다. KEY를 복사해 연결할 프로그램에 입력하세요.' : '다른 화면에서 KEY가 변경되었습니다. 최신 KEY를 다시 확인하세요.';

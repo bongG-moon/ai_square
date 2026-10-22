@@ -20,7 +20,7 @@
 #square-app .sq-tool .sq-tool-summary{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;line-height:1.55;font-size:12px;margin:7px 0 0;color:#707078;min-height:calc(1.55em * 2)}
 #square-app .sq-shelf-grid .sq-tool .sq-tool-summary{display:-webkit-box;-webkit-line-clamp:1;line-clamp:1;min-height:1.55em;font-size:11px;margin-top:6px}
 #square-app .sq-rank-modes button{white-space:nowrap;padding-inline:10px}
-#square-app .sq-rank-modes button[data-mode=people]{font-family:var(--sq-en);font-size:11px;letter-spacing:.015em}
+#square-app .sq-rank-modes button[data-mode=people]{font-family:inherit;font-size:11px;letter-spacing:0}
 #square-app .sq-chart-labels{flex-wrap:wrap;gap:8px}
 #square-app .sq-chart[data-rank-type=people] #sq-rank-all{display:none}
 #square-app .sq-person-rank{grid-template-columns:27px minmax(0,1fr) auto;gap:10px;padding-inline:2px}

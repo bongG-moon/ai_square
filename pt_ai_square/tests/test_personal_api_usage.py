@@ -4,7 +4,7 @@ from pt_ai_square.backend import activity
 
 
 def issue(c, h, scope='publish'):
-    r = c.post('/api/local-tokens', headers=h, json={'name':'PC', 'scope':scope, 'days':7, 'user':'admin'})
+    r = c.post('/api/local-tokens', headers=h, json={'name':'PC', 'scope':scope, 'user':'admin'})
     assert r.status_code == 201
     return r.json, {'Authorization':'Bearer '+r.json['token']}
 

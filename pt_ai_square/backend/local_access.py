@@ -1,5 +1,6 @@
 """Employee-bound API credentials with explicit read/publish permissions."""
 import hashlib
+import math
 import re
 import secrets
 import time
@@ -14,6 +15,18 @@ READ_ENDPOINTS = {
 }
 
 
+def expiry_status(row, now=None):
+    """Only explicit BSON null means no expiry; legacy timestamps still apply."""
+    if 'expires' not in row:
+        return 'invalid'
+    expires = row['expires']
+    if expires is None:
+        return 'active'
+    if isinstance(expires, bool) or not isinstance(expires, (int, float)) or not math.isfinite(expires):
+        return 'invalid'
+    return 'active' if expires > (time.time() if now is None else now) else 'expired'
+
+
 def current_connection_key(uid):
     """Resolve one authoritative key per employee, including pre-upgrade keys.
 
@@ -26,9 +39,11 @@ def current_connection_key(uid):
     if not user:
         return None
     if 'activeConnectionKeyId' not in user:
-        candidate = db().local_tokens.find_one(
-            {'user': uid, 'revoked': False, 'expires': {'$gt': time.time()}},
-            sort=[('created', -1), ('id', -1)])
+        now = time.time()
+        # Explicit scalar validation avoids Mongo's null/missing equivalence and
+        # array matching. Malformed recent records must not hide a valid legacy key.
+        candidates = db().local_tokens.find({'user': uid, 'revoked': False}).sort([('created', -1), ('id', -1)])
+        candidate = next((row for row in candidates if expiry_status(row, now) == 'active'), None)
         db().users.update_one({'_id': uid, 'activeConnectionKeyId': {'$exists': False}},
                               {'$set': {'activeConnectionKeyId': candidate['id'] if candidate else None,
                                         'connectionKeyUpdatedAt': time.time()}})
@@ -42,7 +57,9 @@ def token_user():
     if not re.fullmatch(r'Bearer ptsq_[A-Za-z0-9_-]{43}', value):
         raise Unauthorized('API 인증키가 올바르지 않습니다.')
     digest = hashlib.sha256(value[7:].encode()).hexdigest()
-    row = db().local_tokens.find_one({'_id': digest, 'revoked': False, 'expires': {'$gt': time.time()}})
+    row = db().local_tokens.find_one({'_id': digest, 'revoked': False})
+    if row and expiry_status(row) != 'active':
+        row = None
     user = db().users.find_one({'_id': row['user']}) if row else None
     if (not user or not user.get('enabled', True)
             or current_connection_key(row['user']) != row['id']):
@@ -86,10 +103,15 @@ def tokens():
     upload_counts = {x['_id']: x['count'] for x in groups}
     download_counts = {x['_id']: x['count'] for x in downloads}
     for row in rows:
+        expiration = expiry_status(row)
         row.update(scope=row.get('scope', 'read'),
                    status=('replaced' if row.get('replacedBy') else 'revoked' if row.get('revoked')
-                           else 'expired' if row['expires'] <= time.time() else 'active' if row['id'] == current_id else 'replaced'),
+                           else expiration if expiration != 'active'
+                           else 'active' if row['id'] == current_id else 'replaced'),
                    uploads=upload_counts.get(row['id'], 0), downloads=download_counts.get(row['id'], 0))
+        if expiration == 'invalid':
+            # Do not emit non-JSON values such as NaN; status still requires reissue.
+            row['expires'] = None
         row.pop('replacedBy', None)
     uploads = list(db().tools.aggregate([
         {'$match': upload_match}, {'$unwind': '$versions'}, {'$match': upload_match},
@@ -112,19 +134,20 @@ def tokens():
 def issue():
     raw = request.get_json(silent=True)
     if not isinstance(raw, dict):
-        raise BadRequest('이름과 유효기간을 확인하세요.')
+        raise BadRequest('KEY 이름과 권한을 확인하세요.')
+    if 'days' in raw:
+        raise BadRequest('KEY는 유효기간 없이 발급됩니다. 화면을 새로고침하고 유효기간 항목 없이 다시 발급하세요.')
     name = raw.get('name', '내 연결 KEY')
-    days = raw.get('days', 7)
     scope = raw.get('scope', 'read')
-    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or type(days) is not int or days not in {1, 7, 30}:
-        raise BadRequest('이름은 1~60자, 유효기간은 1·7·30일입니다.')
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60:
+        raise BadRequest('KEY 이름은 1~60자입니다.')
     if not isinstance(scope, str) or scope not in {'read', 'publish'}:
         raise BadRequest('조회·다운로드 또는 업로드 포함 권한을 선택하세요.')
     current_connection_key(g.user['id'])
     token = 'ptsq_' + secrets.token_urlsafe(32)
     now = time.time()
     row = dict(_id=hashlib.sha256(token.encode()).hexdigest(), id=secrets.token_hex(16),
-               user=g.user['id'], name=name.strip(), created=now, expires=now + days * 86400, revoked=False, scope=scope)
+               user=g.user['id'], name=name.strip(), created=now, expires=None, revoked=False, scope=scope)
     db().local_tokens.insert_one(row)
     # A single document update is the cutover point. Never revoke all other rows
     # here: a concurrent reissue may already have created the next valid key.

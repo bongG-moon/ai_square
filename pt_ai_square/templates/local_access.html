@@ -13,9 +13,9 @@
 <div class="local-card-head"><div><span class="local-eyebrow">MY CONNECTION KEY</span><h2 id="key-title">내 연결 KEY</h2></div><span id="key-state" class="local-key-state">확인 중</span></div>
 <div class="local-employee"><span class="local-key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="9" r="4.5"/><path d="m11.5 12.5 7 7H22v-3.5h-3v-3h-3.5"/></svg></span><div><strong id="employee">로그인 정보를 확인하고 있습니다.</strong><p id="current-key-detail">발급 상태를 확인하고 있습니다.</p></div></div>
 <form id="token-form"><label>KEY 이름<input id="token-name" value="내 연결 KEY" maxlength="60" required></label>
-<label>유효기간<select id="token-days"><option value="1">1일</option><option value="7" selected>7일</option><option value="30">30일</option></select></label>
 <label>허용 작업<select id="token-scope"><option value="read">조회·다운로드</option><option value="publish">업로드 포함</option></select></label>
 <div class="local-form-actions"><button id="key-issue" class="sq-primary" type="submit" disabled>연결 KEY 발급</button><button id="key-revoke" class="sq-secondary" type="button" hidden>KEY 사용 취소</button></div></form>
+<p class="local-key-lifetime">새로 발급하는 KEY는 유효기간 제한 없이 사용합니다. 재발급하거나 사용을 취소하면 기존 KEY는 해제됩니다.</p>
 <p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 업로드 포함 권한도 도구 삭제·권한 변경은 허용하지 않습니다.</p>
 <div id="issued" class="local-issued" hidden><strong>새 연결 KEY가 준비되었습니다.</strong><p>원문은 지금 한 번만 표시됩니다. 연결할 프로그램의 인증키 입력란에 넣어주세요.</p>
 <div class="local-secret-row"><input id="secret" type="password" readonly aria-label="발급된 개인 API 인증키" autocomplete="off"><button id="copy-token" class="sq-secondary" type="button">KEY 복사</button></div><small>KEY 원문은 서버에 저장하지 않습니다. 잃어버리면 재발급해 주세요.</small></div>

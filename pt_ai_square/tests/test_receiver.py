@@ -22,7 +22,7 @@ spec.loader.exec_module(receiver)
 
 def key(app, uid='owner'):
     c, h = ready(app, uid)
-    r = c.post('/api/local-tokens', json={'name': 'test PC', 'days': 1}, headers=h)
+    r = c.post('/api/local-tokens', json={'name': 'test PC'}, headers=h)
     assert r.status_code == 201
     return r.json, {'Authorization': 'Bearer ' + r.json['token']}
 
