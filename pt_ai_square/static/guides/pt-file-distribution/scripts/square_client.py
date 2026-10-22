@@ -74,7 +74,7 @@ class Client:
         try:
             return self.opener.open(Request(self.url + path, data=data, headers=headers), timeout=self.timeout)
         except HTTPError as e:
-            messages = {401:'인증키가 없거나 만료·취소되었습니다. 웹의 로컬에서 받기에서 발급하세요.',
+            messages = {401:'연결 KEY가 없거나 재발급·취소·기존 만료일로 사용할 수 없습니다. 웹 상단 KEY 아이콘에서 상태를 확인하세요.',
                         403:'키의 허용 작업과 도구 조회·관리 권한을 확인하세요.',
                         404:'도구 또는 배포 파일을 찾을 수 없습니다.',
                         409:'현재 상태에서는 받을 수 없습니다. 더미 모드인지 확인하세요.',

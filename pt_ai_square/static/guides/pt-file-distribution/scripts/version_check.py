@@ -1,16 +1,28 @@
 """Optional startup check. Does not install, download artifacts, or modify files.
 
-The caller supplies its own authenticated HTTP opener when the site uses SSO. Browser login is NOT automatically inherited by a Python process.
+Pass a personal connection key explicitly, or supply an authenticated HTTP opener.
+Browser login is NOT automatically inherited by a Python process.
 """
 import json
+import re
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-def check_version(base_url, tool_id, installed_release, *, opener=None, timeout=2.0):
-    """Return a notice for the host UI; never write to stdout (MCP uses stdout)."""
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # The API has a fixed address. Never forward a key to a redirect target.
+        return None
+
+
+def check_version(base_url, tool_id, installed_release, *, token='', opener=None, timeout=2.0):
+    """Return a notice for the host UI; never write to stdout or persist a key.
+
+    A key uses the built-in non-redirecting transport. A custom opener is supported
+    for existing authenticated clients, but cannot be combined with token.
+    """
     parsed=urlsplit(base_url)
     if (parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password
             or parsed.query or parsed.fragment
@@ -19,9 +31,15 @@ def check_version(base_url, tool_id, installed_release, *, opener=None, timeout=
     if any(type(n) is not int or not 0<n<1000000000 for n in [tool_id,installed_release]):
         raise ValueError('tool_id and installed_release must be positive release identifiers.')
     if not 0<timeout<=10:raise ValueError('Use a bounded timeout of 0–10 seconds.')
+    if not isinstance(token,str) or (token and not re.fullmatch(r'ptsq_[A-Za-z0-9_-]{43}',token)):
+        raise ValueError('Use a valid personal connection key.')
+    if token and opener is not None:
+        raise ValueError('Use either a connection key or an authenticated opener, not both.')
     url=f'{base_url.rstrip("/")}/api/tools/{tool_id}/version-check?release={installed_release}'
+    headers={'Accept':'application/json'}
+    if token:headers['Authorization']='Bearer '+token
     try:
-        with (opener or build_opener()).open(Request(url,headers={'Accept':'application/json'}),timeout=timeout) as response:
+        with (opener or build_opener(_NoRedirect())).open(Request(url,headers=headers),timeout=timeout) as response:
             raw=response.read(65537)
         if len(raw)>65536:raise ValueError('Oversized response')
         data=json.loads(raw)
@@ -34,7 +52,7 @@ def check_version(base_url, tool_id, installed_release, *, opener=None, timeout=
         return data
     except HTTPError as error:
         status={401:'authentication_required',403:'permission_required',404:'not_found'}.get(error.code,'unavailable')
-        messages={'authentication_required':'버전 확인을 위한 로그인이 필요합니다. 실행 프로그램의 인증 연결을 확인해 주세요.',
+        messages={'authentication_required':'버전 확인 인증이 필요합니다. 연결 KEY가 취소·재발급되었는지 확인하고 새 KEY 또는 정상 인증 클라이언트를 연결해 주세요.',
                   'permission_required':'이 도구의 조회 권한이 필요합니다.',
                   'not_found':'공유 목록에서 도구를 찾을 수 없습니다.',
                   'unavailable':'서버에서 버전을 확인하지 못했습니다. 최신 버전 여부는 알 수 없습니다.'}

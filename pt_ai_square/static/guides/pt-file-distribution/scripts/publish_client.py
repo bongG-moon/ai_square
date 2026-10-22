@@ -98,10 +98,17 @@ def prepare(client, artifact, metadata, plan_path, tool_id=None, new=False):
         if not previous.get('canManage'):
             raise ClientError('이 도구의 새 버전을 게시할 권한이 없습니다.')
         revision = previous['revision']
-    keys = ['name','desc','platform','type','guide','environment','changes','workTags','orgId','categoryId']
+    keys = ['name','desc','platform','type','guide','environment','changes','workTags','orgId','categoryId','workflow']
     values = {k: previous[k] for k in keys if k in previous}
+    # A manual MD/URL/command update keeps its flow unless explicitly replaced
+    # or cleared. Recognized package metadata describes the new release and
+    # overrides this fallback, including a package that omits workflow.
     values.update(fields)
     values.update(metadata)
+    if package:
+        # Match the server's release contract, even if a draft contains an old
+        # workflow. Editing a recognized ZIP's flow requires changing its manifest.
+        values['workflow'] = package.get('workflow')
     values.setdefault('owner', options['employee']['name'])
     values['mode'] = 'file' if artifact else values.get('mode')
     values.pop('approval', None)  # Explicit publish --visibility is always required.

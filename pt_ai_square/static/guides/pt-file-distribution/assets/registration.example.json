@@ -5,7 +5,7 @@
   "program": "Claude",
   "type": "Skill",
   "organization": "등록자가 선택",
-  "owner": "등록자가 작성",
+  "owner": "담당자 표시명 (자동 게시는 인증된 사용자 이름을 기본 입력하며 실제 등록자 사번은 서버가 기록)",
   "sourceType": "file",
   "sourceFile": "weekly-report.zip",
   "runtime": "실제 확인한 환경을 작성",

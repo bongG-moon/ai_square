@@ -10,6 +10,7 @@ from .conftest import ready, publish as web_publish
 from .test_receiver import server
 from .test_package_declaration import declaration
 from .test_personal_api_usage import issue
+from .test_workflow import flow
 from pt_ai_square.backend.storage import db
 from pt_ai_square.backend import mongo_activity as activity
 
@@ -31,7 +32,7 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     config = tmp_path/'client.json'
     config.write_text(json.dumps({'baseUrl':server}))
     source = tmp_path/'source'; source.mkdir()
-    (source/'ai-square.json').write_text(json.dumps(declaration(), ensure_ascii=False), encoding='utf-8')
+    (source/'ai-square.json').write_text(json.dumps(declaration(workflow=flow()), ensure_ascii=False), encoding='utf-8')
     for name in ['main.py','requirements.txt','INSTALL.md']:
         (source/name).write_text('Example resource', encoding='utf-8')
     artifact=tmp_path/'tool.zip'
@@ -48,6 +49,7 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
         return json.loads(r.stdout)
     prepared=cli('prepare','--artifact',str(artifact),'--plan',str(plan),'--org-id','organization-0','--category-id','category-0')
     assert prepared['metadata']['name']=='선언한 도구' and prepared['metadata']['type']=='MCP/Tool'
+    assert prepared['metadata']['workflow'] == flow()
     assert prepared['action']=='new_tool' and not prepared['missing']
     assert 'approval' not in prepared['metadata']
     bad=subprocess.run(prefix+['publish','--plan',str(plan)],env=env,capture_output=True,encoding='utf-8')
@@ -61,13 +63,17 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     # New output file, same package ID + saved binding => same tool, v2.
     changed=tmp_path/'tool-v2.zip'
     (source/'main.py').write_text('updated resource')
+    # A newly inspected ZIP without a flow must override the prior release.
+    (source/'ai-square.json').write_text(json.dumps(declaration(), ensure_ascii=False), encoding='utf-8')
     result=subprocess.run([sys.executable,'-X','utf8',str(SCRIPTS/'prepare_package.py'),str(source),str(changed)],capture_output=True,encoding='utf-8')
     assert result.returncode==0,result.stderr
     prepared=cli('prepare','--artifact',str(changed),'--plan',str(plan))
     assert prepared['action']=='new_version' and prepared['toolId']==1 and prepared['currentApproval']
+    assert prepared['metadata']['workflow'] is None
     assert cli('publish','--plan',str(plan),'--visibility','public')['version']==2
     assert cli('publish','--plan',str(plan),'--visibility','public')['version']==2
     assert member.get('/download/1/2').status_code==200
+    assert owner.get('/api/tools/1/manifest').json['workflow'] is None
     assert owner.get('/api/local-tokens').json['usage']['uploads']==2
     with app.app_context():
         assert db().tools.count_documents({})==1
@@ -76,6 +82,10 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     client=publisher.Client(server,token['token'])
     found=publisher.prepare(client,changed,{},tmp_path/'elsewhere'/'plan.json')
     assert found['toolId']==1 and found['action']=='new_version'
+    # Preview and final publication must agree: a stale manual draft cannot
+    # override the inspected ZIP's release-specific workflow.
+    found=publisher.prepare(client,changed,{'workflow':flow('이전 초안')},tmp_path/'elsewhere'/'plan.json')
+    assert found['metadata']['workflow'] is None
 
 
 def test_md_preserved_and_package_candidate_lookup(app, server, tmp_path):
@@ -99,6 +109,36 @@ def test_md_preserved_and_package_candidate_lookup(app, server, tmp_path):
     # A different MD in the same directory must not silently replace this tool.
     other=tmp_path/'OTHER.md'; other.write_text('# another',encoding='utf-8')
     assert publisher.prepare(client,other,fields,plan)['action']=='new_tool'
+
+
+@pytest.mark.parametrize('change,expected', [
+    ({}, flow()),
+    ({'workflow': flow('새 자료 입력')}, flow('새 자료 입력')),
+    ({'workflow': None}, None),
+])
+def test_manual_release_workflow_preserved_replaced_or_removed(app, server, tmp_path, change, expected):
+    owner, h = ready(app); token, _ = issue(owner, h)
+    client = publisher.Client(server, token['token'])
+    md = tmp_path/'SKILL.md'; md.write_text('# 회의록 정리', encoding='utf-8')
+    fields = dict(name='회의록', desc='회의 자료를 정리합니다.', platform='Claude', type='Skill',
+                  guide='설치 범위를 선택하세요.', orgId='organization-0', categoryId='category-0',
+                  workflow=flow())
+    plan = tmp_path/'plan.json'
+    publisher.prepare(client, md, fields, plan)
+    assert publisher.publish(client, plan, 'public')['version'] == 1
+    md.write_text('# 회의록 정리\n업데이트', encoding='utf-8')
+    prepared = publisher.prepare(client, md, change, plan)
+    assert prepared['action'] == 'new_version' and prepared['metadata']['workflow'] == expected
+    assert publisher.publish(client, plan, 'public')['version'] == 2
+    current = owner.get('/api/tools/1').json
+    assert current['workflow'] == expected
+    assert current['versions'][0]['workflow'] == expected
+    assert current['versions'][1]['workflow'] == flow()
+    assert owner.get('/api/tools/1/manifest').json['workflow'] == expected
+    assert owner.get('/download/1/2').data == md.read_bytes()
+    assert owner.post('/api/tools/1/rollback', headers=h,
+                      json={'version': 1, 'expectedRevision': 2}).status_code == 200
+    assert owner.get('/api/tools/1/manifest').json['workflow'] == flow()
 
 
 def test_key_missing_opens_safe_auth_page(app, server, tmp_path, monkeypatch, capsys):
