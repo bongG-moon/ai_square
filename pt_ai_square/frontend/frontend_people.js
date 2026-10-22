@@ -8,6 +8,8 @@ peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','POWER USER','','t
 $('.sq-chart-controls').insertAdjacentHTML('beforeend','<span id="sq-my-rank" class="sq-my-rank" hidden></span>');
 $('#sq-session').classList.add('sq-profile');
 $('#sq-session').insertAdjacentHTML('afterend',`<a id="sq-connection-key" class="sq-quiet sq-key-link" href="/local-access" aria-label="내 연결 KEY 발급·관리" title="연결 KEY 발급·관리">${icon('key-round')}</a>`);
+// Keep action icons anchored after the photo as the department text grows.
+$('#sq-connection-key').before($('.ws-bell'));
 $('#sq-connection-key').addEventListener('click',event=>{
  if(server.dataMode==='dummy'){
   event.preventDefault();openModal('나의 연결 KEY','개인 연결',`<div class="sq-detail-hero"><h3>내 사번으로, 안전하게 연결.</h3><p>실제 데이터 모드에서 연결 KEY를 발급할 수 있습니다. 사번당 활성 키는 하나이며 재발급하면 이전 키는 즉시 사용할 수 없습니다.</p></div>`);
