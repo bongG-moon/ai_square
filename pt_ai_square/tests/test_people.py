@@ -129,3 +129,79 @@ def test_numeric_mock_employee_photo_never_reaches_company_service(people_app,mo
     def unexpected(employee):raise AssertionError('mock must never request an intranet photo')
     monkeypatch.setattr(people_module,'_fetch_photo',unexpected)
     assert people_app.test_client().get('/api/me/photo').status_code==404
+
+
+def add_contributor(app, employee='0012345', enabled=True, deleted=False):
+    with app.app_context():
+        ensure_user(employee, '공유 구성원', '융합기술')
+        db().users.update_one({'_id':employee},{'$set':{'enabled':enabled,'dept':'융합기술'}})
+        db().tools.insert_one({'_id':900,'owner':employee,'deleted':deleted})
+
+
+def test_ranking_portrait_contract_and_fixed_host_without_forwarded_credentials(people_app,monkeypatch):
+    add_contributor(people_app)
+    calls=[]
+    class Opener:
+        def open(self,request,timeout):
+            calls.append((request.full_url,dict(request.header_items()),timeout))
+            return FakePhoto(b'\xff\xd8\xffportrait')
+    monkeypatch.setattr(people_module,'build_opener',lambda *handlers:Opener())
+    viewer,_=ready(people_app,'member')
+    data=viewer.get('/api/people/ranking').json
+    row=data['items'][0]
+    assert (row['name'],row['org'],row['score'])==('공유 구성원','융합기술',5)
+    assert row['photoUrl']=='/api/people/0012345/photo'
+    assert data['me']['photoUrl'] is None
+    response=viewer.get(row['photoUrl'])
+    assert response.status_code==200 and response.mimetype=='image/jpeg'
+    assert response.data==b'\xff\xd8\xffportrait'
+    assert response.headers['Cache-Control']=='private, no-store'
+    assert response.headers['X-Content-Type-Options']=='nosniff'
+    assert calls==[(people_module.PHOTO_BASE+'0012345.jpg',{'Accept':'image/jpeg,image/png,image/webp,image/gif'},3)]
+    assert viewer.get(row['photoUrl']).status_code==200 and len(calls)==1
+    # Cached portraits also become inaccessible when a contributor is disabled.
+    with people_app.app_context():db().users.update_one({'_id':'0012345'},{'$set':{'enabled':False}})
+    assert viewer.get(row['photoUrl']).status_code==404 and len(calls)==1
+
+
+@pytest.mark.parametrize('case,employee',[
+    ('unknown','0012345'),('disabled','0012345'),('no-tools','0012345'),
+    ('deleted','0012345'),('nonnumeric','owner'),('too-long','1'*21),
+])
+def test_ineligible_contributor_portraits_never_fetch_upstream(people_app,monkeypatch,case,employee):
+    if case not in {'unknown','no-tools'}:
+        add_contributor(people_app,employee,enabled=case!='disabled',deleted=case=='deleted')
+    elif case=='no-tools':
+        with people_app.app_context():ensure_user(employee,'공유 전 구성원')
+    def unexpected(employee):raise AssertionError('ineligible portrait must not reach company service')
+    monkeypatch.setattr(people_module,'_fetch_photo',unexpected)
+    viewer,_=ready(people_app,'member')
+    response=viewer.get('/api/people/'+employee+'/photo')
+    assert response.status_code==404
+    assert response.headers['Cache-Control']=='private, no-store'
+
+
+def test_unauthenticated_and_mock_ranking_portraits_do_not_fetch_company_service(people_app,monkeypatch):
+    add_contributor(people_app)
+    def unexpected(employee):raise AssertionError('unauthenticated/mock portrait must not reach company service')
+    monkeypatch.setattr(people_module,'_fetch_photo',unexpected)
+    assert people_app.test_client().get('/api/people/0012345/photo').status_code==401
+    people_app.config.update(AUTH_MODE='mock',MOCK_USER='0012345',MOCK_NAME='로컬 구성원')
+    viewer=people_app.test_client()
+    assert viewer.get('/api/people/0012345/photo').status_code==404
+    data=viewer.get('/api/people/ranking').json
+    assert data['items'][0]['photoUrl'] is None and data['me']['photoUrl'] is None
+
+
+def test_contributor_portrait_uses_existing_image_validation_and_failure_cache(people_app,monkeypatch):
+    add_contributor(people_app)
+    calls=[]
+    class Opener:
+        def open(self,request,timeout):
+            calls.append(request.full_url)
+            return FakePhoto(b'<svg>not a photograph</svg>','image/jpeg')
+    monkeypatch.setattr(people_module,'build_opener',lambda *handlers:Opener())
+    viewer,_=ready(people_app,'member')
+    assert viewer.get('/api/people/0012345/photo').status_code==404
+    assert viewer.get('/api/people/0012345/photo').status_code==404
+    assert calls==[people_module.PHOTO_BASE+'0012345.jpg']

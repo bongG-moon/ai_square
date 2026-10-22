@@ -58,14 +58,16 @@ def _fetch_photo(employee):
         return data, actual
 
 
-@people.get('/api/me/photo')
-def photo():
-    if current_app.config['AUTH_MODE'] != 'sso':
+def _photo_enabled(employee):
+    # Local/mock identities never leave this service, even if numeric.
+    return (current_app.config['AUTH_MODE'] == 'sso'
+            and current_app.config['DATA_MODE'] == 'mongodb'
+            and re.fullmatch(r'[0-9]{1,20}', employee) is not None)
+
+
+def _photo_response(employee):
+    if not _photo_enabled(employee):
         return Response(status=404, headers={'Cache-Control': 'private, no-store'})
-    employee = str(g.user['id'])
-    # Mock identities such as 'owner' never leave the local service.
-    if not re.fullmatch(r'[0-9]{1,20}', employee):
-        return Response(status=404)
     now = time.monotonic()
     with _photo_lock:
         cached = _photo_cache.get(employee)
@@ -93,6 +95,22 @@ def photo():
     # must not show a previous employee's face after an account switch; the
     # bounded server cache above is separately keyed by employee number.
     return Response(data, mimetype=mime, headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@people.get('/api/me/photo')
+def photo():
+    return _photo_response(str(g.user['id']))
+
+
+@people.get('/api/people/<employee>/photo')
+def contributor_photo(employee):
+    # This is a portrait for a platform contributor, not a general employee
+    # directory proxy. Check eligibility before consulting the image cache too.
+    if (not _photo_enabled(employee)
+            or not db().users.find_one({'_id': employee, 'enabled': {'$ne': False}}, {'_id': 1})
+            or not db().tools.find_one({'owner': employee, 'deleted': {'$ne': True}}, {'_id': 1})):
+        return Response(status=404, headers={'Cache-Control': 'private, no-store'})
+    return _photo_response(employee)
 
 
 def _ranking_pipeline():
@@ -145,13 +163,14 @@ def ranking():
     for total, row in enumerate(rows, 1):
         row.update(id=row.pop('_id'), rank=total)
         row['isMe'] = row['id'] == g.user['id']
+        row['photoUrl'] = f"/api/people/{row['id']}/photo" if _photo_enabled(str(row['id'])) else None
         if total <= 10:
             items.append(row)
         if row['isMe']:
             me = row
     if me is None:
         me = dict(id=g.user['id'], name=g.user['name'], org=g.user['org'], rank=None,
-                  registered=0, likes=0, downloads=0, score=0, isMe=True)
+                  registered=0, likes=0, downloads=0, score=0, isMe=True, photoUrl=None)
     return jsonify(items=items, me=me, totalUsers=total, period='all', asOf=time.time(),
         weights=dict(registered=5, likes=2, downloads=1),
         method='등록 도구 × 5 + 받은 좋아요 × 2 + 고유 다운로드 × 1 · 전체 기간',
