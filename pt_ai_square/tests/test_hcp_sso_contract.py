@@ -128,10 +128,49 @@ def test_mock_bypasses_hcp_and_sets_employee_session(app):
     with client.session_transaction() as session:
         assert session['emp_no']=='0000099' and session['logFlag'] is True
 
-@pytest.mark.parametrize('target',['http://sso.example.test/','https://[broken'])
-def test_invalid_sdk_redirect_is_configuration_error(hcp,target):
+@pytest.mark.parametrize('target,reason',[
+    (None,'missing_url'),('', 'missing_url'),(17,'missing_url'),
+    ('https://[broken','malformed_url'),('https://sso.example.test:bad/','malformed_url'),
+    ('https://sso.example.test:99999/','malformed_url'),('https:///login','missing_host'),
+    ('javascript:alert(1)','unsupported_scheme'),('data:text/html,hello','unsupported_scheme'),
+    ('//sso.example.test/','network_path'),('///sso.example.test/','network_path'),
+    ('/\\sso.example.test/','backslash'),('https://@sso.example.test/','userinfo'),
+    ('https://user:private-password@sso.example.test/','userinfo'),
+    (' https://sso.example.test/','invalid_whitespace'),
+    ('https://sso.example.test/\r\nLocation: https://outside.example/','invalid_whitespace'),
+    ('login/continue','invalid_relative_path'),
+])
+def test_invalid_sdk_redirect_is_configuration_error(hcp,target,reason,caplog):
     client,_,SSO=hcp;SSO.redirect_url=target
     assert client.get('/login').status_code==503
+    assert f'HCP SSO failure stage=redirect_url reason={reason}' in caplog.text
+    assert 'private-password' not in caplog.text
+    with client.session_transaction() as session:assert '_hcp_login' not in session
+
+
+@pytest.mark.parametrize('target',[
+    'http://sso.example.test/return?ticket=private-ticket',
+    'https://sso.example.test:8443/return?ticket=private-ticket',
+    '/return?ticket=private-ticket',
+])
+def test_sdk_web_redirect_preserves_scheme_host_port_and_query(hcp,target,caplog):
+    client,_,SSO=hcp;SSO.redirect_url=target
+    response=client.get('/login')
+    assert response.status_code==302 and response.location==target
+    client.set_cookie('company','valid')
+    response=client.get('/login')
+    assert response.status_code==302 and response.location==target
+    assert client.get('/api/bootstrap').json['user']['id']=='0012345'
+    assert client.get('/').status_code==200
+    assert 'private-ticket' not in caplog.text
+
+
+@pytest.mark.parametrize('base',['http://platform.example.test:8081/portal','/portal'])
+def test_nested_login_preserves_sdk_http_or_relative_target(hcp,base):
+    client,_,SSO=hcp;SSO.redirect_url=base+'?ticket=value'
+    response=client.get('/login/tools/17')
+    assert response.status_code==302
+    assert response.location==base+'/tools/17?ticket=value'
 
 
 def test_refresh_and_admin_delete_do_not_reenter_login_sdk(app):

@@ -41,6 +41,31 @@ def login_target(target,sub_path):
     parts=urlsplit(target)
     return urlunsplit((parts.scheme,parts.netloc,parts.path.rstrip('/')+'/'+quote(sub_path,safe='/'),parts.query,parts.fragment))
 
+
+def sdk_redirect_error(target):
+    """Validate SDK output without imposing a deployment scheme or port.
+
+    This is not the policy for user-supplied ORIGIN, which stays same-origin.
+    HCP deployments may return HTTP, HTTPS or a root-relative application path.
+    """
+    if not isinstance(target,str) or not target:return 'missing_url'
+    if target!=target.strip() or any(ord(c)<32 or ord(c)==127 for c in target):return 'invalid_whitespace'
+    if '\\' in target:return 'backslash'
+    if target.startswith('//'):return 'network_path'
+    try:
+        parts=urlsplit(target)
+        if parts.username is not None or parts.password is not None:return 'userinfo'
+        if parts.scheme:
+            if parts.scheme not in {'http','https'}:return 'unsupported_scheme'
+            if not parts.hostname or any(c.isspace() for c in parts.netloc):return 'missing_host'
+            parts.port  # Validate an explicit port without changing it.
+        elif parts.netloc or not target.startswith('/'):
+            return 'invalid_relative_path'
+    except ValueError:
+        return 'malformed_url'
+    return None
+
+
 def valid_origin(value):
     if not value:return True
     decoded=unquote(value)
@@ -119,7 +144,7 @@ def install_auth(app):
                 stage='initialize'
                 sso=factory(request)
                 stage='redirect_url'
-                target=str(sso.redirect_url)
+                target=sso.redirect_url
                 cookie=request.headers.get('Cookie','')
                 stage='check_day_cookie'
                 if cookie and sso.check_day_cookie(cookie) is True:
@@ -135,10 +160,10 @@ def install_auth(app):
                 # cookies, tokens, addresses or personal information.
                 app.logger.error('HCP SSO failure stage=%s error=%s',stage,type(error).__name__)
                 return render_template('login.html',error='HCP SSO 모듈·쿠키 검증 설정을 확인해 주세요. 다른 인증 모드로 자동 전환하지 않습니다.',mode='sso'),503
-            try:parts=urlsplit(target)
-            except ValueError:parts=None
-            if not parts or parts.scheme!='https' or not parts.netloc or parts.username or parts.password:
-                return render_template('login.html',error='HCP SSO의 HTTPS 로그인 주소를 확인해 주세요.',mode='sso'),503
+            reason=sdk_redirect_error(target)
+            if reason:
+                app.logger.error('HCP SSO failure stage=redirect_url reason=%s',reason)
+                return render_template('login.html',error='HCP SSO가 반환한 로그인 이동 주소 형식을 확인해 주세요.',mode='sso'),503
             target=login_target(target,sub_path)
             if target is None:return jsonify(error='로그인 경로를 확인해 주세요.'),400
             if identity:
