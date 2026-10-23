@@ -157,10 +157,26 @@ function wizard(){
 }
 async function publish(){
  const d=runtime.draft,error=packageBlockingError(d)||Core.validate(d,1)||Core.validate(d,2);if(runtime.step!==3||error){if(error)throw Error(error);return;}
- const form=new FormData();form.append('metadata',JSON.stringify({...d,file:undefined,sample:undefined,packageInspection:undefined}));if(d.mode==='file')form.append('artifact',d.file);
+ const metadata=JSON.stringify({...d,file:undefined,sample:undefined,packageInspection:undefined}),target=runtime.releaseId||null,file=d.mode==='file'?d.file:null;
+ // Match the API's publish identity fields; preview state and revision checks are not content.
+ const identity=Object.fromEntries(['name','desc','owner','platform','type','guide','environment','changes','org','orgId','category','categoryId'].map(key=>[key,String(d[key]??'').trim()]));
+ identity.approval=!!d.approval;identity.workflow=d.workflow||null;
+ identity.workTags=[...new Set((Array.isArray(d.workTags)?d.workTags:String(d.workTags||'').split(/[,，\n]/)).map(tag=>tag.trim().replace(/\s+/g,' ')).filter(Boolean))];
+ identity.mode=d.mode;identity.url=d.mode==='url'?String(d.url||'').trim():'';
+ identity.commands=d.mode==='command'?{project:String(d.commandProject||'').trim(),user:String(d.commandUser||'').trim()}:{};
+ const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+ const signature=JSON.stringify(canonical(identity));
+ let attempt=runtime.publishAttempt;
+ if(!attempt||attempt.signature!==signature||attempt.target!==target||attempt.file!==file){
+  const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
+  attempt=runtime.publishAttempt={signature,target,file,id:`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`};
+ }
+ const form=new FormData();form.append('metadata',JSON.stringify({...JSON.parse(metadata),clientRequestId:attempt.id}));if(file)form.append('artifact',file);
  const result=await requestAPI(runtime.releaseId?`/api/tools/${runtime.releaseId}/versions`:'/api/tools','POST',form);
- runtime.newId=result.id;runtime.draft=null;await refresh();
- openModal('공유할 준비가 되었습니다.','게시 완료',`<div class="sq-success"><span class="sq-feature-icon">${icon('check')}</span><h3>${esc(getItem(result.id).name)}</h3><p>v${result.version}을 서버에 저장했습니다.<br>설치·연결 안내와 공개 범위를 확인해 주세요.</p>${result.packageWarning?`<div class="ws-package"><strong>파일은 게시되었습니다. 배포 정보는 읽지 못했습니다.</strong><p>${esc(result.packageWarning)}</p><p>직접 입력한 등록 정보로 제공됩니다.</p></div>`:''}${result.deploymentUrl?`<div class="ws-package"><strong>도구 ID ${result.id} · 배포 v${result.version}</strong><p>배포 정보에 원본 파일·버전 확인 주소를 연결했습니다.</p><a class="sq-link" href="${esc(result.deploymentUrl)}" download>배포 정보 JSON 받기</a></div>`:''}<div class="sq-actions" style="justify-content:center">${button('published-detail','상세 화면 보기','sq-primary')}${button('manage','등록 도구 관리')}</div></div>`);
+ runtime.newId=result.id;runtime.draft=null;runtime.publishAttempt=null;
+ let refreshNotice='';try{await refresh();}catch{refreshNotice='게시가 완료되었습니다. 목록을 갱신하지 못했으므로 새로고침 후 확인해 주세요.';}
+ openModal('공유할 준비가 되었습니다.','게시 완료',`<div class="sq-success"><span class="sq-feature-icon">${icon('check')}</span><h3>${esc(getItem(result.id)?.name||d.name)}</h3><p>v${result.version}을 서버에 저장했습니다.<br>설치·연결 안내와 공개 범위를 확인해 주세요.</p>${refreshNotice?`<p role="status">${refreshNotice}</p>`:''}${result.pending?'<p role="status">게시가 완료되었습니다. 이력·알림은 다음 조회 시 동기화됩니다.</p>':''}${result.packageWarning?`<div class="ws-package"><strong>파일은 게시되었습니다. 배포 정보는 읽지 못했습니다.</strong><p>${esc(result.packageWarning)}</p><p>직접 입력한 등록 정보로 제공됩니다.</p></div>`:''}${result.deploymentUrl?`<div class="ws-package"><strong>도구 ID ${result.id} · 배포 v${result.version}</strong><p>배포 정보에 원본 파일·버전 확인 주소를 연결했습니다.</p><a class="sq-link" href="${esc(result.deploymentUrl)}" download>배포 정보 JSON 받기</a></div>`:''}<div class="sq-actions" style="justify-content:center">${button('published-detail','상세 화면 보기','sq-primary')}${button('manage','등록 도구 관리')}</div></div>`);
 }
 
 function versionManager(id){const x=getItem(id);runtime.detailId=x.id;const rows=x.versions.filter(v=>!v.deleted).map(v=>`<div class="sq-version"><div><strong>v${v.n}</strong> ${v.n===x.active?'<span class="sq-badge blue">현재 배포</span>':v.withdrawn?'<span class="sq-badge">배포 중단</span>':v.n===x.fallback?'<span class="sq-badge">복구용 보호</span>':''}<p>${esc(v.note)} · ${v.age}일 전 · ${v.size} MB</p></div><div class="sq-row-actions">${button('rollback','이 버전으로 복구','',`data-version="${v.n}" ${v.n===x.active||v.withdrawn?'disabled':''}`)}${button('delete-version','삭제','',`data-version="${v.n}" ${Core.canDelete(x,v)?'':'disabled'}`)}</div></div>`).join('');openModal('버전과 배포 관리',x.name,`<div class="sq-admin-head"><div><h3>현재 배포 v${x.active}</h3><p class="sq-note">배포 지시 번호 ${x.revision} · ${x.updatePaused?'업데이트 보류':'업데이트 정보 제공'}</p></div>${button('new-release','새 버전 등록','sq-primary',`data-id="${x.id}"`)}</div>${x.updatePaused?'<div class="sq-callout"><strong>이전 버전으로 복구했습니다.</strong> 문제가 있던 버전은 배포가 중단되었습니다. 사용자 PC 반영 여부는 연동 앱에서 별도로 확인해야 합니다.</div>':''}<div class="sq-version-list">${rows}</div><div class="sq-callout">현재 배포와 복구용 버전은 삭제할 수 없습니다. PC별 설치 현황은 아직 수집하지 않습니다. 파일을 지워도 배포 이력과 변경 기록은 남깁니다.</div><div class="sq-actions">${button('manage','관리 목록으로')}</div>`);}
@@ -235,7 +251,16 @@ const actions={
  idea:()=>openModal('이런 도구가 있으면 좋겠어요.','개발 아이디어 제안',`<form id="sq-idea-form"><div class="sq-form-grid"><label class="sq-field wide"><span>아이디어 제목</span><input name="name" required placeholder="예: 여러 장비의 점검 이력을 한 번에 비교하고 싶어요."></label><label class="sq-field wide"><span>현재 불편한 점과 원하는 결과</span><textarea name="desc" required></textarea></label><label class="sq-field"><span>관련 업무</span><select name="category">${options(['공통 업무','제조','장비','기술'],'공통 업무')}</select></label></div><div class="sq-actions"><button class="sq-primary cursor-interaction">제안 등록</button></div></form>`)
 };
 const server={csrf:'',user:{},rankAsOf:0,storage:null,ideas:[]};
-function showError(error){const message=error.message||'처리 중 오류가 발생했습니다.';const target=$('#sq-register-error')||$('#sq-edit-error')||$('#sq-org-error');if(target)target.textContent=message;else {let banner=$('#sq-server-error');if(!banner){banner=document.createElement('p');banner.id='sq-server-error';banner.className='sq-server-error';banner.setAttribute('role','alert');$('.sq-shell').prepend(banner);}banner.hidden=false;banner.textContent=message;}announce(message);}
+function showError(error,target){
+ const message=error?.message||'처리 중 오류가 발생했습니다.',body=$('#sq-dialog')?.open?$('#sq-dialog-body'):null;
+ if(!target?.isConnected)target=body?.querySelector('#sq-register-error,#sq-edit-error,#sq-org-error')||(!body?$('#ws-capacity-message'):null);
+ if(!target&&body){target=$('#ws-dialog-error');if(!target){target=document.createElement('p');target.id='ws-dialog-error';target.className='sq-error';body.prepend(target);}}
+ if(!target){target=$('#sq-server-error');if(!target){target=document.createElement('p');target.id='sq-server-error';target.className='sq-server-error';$('.sq-shell').prepend(target);}}
+ // The alert is also the accessible announcement; announce() would add a second blue message.
+ $$('#sq-server-error,#ws-dialog-error,#sq-register-error,#sq-edit-error,#sq-org-error,#ws-capacity-message,#sq-status,#sq-modal-status').forEach(node=>{if(node!==target){node.textContent='';if(node.id==='sq-server-error')node.hidden=true;}});
+ target.hidden=false;target.setAttribute('role','alert');target.setAttribute('aria-live','assertive');target.textContent=message;
+ if(body)target.scrollIntoView?.({block:'nearest'});
+}
 async function requestAPI(url,method='GET',body){
  runtime.requestBusy=(runtime.requestBusy||0)+1;
  try{const headers={'X-CSRF-Token':server.csrf};if(body&&!(body instanceof FormData))headers['Content-Type']='application/json';
@@ -259,12 +284,40 @@ async function downloadVersion(id,n){
  const check=await fetch(`/download/${id}/${n}`,{method:'HEAD'});if(!check.ok)throw Error('파일을 받을 수 없습니다. 권한 또는 배포 상태를 확인해 주세요.');
  const a=document.createElement('a');a.href=`/download/${id}/${n}`;a.download=v.filename;document.body.append(a);a.click();a.remove();setTimeout(()=>refresh().catch(showError),1500);
 }
-actions.like=async b=>{const id=+b.dataset.id,liked=!state.liked.has(id);const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked});const x=getItem(id);x.likes=result.count-(liked?1:0);liked?state.liked.add(id):state.liked.delete(id);
- $$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.setAttribute('aria-pressed',String(liked));const count=control.querySelector('[data-like-count]')||(control.classList.contains('sq-like')?control.querySelector('span'):null);if(count)count.textContent=num(result.count);const label=control.querySelector('[data-like-label]');if(label)label.textContent=liked?'좋아요 취소':'좋아요';});
- if($('#sq-dialog').open&&runtime.detailId===id){const summary=$('.sq-detail-id p');if(summary)summary.textContent=`다운로드 ${num(x.downloads)} · 좋아요 ${num(result.count)}`;}
- const heart=b.querySelector('svg');if(liked&&!motion.matches&&heart?.animate)heart.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:330});
- if(result.pending){showError({message:result.notice});return;}
- await refresh();announce(liked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');};
+function setLikeBusy(id,busy){$$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.disabled=busy;if(busy)control.setAttribute('aria-busy','true');else control.removeAttribute('aria-busy');});}
+function applyLikeResult(id,liked,count){
+ const x=getItem(id);if(x)x.likes=count-(liked?1:0);liked?state.liked.add(id):state.liked.delete(id);
+ $$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.setAttribute('aria-pressed',String(liked));const counter=control.querySelector('[data-like-count]')||(control.classList.contains('sq-like')?control.querySelector('span'):null);if(counter)counter.textContent=num(count);const label=control.querySelector('[data-like-label]');if(label)label.textContent=liked?'좋아요 취소':'좋아요';});
+ if(x&&$('#sq-dialog').open&&runtime.detailId===id){const summary=$('.sq-detail-id p');if(summary)summary.textContent=`다운로드 ${num(x.downloads)} · 좋아요 ${num(count)}`;}
+}
+// Catalog/rank rendering or opening a detail can create another control during the request.
+new MutationObserver(()=>{runtime.likeRequests?.forEach((_,id)=>setLikeBusy(id,true));}).observe(root,{childList:true,subtree:true});
+actions.like=b=>{
+ const id=+b.dataset.id,pending=runtime.likeRequests||(runtime.likeRequests=new Map());
+ if(pending.has(id))return pending.get(id).promise;
+ const operation={},liked=!state.liked.has(id);pending.set(id,operation);setLikeBusy(id,true);
+ operation.promise=(async()=>{
+ const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked}),savedLiked=result.liked??liked;applyLikeResult(id,savedLiked,result.count);
+ const heart=b.querySelector('svg');if(savedLiked&&!motion.matches&&heart?.animate)heart.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:330});
+ // Keep concurrent cards independent, but do not apply older bootstrap responses last.
+ runtime.likeRefresh=(runtime.likeRefresh||Promise.resolve()).catch(()=>{}).then(()=>refresh());
+ try{await runtime.likeRefresh;}catch(error){applyLikeResult(id,savedLiked,result.count);showError({message:`좋아요 ${savedLiked?'추가':'취소'}는 저장되었습니다. 목록·순위를 새로고침하지 못했습니다. ${error.message}`});return;}
+ announce(result.pending?'좋아요는 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':savedLiked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');
+ })().finally(()=>{pending.delete(id);setLikeBusy(id,false);});
+ return operation.promise;
+};
+actions['published-detail']=async()=>{
+ const id=runtime.newId,token=invalidateDetailLoad();
+ const viewError=error=>Error(`게시한 도구는 저장되어 있습니다. 상세 화면을 불러오지 못했습니다. ${error.message}`);
+ // Only guard the bootstrap recovery; detail() starts and owns its own load token.
+ try{if(!getItem(id))await refresh();}
+ catch(error){if(token!==runtime.detailLoadToken)return false;throw viewError(error);}
+ if(token!==runtime.detailLoadToken)return false;
+ try{
+  if(!getItem(id))throw Error('목록에서 게시한 도구를 찾지 못했습니다.');
+  return await detail(id);
+ }catch(error){throw viewError(error);}
+};
 actions['rank-refresh']=async()=>{await refresh();closeModal();announce('서버 집계 기준으로 갱신했습니다.');};
 actions['download-file']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
 actions['version-download']=b=>downloadVersion(runtime.detailId,+b.dataset.version);
@@ -503,9 +556,7 @@ root.addEventListener('submit',event=>{
   }
  })().catch(showError).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=false);});
 },true);
-// Keep errors visible in the active dialog, not behind its backdrop.
-const originalError=showError;
-showError=function(error){if($('#sq-dialog').open){let e=$('#ws-dialog-error');if(!e){e=document.createElement('p');e.id='ws-dialog-error';e.className='sq-error';e.setAttribute('role','alert');$('#sq-dialog-body').prepend(e);}e.textContent=error.message;e.scrollIntoView({block:'nearest'});announce(error.message);}else originalError(error);};
+// showError keeps one accessible error in the active form/dialog or page banner.
 setInterval(()=>{if(document.hidden||runtime.requestBusy)return;requestAPI('/api/notifications?unread=true').then(r=>{server.unread=r.unread;$('#ws-unread').hidden=!r.unread;$('#ws-unread').textContent=r.unread>99?'99+':r.unread;}).catch(()=>{});},30000);
 
 function fileSize(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
@@ -657,11 +708,15 @@ root.addEventListener('submit',e=>{
  e.preventDefault();e.stopImmediatePropagation();if(form.dataset.busy)return;
  const message=form.querySelector('#ws-capacity-message'),quota=Number(form.elements.quotaGB.value),reserve=Number(form.elements.reserveGB.value);
  const quotaBytes=Math.round(quota*1073741824),reserveBytes=Math.round(reserve*1073741824);
- if(!Number.isFinite(quota)||!Number.isFinite(reserve)||quotaBytes<1048576||reserve<0){message.textContent='한도는 최소 1MB, 여유 공간은 0 이상으로 입력하세요.';return;}
- form.dataset.busy='true';const button=form.querySelector('[type=submit]');button.disabled=true;message.textContent='저장하고 있습니다.';
- requestAPI('/api/storage/limits','PUT',{mode:form.elements.mode.value,quotaBytes,reserveBytes,expectedRevision:Number(form.dataset.revision)})
- .then(async()=>{await refresh();const status=$('#ws-capacity-message');if(status)status.textContent='저장했습니다. 기존 파일은 그대로 유지됩니다.';})
- .catch(error=>{message.textContent=error.message;})
+ if(!Number.isFinite(quota)||!Number.isFinite(reserve)||quotaBytes<1048576||reserve<0){showError({message:'한도는 최소 1MB, 여유 공간은 0 이상으로 입력하세요.'},message);return;}
+ form.dataset.busy='true';const button=form.querySelector('[type=submit]');button.disabled=true;message.setAttribute('role','status');message.setAttribute('aria-live','polite');message.textContent='저장하고 있습니다.';
+ return requestAPI('/api/storage/limits','PUT',{mode:form.elements.mode.value,quotaBytes,reserveBytes,expectedRevision:Number(form.dataset.revision)})
+ .then(async result=>{
+  server.storage={...server.storage,...result.storage};form.dataset.revision=String(server.storage.limitRevision);
+  try{await refresh();}catch(error){showError({message:`한도 설정은 저장되었습니다. 화면을 새로고침하지 못했습니다. ${error.message}`},$('#ws-capacity-message'));return;}
+  const status=$('#ws-capacity-message');if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent=result.pending?'한도 설정은 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':'저장했습니다. 기존 파일은 그대로 유지됩니다.';}
+ })
+ .catch(error=>{showError(error,$('#ws-capacity-message'));})
  .finally(()=>{delete form.dataset.busy;button.disabled=false;});
 },true);
 

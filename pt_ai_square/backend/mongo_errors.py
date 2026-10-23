@@ -13,6 +13,9 @@ def mongo_diagnostic(error):
     if isinstance(error, BulkWriteError):
         code = 'DB-BULK-WRITE'
         message = 'MongoDB 일괄 저장 중 오류가 발생했습니다. 일부 항목은 저장되었을 수 있습니다.'
+    elif mongo_code == 225:
+        code = 'DB-SESSION-ORDER'
+        message = 'MongoDB가 이전 작업 번호로 전달된 요청을 거부했습니다. 운영자가 서버 프로세스별 DB 연결과 세션 상태를 확인해야 합니다.'
     elif isinstance(error, DuplicateKeyError) or mongo_code == 11000:
         code = 'DB-DUPLICATE'
         message = 'MongoDB에서 중복된 값으로 저장이 거부되었습니다. 기존 등록 내용과 중복 기준을 확인해야 합니다.'

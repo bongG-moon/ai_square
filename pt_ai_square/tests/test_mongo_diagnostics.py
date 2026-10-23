@@ -25,6 +25,7 @@ PRIVATE = 'mongodb://private-user:private-password@private-host/employee-data'
     (OperationFailure(PRIVATE, 13), 'DB-PERMISSION', 13),
     (DuplicateKeyError(PRIVATE, 11000), 'DB-DUPLICATE', 11000),
     (OperationFailure(PRIVATE, 121), 'DB-DOCUMENT', 121),
+    (OperationFailure(PRIVATE, 225), 'DB-SESSION-ORDER', 225),
     (OperationFailure(PRIVATE, 40324), 'DB-OPERATION', 40324),
     (BulkWriteError({'writeErrors': [{'code': 11000, 'errmsg': PRIVATE, 'op': {'secret': PRIVATE}}]}), 'DB-BULK-WRITE', 65),
     (PyMongoError(PRIVATE), 'DB-ERROR', None),

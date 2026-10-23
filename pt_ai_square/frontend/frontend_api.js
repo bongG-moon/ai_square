@@ -1,10 +1,19 @@
 const server={csrf:'',user:{},rankAsOf:0,storage:null,ideas:[]};
-function showError(error){const message=error.message||'처리 중 오류가 발생했습니다.';const target=$('#sq-register-error')||$('#sq-edit-error')||$('#sq-org-error');if(target)target.textContent=message;else {let banner=$('#sq-server-error');if(!banner){banner=document.createElement('p');banner.id='sq-server-error';banner.className='sq-server-error';banner.setAttribute('role','alert');$('.sq-shell').prepend(banner);}banner.hidden=false;banner.textContent=message;}announce(message);}
+function showError(error,target){
+ const message=error?.message||'처리 중 오류가 발생했습니다.',body=$('#sq-dialog')?.open?$('#sq-dialog-body'):null;
+ if(!target?.isConnected)target=body?.querySelector('#sq-register-error,#sq-edit-error,#sq-org-error')||(!body?$('#ws-capacity-message'):null);
+ if(!target&&body){target=$('#ws-dialog-error');if(!target){target=document.createElement('p');target.id='ws-dialog-error';target.className='sq-error';body.prepend(target);}}
+ if(!target){target=$('#sq-server-error');if(!target){target=document.createElement('p');target.id='sq-server-error';target.className='sq-server-error';$('.sq-shell').prepend(target);}}
+ // The alert is also the accessible announcement; announce() would add a second blue message.
+ $$('#sq-server-error,#ws-dialog-error,#sq-register-error,#sq-edit-error,#sq-org-error,#ws-capacity-message,#sq-status,#sq-modal-status').forEach(node=>{if(node!==target){node.textContent='';if(node.id==='sq-server-error')node.hidden=true;}});
+ target.hidden=false;target.setAttribute('role','alert');target.setAttribute('aria-live','assertive');target.textContent=message;
+ if(body)target.scrollIntoView?.({block:'nearest'});
+}
 async function requestAPI(url,method='GET',body){
  runtime.requestBusy=(runtime.requestBusy||0)+1;
  try{const headers={'X-CSRF-Token':server.csrf};if(body&&!(body instanceof FormData))headers['Content-Type']='application/json';
  const response=await fetch(url,{method,credentials:'same-origin',headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
- const result=await response.json();if(!response.ok){if(response.status===401)location.assign(result.login||'/login');throw Error(result.error||'요청을 처리하지 못했습니다.');}return result;
+ const result=await response.json();if(!response.ok){if(response.status===401)location.assign(result.login||'/login');const error=Error(result.error||'요청을 처리하지 못했습니다.');error.status=response.status;throw error;}return result;
  }finally{runtime.requestBusy--;}
 }
 async function refresh(){
@@ -23,12 +32,40 @@ async function downloadVersion(id,n){
  const check=await fetch(`/download/${id}/${n}`,{method:'HEAD'});if(!check.ok)throw Error('파일을 받을 수 없습니다. 권한 또는 배포 상태를 확인해 주세요.');
  const a=document.createElement('a');a.href=`/download/${id}/${n}`;a.download=v.filename;document.body.append(a);a.click();a.remove();setTimeout(()=>refresh().catch(showError),1500);
 }
-actions.like=async b=>{const id=+b.dataset.id,liked=!state.liked.has(id);const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked});const x=getItem(id);x.likes=result.count-(liked?1:0);liked?state.liked.add(id):state.liked.delete(id);
- $$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.setAttribute('aria-pressed',String(liked));const count=control.querySelector('[data-like-count]')||(control.classList.contains('sq-like')?control.querySelector('span'):null);if(count)count.textContent=num(result.count);const label=control.querySelector('[data-like-label]');if(label)label.textContent=liked?'좋아요 취소':'좋아요';});
- if($('#sq-dialog').open&&runtime.detailId===id){const summary=$('.sq-detail-id p');if(summary)summary.textContent=`다운로드 ${num(x.downloads)} · 좋아요 ${num(result.count)}`;}
- const heart=b.querySelector('svg');if(liked&&!motion.matches&&heart?.animate)heart.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:330});
- if(result.pending){showError({message:result.notice});return;}
- await refresh();announce(liked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');};
+function setLikeBusy(id,busy){$$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.disabled=busy;if(busy)control.setAttribute('aria-busy','true');else control.removeAttribute('aria-busy');});}
+function applyLikeResult(id,liked,count){
+ const x=getItem(id);if(x)x.likes=count-(liked?1:0);liked?state.liked.add(id):state.liked.delete(id);
+ $$(`[data-action="like"][data-id="${id}"]`).forEach(control=>{control.setAttribute('aria-pressed',String(liked));const counter=control.querySelector('[data-like-count]')||(control.classList.contains('sq-like')?control.querySelector('span'):null);if(counter)counter.textContent=num(count);const label=control.querySelector('[data-like-label]');if(label)label.textContent=liked?'좋아요 취소':'좋아요';});
+ if(x&&$('#sq-dialog').open&&runtime.detailId===id){const summary=$('.sq-detail-id p');if(summary)summary.textContent=`다운로드 ${num(x.downloads)} · 좋아요 ${num(count)}`;}
+}
+// Catalog/rank rendering or opening a detail can create another control during the request.
+new MutationObserver(()=>{runtime.likeRequests?.forEach((_,id)=>setLikeBusy(id,true));}).observe(root,{childList:true,subtree:true});
+actions.like=b=>{
+ const id=+b.dataset.id,pending=runtime.likeRequests||(runtime.likeRequests=new Map());
+ if(pending.has(id))return pending.get(id).promise;
+ const operation={},liked=!state.liked.has(id);pending.set(id,operation);setLikeBusy(id,true);
+ operation.promise=(async()=>{
+ const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked}),savedLiked=result.liked??liked;applyLikeResult(id,savedLiked,result.count);
+ const heart=b.querySelector('svg');if(savedLiked&&!motion.matches&&heart?.animate)heart.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:330});
+ // Keep concurrent cards independent, but do not apply older bootstrap responses last.
+ runtime.likeRefresh=(runtime.likeRefresh||Promise.resolve()).catch(()=>{}).then(()=>refresh());
+ try{await runtime.likeRefresh;}catch(error){applyLikeResult(id,savedLiked,result.count);showError({message:`좋아요 ${savedLiked?'추가':'취소'}는 저장되었습니다. 목록·순위를 새로고침하지 못했습니다. ${error.message}`});return;}
+ announce(result.pending?'좋아요는 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':savedLiked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');
+ })().finally(()=>{pending.delete(id);setLikeBusy(id,false);});
+ return operation.promise;
+};
+actions['published-detail']=async()=>{
+ const id=runtime.newId,token=invalidateDetailLoad();
+ const viewError=error=>Error(`게시한 도구는 저장되어 있습니다. 상세 화면을 불러오지 못했습니다. ${error.message}`);
+ // Only guard the bootstrap recovery; detail() starts and owns its own load token.
+ try{if(!getItem(id))await refresh();}
+ catch(error){if(token!==runtime.detailLoadToken)return false;throw viewError(error);}
+ if(token!==runtime.detailLoadToken)return false;
+ try{
+  if(!getItem(id))throw Error('목록에서 게시한 도구를 찾지 못했습니다.');
+  return await detail(id);
+ }catch(error){throw viewError(error);}
+};
 actions['rank-refresh']=async()=>{await refresh();closeModal();announce('서버 집계 기준으로 갱신했습니다.');};
 actions['download-file']=()=>downloadVersion(runtime.detailId,getItem(runtime.detailId).active);
 actions['version-download']=b=>downloadVersion(runtime.detailId,+b.dataset.version);

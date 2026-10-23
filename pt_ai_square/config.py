@@ -19,6 +19,12 @@ def settings():
         raise ValueError('PTAI_AUTH_MODE는 sso 또는 mock만 지원합니다. local 로그인 모드는 제거되었습니다.')
     def named(name, default=''):
         return os.environ.get(name) or private.get(name, default)
+    def boolean(name, default=False):
+        value=get(name, default)
+        if isinstance(value,bool): return value
+        if isinstance(value,str) and value.strip().lower() in {'true','false'}:
+            return value.strip().lower()=='true'
+        raise ValueError('PTAI_'+name+'는 True 또는 False로 설정하세요.')
     backend='mongodb'
     return dict(HOST=str(get('HOST','127.0.0.1')),PORT=int(get('PORT',5080)),ACTIVITY_BACKEND=backend,
                 DATA_MODE=str(get('DATA_MODE','mongodb')).strip().lower(),
@@ -26,6 +32,7 @@ def settings():
                 MONGODB_DATABASE=str(named('MONGODB_DATABASE','pt_ai_square')),
                 ACTIVITY_COLLECTION=str(get('ACTIVITY_COLLECTION','square_activity_events')),
                 MONGODB_TIMEOUT_MS=int(get('MONGODB_TIMEOUT_MS',3000)),
+                MONGODB_RETRY_WRITES=boolean('MONGODB_RETRY_WRITES',False),
                 AUTH_MODE=mode, DATA_DIR=str(get('DATA_DIR', BASE / 'instance')),
                 SECRET_KEY=str(get('SECRET_KEY')), ADMIN_IDS=str(get('ADMIN_IDS', '')),
                 SESSION_COOKIE_NAME=str(get('SESSION_COOKIE_NAME','pt_ai_square_session')),

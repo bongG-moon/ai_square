@@ -1,23 +1,66 @@
 """MongoDB is the sole application database; artifacts stay on disk."""
 import secrets
+import os
+import threading
 import time
 import uuid
+from os import getpid
 from flask import current_app, g
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from .artifacts import stage_upload, artifact_path, used_bytes
 
+# A company WSGI runner may import web_main before forking its workers. Each
+# process must own its own client/session pool; threads in that process share it.
+_CLIENT_LOCK = threading.RLock()
+
+
+def _after_fork():
+    global _CLIENT_LOCK
+    # A lock copied while held by a vanished parent thread must not be acquired.
+    _CLIENT_LOCK = threading.RLock()
+
+
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_after_fork)
+
+
+def _connect(app):
+    client = MongoClient(app.config['MONGODB_URI'],
+                         serverSelectionTimeoutMS=app.config['MONGODB_TIMEOUT_MS'],
+                         retryWrites=app.config.get('MONGODB_RETRY_WRITES',False),
+                         connect=False)
+    try:
+        database = client[app.config['MONGODB_DATABASE']]
+        client.admin.command('ping')
+    except Exception:
+        client.close()
+        raise
+    app.extensions['square_mongo_client'] = client
+    app.extensions['square_mongo'] = database
+    app.extensions['square_mongo_pid'] = getpid()
+    return client
+
+
 def db():
+    if current_app.extensions.get('square_mongo_pid') != getpid():
+        with _CLIENT_LOCK:
+            if current_app.extensions.get('square_mongo_pid') != getpid():
+                inherited = current_app.extensions.get('square_mongo_client')
+                _connect(current_app)
+                if inherited is not None:
+                    # Never use or close an inherited client: ending its copied
+                    # sessions could interfere with the still-running parent.
+                    current_app.extensions.setdefault('square_mongo_inherited_clients', []).append(inherited)
+                current_app.logger.info('MongoDB client initialized for current worker process')
     return current_app.extensions['square_mongo']
 
 def next_id(name):
     return db().counters.find_one_and_update({'_id': name}, {'$inc': {'value': 1}}, upsert=True, return_document=ReturnDocument.AFTER)['value']
 
 def init_db(app):
-    client = MongoClient(app.config['MONGODB_URI'], serverSelectionTimeoutMS=app.config['MONGODB_TIMEOUT_MS'])
-    client.admin.command('ping')
-    app.extensions['square_mongo_client'] = client
-    app.extensions['square_mongo'] = client[app.config['MONGODB_DATABASE']]
+    with _CLIENT_LOCK:
+        _connect(app)
     with app.app_context():
         for collection, keys in [('taxonomy', [('kind', 1), ('name', 1)]), ('access', [('tool', 1), ('user', 1)]), ('subscriptions', [('tool', 1), ('user', 1)])]:
             db()[collection].create_index(keys, unique=True)

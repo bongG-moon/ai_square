@@ -19,7 +19,10 @@ WRITE_LOCK = threading.RLock()
 
 
 def policy():
-    row = current_app.extensions['square_mongo'].settings.find_one({'_id': 'storage_limits'}) or {}
+    # Local import avoids the artifacts/storage import cycle and uses the same
+    # process-owned connection as all other reads and writes.
+    from .mongo_store import db
+    row = db().settings.find_one({'_id': 'storage_limits'}) or {}
     return dict(mode=row.get('mode', 'manual'),
                 quotaBytes=row.get('quotaBytes', current_app.config['STORAGE_QUOTA']),
                 reserveBytes=row.get('reserveBytes', current_app.config.get('STORAGE_RESERVE', 1024**3)),
@@ -35,9 +38,9 @@ def disk_status():
         return dict(diskKnown=False, diskTotal=None, diskFree=None, diskUsed=None)
 
 
-def snapshot():
+def snapshot(policy_value=None):
     from .artifacts import used_bytes
-    p = policy()
+    p = policy() if policy_value is None else policy_value
     used = used_bytes()
     disk = disk_status()
     disk_available = max(0, disk['diskFree'] - p['reserveBytes']) if disk['diskKnown'] else None

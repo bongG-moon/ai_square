@@ -36,8 +36,9 @@ pt_ai_square/
 | 설정 읽기와 기본값 | config.py |
 | 회사 SSO / mock 인증 | backend/auth.py |
 | 도구 등록·수정·권한·버전 API | backend/mongo_api.py |
-| MongoDB 초기화·사용자·권한 | backend/mongo_store.py |
+| MongoDB 초기화·프로세스별 연결·사용자·권한 | backend/mongo_store.py |
 | MongoDB 오류 분류·사용자 진단 안내 | backend/mongo_errors.py / templates/database_error.html |
+| 게시·저장 공간의 저장 후 이력·구독 작업 재처리 | backend/post_commit.py |
 | 좋아요·다운로드 집계 | backend/mongo_activity.py |
 | 파일 검사·저장 / 배포 정보 검사 | backend/artifacts.py / backend/package_contract.py |
 | 개인 API 인증키·로컬 다운로드 | backend/local_access.py |
@@ -52,6 +53,10 @@ pt_ai_square/
 | 다운로드 Skill·공용 HTTP 클라이언트 원본 | receiver/pt-square-receiver/ |
 
 backend/api.py·storage.py·activity.py는 MongoDB 구현을 연결하는 짧은 진입 파일입니다. 현재 서비스 저장은 MongoDB로 통일되어 있으며 별도 SQLite 실행 모드가 아닙니다.
+
+`mongo_store.py`는 프로세스 ID를 확인해 각 작업 프로세스가 자기 MongoClient와 연결 풀을 사용하게 합니다. 같은 프로세스의 여러 스레드는 클라이언트를 공유합니다. `config.py`의 선택 설정 `PTAI_MONGODB_RETRY_WRITES`는 생략하면 `False`이며 URI의 `retryWrites`보다 우선합니다. 기존 `runtime_config.py`에 필수로 추가할 값은 없습니다. `True`는 DB 제품·드라이버·실행 환경을 검증한 뒤 선택하고, 쓰기 결과 확인과 읽기 재시도 설정은 유지합니다.
+
+게시·저장 공간 한도 저장은 주 기록과 후속 이력·구독 작업을 함께 보관하고, `post_commit.py`가 이후 조회 등에서 남은 작업을 중복 없이 처리합니다. 좋아요는 `mongo_activity.py`의 상태와 활동 대기열을 함께 저장합니다. 후속 처리 실패는 `pending`으로 반환하여 이미 저장된 결과와 구분합니다. 일반 변경 요청 전체를 자동 재실행하지 않습니다. 225는 `mongo_errors.py`에서 `DB-SESSION-ORDER`로 분류하며, 뜻과 운영 반영 절차는 `docs/SSO_OPERATIONS_GUIDE.md` 13-2절에 있습니다.
 
 ## 빌드·검증 명령
 
@@ -88,7 +93,7 @@ node pt_ai_square/tests/test_upload_ui.cjs
 2. 새 Git ZIP은 기존 코드 위에 겹쳐 풀지 말고 새 폴더에 풉니다. 겹쳐 풀면 이전 최상위 파일이 그대로 남습니다.
 3. 기존 runtime_config.py를 새 앱 폴더로 복사합니다. 설정의 PTAI_DATA_DIR이 기존 영구 저장소를 가리키는지 확인합니다.
 4. 기본 instance 폴더에 저장하던 경우에는 해당 폴더도 보존하여 옮기거나 절대 경로로 연결합니다. 경로 변경만으로 파일이 이동되지는 않습니다.
-5. 기존 MongoDB 주소·DB 이름을 유지하고 회사의 기존 시작 설정으로 재시작합니다. 직접 실행 방식은 python index.py입니다. 회사 실행기는 index:application을 불러오며 기존 web_main:app 설정도 호환됩니다. 회사 실행 방식과 포트를 임의로 바꾸지 않습니다.
-6. 로그인, 기존 도구 조회, 파일 다운로드를 확인합니다.
+5. 기존 MongoDB 주소·DB 이름을 유지하고 회사의 기존 절차로 모든 작업 프로세스를 재시작하거나 교체합니다. 직접 실행 방식은 python index.py입니다. 회사 실행기는 index:application을 불러오며 기존 web_main:app 설정도 호환됩니다. 회사 실행 방식과 포트를 임의로 바꾸지 않습니다.
+6. 로그인, 기존 도구 조회, 파일 다운로드를 확인합니다. 쓰기 안정화 반영 시 검수용 게시·좋아요·저장 공간 한도 저장을 각각 한 번 실행하고 새로고침 후 결과가 유지되는지도 확인합니다. 한도에는 승인된 운영 값을 사용합니다.
 
 실행 후 생기는 __pycache__, instance, .preview, .local-mongo 등은 실행 데이터·캐시이며 Git 소스에는 포함하지 않습니다. 운영 자료를 정리 목적으로 삭제하지 마세요. 실제 runtime_config.py도 Git에서 제외하며 코드 업데이트 때 보존합니다.

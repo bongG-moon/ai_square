@@ -70,6 +70,12 @@ PTAI_ACTIVITY_COLLECTION = 'square_activity_events'
 # 시간 초과 시 오류를 표시하며 다른 DB나 가짜 자료로 대체하지 않습니다.
 PTAI_MONGODB_TIMEOUT_MS = 3000
 
+# 자동 쓰기 재시도입니다. 기본 False는 작업 번호 충돌(225)이 보고된 환경을 위한 호환 설정입니다.
+# False여도 DB의 저장 확인 응답은 기다립니다. 네트워크 오류 때 쓰기를 자동으로 다시 보내지 않습니다.
+# URL의 retryWrites 옵션보다 이 설정이 우선합니다. 기존 설정 파일에 없으면 False로 적용합니다.
+# DB 구성과 재시도 지원을 검증한 운영 환경에서만 True로 바꾸세요. 읽기 재시도 설정은 바꾸지 않습니다.
+PTAI_MONGODB_RETRY_WRITES = False
+
 # AUTH_MODE='mock'일 때 사용할 사번입니다. 숫자처럼 보여도 따옴표로 감싼 문자열로 입력하세요.
 # 실제 MongoDB 모드에서는 이 사번이 등록자·권한·좋아요·알림의 사용자 식별자가 됩니다.
 PTAI_MOCK_USER = '1000001'

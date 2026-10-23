@@ -13,6 +13,7 @@ from . import activity
 from .request_files import stage_attachments, attachment_path, public_attachments
 from .package_contract import registration_fields, normalize_workflow
 from .storage_capacity import snapshot as storage_snapshot
+from . import post_commit
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -125,17 +126,24 @@ def access_rows():
 
 @api.get('/api/bootstrap')
 def bootstrap():
-    activity.flush(); deliver_notifications(); now=time.time()
+    pending=post_commit.followup_pending('maintenance',post_commit.drain)
+    pending=post_commit.followup_pending('activity',activity.flush) or pending
+    pending=post_commit.followup_pending('notifications',deliver_notifications) or pending
+    now=time.time()
     ts=list(db().tools.find({'$or':[{'deleted':{'$ne':True}}, {'owner':g.user['id']}] } if g.user['role']!='admin' else {}).sort('_id',1))
     stats=activity.statistics([t['_id'] for t in ts],g.user['id'],now)
     taxonomy=[dict(id=r['_id'],name=r['name'],kind=r['kind'],enabled=r['enabled'],order=r.get('order',0),owner=r.get('owner','')) for r in db().taxonomy.find().sort([('order',1),('name',1)])]
     retention=db().settings.find_one({'_id':'retention'});retention.pop('_id')
-    return jsonify(items=[serialize(t,stats[t['_id']],now) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
+    return jsonify(items=[serialize(t,stats[t['_id']],now) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',pending=pending,unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
 
 @api.get('/api/tools/<int:tid>')
 def details(tid):
     t=tool(tid);usable(t)
     return jsonify(serialize(t,activity.statistics([tid],g.user['id'],time.time())[tid],time.time()))
+
+def publish_followup_pending(tid):
+    pending=post_commit.followup_pending('publish-maintenance',post_commit.drain,'tools',tid)
+    return post_commit.followup_pending('publish-notifications',deliver_notifications) or pending
 
 @api.post('/api/tools')
 @api.post('/api/tools/<int:tid>/versions')
@@ -182,7 +190,8 @@ def publish(tid=None):
             saved=next(v for v in existing['versions'] if v.get('publishRequest',{}).get('key')==request_key)
             if saved['publishRequest']['fingerprint']!=fingerprint:
                 raise Conflict('같은 게시 요청 번호의 내용이 다릅니다. 새 준비안을 생성하세요.')
-            return jsonify(id=existing['_id'],version=saved['n'],replayed=True),200
+            return jsonify(id=existing['_id'],version=saved['n'],replayed=True,
+                           pending=publish_followup_pending(existing['_id'])),200
         if request_key:
             previous_response=replay()
             if previous_response: return previous_response
@@ -193,21 +202,23 @@ def publish(tid=None):
             version['apiUsage'] = dict(user=g.user['id'], tokenId=g.api_token_id)
         if request_key:
             version['publishRequest']=dict(key=request_key,fingerprint=fingerprint)
+        if not t: tid=next_id('tools')
+        job=post_commit.audit_job(f'publish:{tid}:{n}',g.user['id'],f'{data["name"]} v{n} 게시',
+                                  subscription={'tool':tid,'user':g.user['id']})
         if t:
             future=dict(t,data=data)
             e=event(followers(future),f'{data["name"]} v{n} 업데이트',{'type':'tool','id':tid},'release')
-            cas(t,{'$set':{'data':data,'active':n,'fallback':t['active'],'paused':False},'$push':{'versions':version,'outbox':e}})
+            cas(t,{'$set':{'data':data,'active':n,'fallback':t['active'],'paused':False},'$push':{'versions':version,'outbox':e,'postCommit':job}})
         else:
-            tid=next_id('tools')
-            try: db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version]})
+            try: db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'postCommit':[job]})
             except DuplicateKeyError:
                 if request_key:
                     previous_response=replay()
                     if previous_response: return previous_response
                 raise
         committed=True
-        subscribe(tid,g.user['id']);audit(f'{data["name"]} v{n} 게시');deliver_notifications()
-        return jsonify(id=tid,version=n,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
+        pending=publish_followup_pending(tid)
+        return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
     finally:
         if not committed and artifact['path']:
             # A network timeout may follow a committed write. Never remove a potentially referenced file.
@@ -257,8 +268,9 @@ def restore(tid):
 def like(tid):
     t=tool(tid);usable(t);value=payload().get('liked')
     if not isinstance(value,bool): raise BadRequest('좋아요 상태를 확인해 주세요.')
-    count=activity.set_like(tid,g.user['id'],value);activity.flush()
-    return jsonify(liked=value,count=count,pending=False)
+    count=activity.set_like(tid,g.user['id'],value)
+    pending=post_commit.followup_pending('like-activity',activity.flush)
+    return jsonify(liked=value,count=count,pending=pending)
 
 @api.put('/api/tools/<int:tid>/subscription')
 def subscription(tid):
@@ -503,15 +515,19 @@ def update_storage_limits():
             raise BadRequest('한도·확보할 공간·설정 버전 값을 확인하세요.')
     values={key:raw[key] for key in ['mode','quotaBytes','reserveBytes']}
     values.update(updated=time.time(),updatedBy=g.user['id'])
+    revision=raw['expectedRevision']+1
+    job=post_commit.audit_job(f'storage_limits:{revision}',g.user['id'],
+        f'파일 저장 한도 변경: {raw["mode"]}, 한도 {raw["quotaBytes"]} bytes, 여유 공간 {raw["reserveBytes"]} bytes')
     if raw['expectedRevision']==0:
-        try: db().settings.insert_one(dict(values,_id='storage_limits',revision=1))
+        try: db().settings.insert_one(dict(values,_id='storage_limits',revision=revision,postCommit=[job]))
         except DuplicateKeyError: raise Conflict('다른 관리자가 설정을 변경했습니다. 새로고침 후 다시 적용하세요.')
     else:
         changed=db().settings.update_one({'_id':'storage_limits','revision':raw['expectedRevision']},
-            {'$set':values,'$inc':{'revision':1}})
+            {'$set':values,'$inc':{'revision':1},'$push':{'postCommit':job}})
         if not changed.matched_count: raise Conflict('다른 관리자가 설정을 변경했습니다. 새로고침 후 다시 적용하세요.')
-    audit(f'파일 저장 한도 변경: {raw["mode"]}, 한도 {raw["quotaBytes"]} bytes, 여유 공간 {raw["reserveBytes"]} bytes')
-    return jsonify(storage=storage_snapshot(),ok=True)
+    pending=post_commit.followup_pending('storage-maintenance',post_commit.drain,'settings','storage_limits')
+    saved_policy=dict(values,revision=revision,source='admin')
+    return jsonify(storage=storage_snapshot(policy_value=saved_policy),ok=True,pending=pending)
 
 @api.get('/api/storage/candidates')
 def storage_preview():

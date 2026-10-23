@@ -17,10 +17,14 @@ root.addEventListener('submit',e=>{
  e.preventDefault();e.stopImmediatePropagation();if(form.dataset.busy)return;
  const message=form.querySelector('#ws-capacity-message'),quota=Number(form.elements.quotaGB.value),reserve=Number(form.elements.reserveGB.value);
  const quotaBytes=Math.round(quota*1073741824),reserveBytes=Math.round(reserve*1073741824);
- if(!Number.isFinite(quota)||!Number.isFinite(reserve)||quotaBytes<1048576||reserve<0){message.textContent='한도는 최소 1MB, 여유 공간은 0 이상으로 입력하세요.';return;}
- form.dataset.busy='true';const button=form.querySelector('[type=submit]');button.disabled=true;message.textContent='저장하고 있습니다.';
- requestAPI('/api/storage/limits','PUT',{mode:form.elements.mode.value,quotaBytes,reserveBytes,expectedRevision:Number(form.dataset.revision)})
- .then(async()=>{await refresh();const status=$('#ws-capacity-message');if(status)status.textContent='저장했습니다. 기존 파일은 그대로 유지됩니다.';})
- .catch(error=>{message.textContent=error.message;})
+ if(!Number.isFinite(quota)||!Number.isFinite(reserve)||quotaBytes<1048576||reserve<0){showError({message:'한도는 최소 1MB, 여유 공간은 0 이상으로 입력하세요.'},message);return;}
+ form.dataset.busy='true';const button=form.querySelector('[type=submit]');button.disabled=true;message.setAttribute('role','status');message.setAttribute('aria-live','polite');message.textContent='저장하고 있습니다.';
+ return requestAPI('/api/storage/limits','PUT',{mode:form.elements.mode.value,quotaBytes,reserveBytes,expectedRevision:Number(form.dataset.revision)})
+ .then(async result=>{
+  server.storage={...server.storage,...result.storage};form.dataset.revision=String(server.storage.limitRevision);
+  try{await refresh();}catch(error){showError({message:`한도 설정은 저장되었습니다. 화면을 새로고침하지 못했습니다. ${error.message}`},$('#ws-capacity-message'));return;}
+  const status=$('#ws-capacity-message');if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent=result.pending?'한도 설정은 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':'저장했습니다. 기존 파일은 그대로 유지됩니다.';}
+ })
+ .catch(error=>{showError(error,$('#ws-capacity-message'));})
  .finally(()=>{delete form.dataset.busy;button.disabled=false;});
 },true);

@@ -188,7 +188,5 @@ root.addEventListener('submit',event=>{
   }
  })().catch(showError).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=false);});
 },true);
-// Keep errors visible in the active dialog, not behind its backdrop.
-const originalError=showError;
-showError=function(error){if($('#sq-dialog').open){let e=$('#ws-dialog-error');if(!e){e=document.createElement('p');e.id='ws-dialog-error';e.className='sq-error';e.setAttribute('role','alert');$('#sq-dialog-body').prepend(e);}e.textContent=error.message;e.scrollIntoView({block:'nearest'});announce(error.message);}else originalError(error);};
+// showError keeps one accessible error in the active form/dialog or page banner.
 setInterval(()=>{if(document.hidden||runtime.requestBusy)return;requestAPI('/api/notifications?unread=true').then(r=>{server.unread=r.unread;$('#ws-unread').hidden=!r.unread;$('#ws-unread').textContent=r.unread>99?'99+':r.unread;}).catch(()=>{});},30000);
