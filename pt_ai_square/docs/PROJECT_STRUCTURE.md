@@ -37,6 +37,7 @@ pt_ai_square/
 | 회사 SSO / mock 인증 | backend/auth.py |
 | 도구 등록·수정·권한·버전 API | backend/mongo_api.py |
 | MongoDB 초기화·사용자·권한 | backend/mongo_store.py |
+| MongoDB 오류 분류·사용자 진단 안내 | backend/mongo_errors.py / templates/database_error.html |
 | 좋아요·다운로드 집계 | backend/mongo_activity.py |
 | 파일 검사·저장 / 배포 정보 검사 | backend/artifacts.py / backend/package_contract.py |
 | 개인 API 인증키·로컬 다운로드 | backend/local_access.py |

@@ -1,7 +1,7 @@
 import os
 import secrets
 from pathlib import Path
-from flask import Flask, jsonify, render_template, session
+from flask import Flask, jsonify, make_response, render_template, request, session
 from werkzeug.exceptions import HTTPException
 from pymongo.errors import PyMongoError
 from .config import settings
@@ -9,6 +9,7 @@ from .backend.storage import init_db, db
 from .backend.auth import IDENTITY_FIELDS, install_auth
 from .backend.api import api
 from .backend.activity import init_activity
+from .backend.mongo_errors import mongo_diagnostic
 
 def create_app(overrides=None):
     """Factory retained for isolated tests and the optional local CLI."""
@@ -62,8 +63,29 @@ def init_app(app, overrides=None):
     def http_error(error): return jsonify(error=error.description),error.code
     @app.errorhandler(PyMongoError)
     def mongo_error(error):
-        app.logger.error('MongoDB unavailable: %s', type(error).__name__)
-        return jsonify(error='MongoDB 연결을 확인할 수 없습니다. 저장 결과를 확인한 후 다시 시도해 주세요.'),503
+        diagnostic=mongo_diagnostic(error)
+        diagnostic['reference']=secrets.token_hex(6)
+        # Log only allowlisted categories, a numeric code and our reference.
+        # Exception text/tracebacks may contain DB addresses or document data.
+        app.logger.error('MongoDB request failed diagnostic=%s mongo_code=%s reference=%s',
+                         diagnostic['code'], diagnostic['mongo_code'], diagnostic['reference'])
+        code_label='진단 코드: '+diagnostic['code']
+        if diagnostic['mongo_code'] is not None:
+            code_label+=' · MongoDB 코드: '+str(diagnostic['mongo_code'])
+        code_label+=' · 문의 번호: '+diagnostic['reference']
+        guidance='등록·수정·삭제 중이었다면 목록에서 반영 여부를 먼저 확인한 뒤 다시 시도해 주세요.'
+        message=diagnostic['message']+' '+guidance+' ['+code_label+']'
+        # API clients and /health always retain the JSON error contract.
+        wants_html=(request.endpoint!='health' and not request.path.startswith('/api/')
+                    and not request.is_json and request.accept_mimetypes.best_match(
+                        ['application/json','text/html'])=='text/html')
+        if wants_html:
+            response=make_response(render_template('database_error.html',
+                                   diagnostic=diagnostic, guidance=guidance),503)
+        else:
+            response=make_response(jsonify(error=message,diagnostic=diagnostic),503)
+        response.headers['Cache-Control']='no-store'
+        return response
     @app.errorhandler(Exception)
     def unexpected(error):
         app.logger.exception('Request failed')
