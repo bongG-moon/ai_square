@@ -38,6 +38,34 @@ def test_hcp_origin_redirect_nested_login_and_six_session_fields(app,hcp):
     assert app.config['TEMPLATES_AUTO_RELOAD'] is True
 
 
+def test_company_flask_instance_keeps_sso_routes_and_template_identity(app,hcp):
+    """The company-created app receives the full platform, not a second app."""
+    from flask import Flask, template_rendered
+    from pt_ai_square import init_app
+
+    company = Flask('company_web_main', root_path=app.root_path)
+    assert init_app(company, dict(app.config)) is company
+    rendered = []
+    def capture(sender, template, context, **extra):
+        rendered.append((template.name, context))
+    try:
+        for path in ['/', '/login', '/login/<path:sub_path>']:
+            assert sum(rule.rule == path for rule in company.url_map.iter_rules()) == 1
+        client = company.test_client()
+        assert client.get('/').status_code == 302
+        client.set_cookie('company', 'valid')
+        with template_rendered.connected_to(capture, company):
+            response = client.get('/')
+        assert response.status_code == 200
+        name, context = rendered[-1]
+        assert name == 'index.html'
+        assert [context[key] for key in ['emp_no', 'emp_name', 'emp_name_en', 'dept', 'email', 'dept_cd']] == [
+            '0012345', '시험 직원', 'Test Employee', '시험 부서', 'employee@example.test', 'D001']
+        assert client.get('/api/bootstrap').json['user']['id'] == '0012345'
+    finally:
+        company.extensions['square_mongo_client'].close()
+
+
 def test_sso_profile_refresh_keeps_employee_references_and_connection_key(app,hcp):
     client,_,SSO=hcp
     client.set_cookie('company','valid');client.get('/api/bootstrap')

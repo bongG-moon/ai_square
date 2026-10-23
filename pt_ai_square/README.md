@@ -19,16 +19,16 @@ Flask + MongoDB로 구현한 사내 AI 도구 공유 웹입니다. 모든 서비
 
 ```powershell
 python -m pip install -r requirements.txt
-python web_main.py
+python index.py
 ```
 
-브라우저: http://127.0.0.1:5080/
+같은 PC의 브라우저에서 실행 터미널에 표시된 로컬 주소를 엽니다. 회사에 배포한 뒤에는 회사에서 발급한 HTTPS 웹 주소로 접속합니다.
 
-위 명령은 `web_main.py`와 `requirements.txt`가 들어 있는 폴더에서 실행합니다. 이 폴더만 복사하면 되고, 상위 프로젝트나 `pt_ai_square`라는 폴더 이름은 필요하지 않습니다. VS Code의 **Python 파일 실행**도 지원합니다. WSGI 진입점은 해당 폴더 기준 `web_main:app`입니다. 기존 패키지 실행도 계속 지원합니다.
+위 명령은 `index.py`, `web_main.py`, `requirements.txt`가 들어 있는 폴더에서 실행합니다. 이 폴더만 복사하면 되고, 상위 프로젝트나 `pt_ai_square`라는 폴더 이름은 필요하지 않습니다. VS Code에서는 **index.py의 Python 파일 실행**을 누릅니다. `web_main.py`는 앱을 만드는 파일이며 단독 실행으로 서버를 시작하지 않습니다.
 
-로컬 `mock`에서는 Waitress가 없어도 Flask 내장 서버로 실행합니다(디버그·자동 재시작 꺼짐). SSO 운영은 Waitress를 설치하거나 회사 WSGI 실행기를 사용하세요. 설치는 실행에 사용하는 동일한 Python에서 진행해야 합니다.
+`index.py`는 회사 기본 코드대로 `from web_main import app as application`으로 앱을 불러오고, 직접 실행할 때 `application.run(debug=True, host='0.0.0.0')`를 호출합니다. 별도 포트 지정이나 Waitress 자동 선택은 하지 않습니다. 회사 실행기가 `index:application`을 불러오면 이 실행문은 호출되지 않습니다. 기존 실행기가 `web_main:app`을 사용 중이면 같은 앱을 그대로 불러올 수 있습니다. 회사의 실행 방식·포트 설정을 임의로 바꾸지 않습니다.
 
-기본 인증 모드는 SSO를 사용하지 않는 `mock`입니다. 별도 설정이 없으면 로컬 주소 `http://127.0.0.1:5080`에서 실행되며 기본 시험 사번은 `1000001`입니다. `runtime_config.py`의 `PTAI_MOCK_USER`로 시험 사번을 바꿀 수 있습니다. 환경변수나 설정 파일에 명시한 값이 있으면 해당 값이 기본값보다 우선합니다.
+기본 인증 모드는 SSO를 사용하지 않는 `mock`이며 기본 시험 사번은 `1000001`입니다. `runtime_config.py`의 `PTAI_MOCK_USER`로 시험 사번을 바꿀 수 있습니다. 환경변수나 설정 파일에 명시한 값이 있으면 해당 값이 기본값보다 우선합니다. 기존 로컬 보조 명령 `python __main__.py run`도 남아 있으며, `PTAI_HOST`·`PTAI_PORT`는 이 보조 명령에서만 사용합니다. 회사 기본 `index.py`의 실행 설정에는 영향을 주지 않습니다.
 
 `mock`은 로컬 전용 개발 인증입니다. 회사 운영은 `sso`를 설정합니다. 별도 아이디·비밀번호 로그인은 없습니다. mock에서도 MongoDB가 연결되어 있으면 업로드·업데이트·권한·알림이 실제로 저장됩니다. 비밀번호 포함 URI·세션 키가 들어 있는 runtime_config.py는 Git이나 배포 ZIP에 포함하지 않습니다.
 
@@ -56,7 +56,7 @@ python -m pytest tests -q
 
 | 위치 | 역할 |
 |---|---|
-| `web_main.py`, `run_server.cmd` | 직접 실행·WSGI 진입점 |
+| `index.py`, `web_main.py`, `run_server.cmd` | 회사 기본 실행 진입점 / Flask 앱 / Windows index.py 실행 바로가기 |
 | `runtime_config.py`, `runtime_config.example.py`, `config.py` | 개인 운영 설정 / 설정 예시 / 설정 로더 |
 | `backend/` | Flask API, SSO, MongoDB, 권한, 파일 검사·저장, 배포 정보 |
 | `frontend/` | 화면 기능별 JS 원본. `frontend_workspace.js`, `frontend_upload.js`, `frontend_package.js`, `frontend_commands.js`는 build_workspace로 반영 |

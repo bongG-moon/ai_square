@@ -156,7 +156,7 @@ runtime_config.example.py와 로컬 runtime_config.py에는 각 값의 한국어
 
 ## 21. 개발 폴더와 실행 호환성
 
-backend에는 API·SSO·MongoDB·파일 저장 코드를, frontend에는 기능별 JS를, scripts에는 개발·문서 생성 도구를, docs에는 설명 문서를 모은다. web_main.py·config.py·runtime_config.py·실행 명령·requirements는 최상위에 유지한다. 상위 프로젝트 없이 폴더 단독으로 실행하며 WSGI 진입점 web_main:app도 유지한다. static/app.js는 실제 브라우저 파일이고 확장 UI는 scripts/build_workspace.py로 조립한다. 초기 build_frontend.py는 역사적 디자인 가져오기 도구로 일상 개발에서 실행하지 않는다.
+backend에는 API·SSO·MongoDB·파일 저장 코드를, frontend에는 기능별 JS를, scripts에는 개발·문서 생성 도구를, docs에는 설명 문서를 모은다. index.py·web_main.py·config.py·runtime_config.py·실행 명령·requirements는 최상위에 유지한다. 회사 기본 index.py는 web_main.app을 application으로 가져오며 직접 실행 시 application.run(debug=True, host='0.0.0.0')을 호출한다. 포트 인자나 다른 서버 실행 방식을 추가하지 않는다. WSGI 진입점은 index:application이며 기존 web_main:app도 같은 앱으로 호환된다. 상위 프로젝트 없이 폴더 단독으로 실행한다. static/app.js는 실제 브라우저 파일이고 확장 UI는 scripts/build_workspace.py로 조립한다. 초기 build_frontend.py는 역사적 디자인 가져오기 도구로 일상 개발에서 실행하지 않는다.
 ## 22. 관리자 저장 한도와 실제 디스크 조회
 
 관리자 저장 공간 탭에 플랫폼 파일 사용량·디스크 남은 공간·추가 저장 가능량을 표시한다. 직접 지정/자동 계산, 플랫폼 최대 GB, 서버에 남겨둘 GB를 설정하고 즉시 저장한다. 저장 설정은 MongoDB settings/storage_limits 문서에 mode·quotaBytes·reserveBytes·revision·변경 관리자와 시각으로 기록한다. 환경 설정은 최초 관리자 설정 이전의 기본값이며, revision으로 동시 변경을 검출한다.
@@ -165,7 +165,7 @@ backend에는 API·SSO·MongoDB·파일 저장 코드를, frontend에는 기능�
 
 GET/PUT /api/storage/limits는 관리자만 호출한다. 디스크 수치는 DATA_DIR가 속한 볼륨을 운영체제로 조회하며 서버 전체·원격 MongoDB 용량을 의미하지 않는다. 조회 실패는 확인 불가로 표시하고 업로드를 중단한다. 배포 파일 검사·게시와 요청 첨부 저장이 같은 저장 한도를 적용한다. 저장 중 공간 부족은 507, 한도 초과는 409, 조회 실패는 503으로 안내하고 부분 파일을 제거한다. 파일 없는 URL·명령어 배포는 파일 한도로 제한하지 않는다.
 
-보관 정책에 따른 이전 버전 삭제는 별도의 목록 확인·삭제 절차를 유지한다. 기본 Waitress 단일 프로세스는 쓰기 잠금을 사용한다. 다중 프로세스/서버의 엄격한 공용 한도와 별도 컨테이너 할당량은 운영 파일시스템 quota로 관리한다. 더미 모드는 dummy/catalog.json의 예시 용량만 읽으며 실제 디스크를 조회하거나 설정을 저장하지 않는다.
+보관 정책에 따른 이전 버전 삭제는 별도의 목록 확인·삭제 절차를 유지한다. 파일 저장의 쓰기 잠금은 한 프로세스 안에서 동작한다. 다중 프로세스/서버의 엄격한 공용 한도와 별도 컨테이너 할당량은 운영 파일시스템 quota로 관리한다. 더미 모드는 dummy/catalog.json의 예시 용량만 읽으며 실제 디스크를 조회하거나 설정을 저장하지 않는다.
 ## 로컬 수신 연계 추가 사항 (2026-10-20)
 
 기존 등록·다운로드 구조에 로컬 수신과 배포 Skill 자동 게시 기능을 추가합니다. 설치·실행과 EXE 자동 변환은 수행하지 않습니다.

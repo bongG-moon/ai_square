@@ -1,16 +1,17 @@
 # P&T AI SQUARE 폴더 구조
 
-최상위에는 실행·설정·의존성 파일만 두고, 서버 기능·화면 소스·스크립트·문서를 역할별 폴더로 나눴습니다. 이 구조는 `python web_main.py` 직접 실행과 회사 실행기의 `web_main:app` 진입점을 유지합니다.
+최상위에는 실행·설정·의존성 파일만 두고, 서버 기능·화면 소스·스크립트·문서를 역할별 폴더로 나눴습니다. 회사 기본 진입점은 `python index.py` 또는 회사 실행기의 `index:application`입니다. 기존 `web_main:app`도 같은 Flask 앱을 가리킵니다.
 
 ```text
 pt_ai_square/
-├─ web_main.py                 직접 실행 / 회사 WSGI 진입점
-├─ run_server.cmd              Windows 실행 바로가기
+├─ index.py                    회사 기본 실행 진입점 / application 제공
+├─ web_main.py                 Flask app 생성 및 기능 연결 (서버 시작 없음)
+├─ run_server.cmd              Windows index.py 실행 바로가기
 ├─ runtime_config.example.py   설정 예시
 ├─ runtime_config.py           직접 만드는 개인·운영 설정 (Git 제외)
 ├─ config.py                   설정을 읽는 코드
-├─ __init__.py                 Flask 앱 조립
-├─ __main__.py                 실행 명령 처리
+├─ __init__.py                 기존 Flask 앱에 기능 연결 / 테스트용 앱 생성
+├─ __main__.py                 선택적인 로컬 실행·관리 명령
 ├─ _square_bootstrap.py        폴더 단독 실행 지원
 ├─ requirements.txt            서비스 의존성
 ├─ requirements-lock.txt       고정 버전 의존성
@@ -86,7 +87,7 @@ node pt_ai_square/tests/test_upload_ui.cjs
 2. 새 Git ZIP은 기존 코드 위에 겹쳐 풀지 말고 새 폴더에 풉니다. 겹쳐 풀면 이전 최상위 파일이 그대로 남습니다.
 3. 기존 runtime_config.py를 새 앱 폴더로 복사합니다. 설정의 PTAI_DATA_DIR이 기존 영구 저장소를 가리키는지 확인합니다.
 4. 기본 instance 폴더에 저장하던 경우에는 해당 폴더도 보존하여 옮기거나 절대 경로로 연결합니다. 경로 변경만으로 파일이 이동되지는 않습니다.
-5. 기존 MongoDB 주소·DB 이름을 유지하고 새 폴더에서 python web_main.py를 실행합니다. 회사 실행기라면 작업 폴더를 새 위치로 바꾸고 web_main:app을 유지합니다.
+5. 기존 MongoDB 주소·DB 이름을 유지하고 회사의 기존 시작 설정으로 재시작합니다. 직접 실행 방식은 python index.py입니다. 회사 실행기는 index:application을 불러오며 기존 web_main:app 설정도 호환됩니다. 회사 실행 방식과 포트를 임의로 바꾸지 않습니다.
 6. 로그인, 기존 도구 조회, 파일 다운로드를 확인합니다.
 
-최신 Git 소스의 앱 최상위에는 11개 파일이 있습니다. 직접 runtime_config.py를 만들면 12개가 됩니다. 실행 후 생기는 __pycache__, instance, .preview, .local-mongo 등은 실행 데이터·캐시이며 Git 소스에는 포함하지 않습니다. 운영 자료를 정리 목적으로 삭제하지 마세요.
+실행 후 생기는 __pycache__, instance, .preview, .local-mongo 등은 실행 데이터·캐시이며 Git 소스에는 포함하지 않습니다. 운영 자료를 정리 목적으로 삭제하지 마세요. 실제 runtime_config.py도 Git에서 제외하며 코드 업데이트 때 보존합니다.

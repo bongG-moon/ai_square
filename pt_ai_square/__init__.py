@@ -1,17 +1,25 @@
 import os
 import secrets
 from pathlib import Path
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, session
 from werkzeug.exceptions import HTTPException
 from pymongo.errors import PyMongoError
 from .config import settings
 from .backend.storage import init_db, db
-from .backend.auth import install_auth
+from .backend.auth import IDENTITY_FIELDS, install_auth
 from .backend.api import api
 from .backend.activity import init_activity
 
 def create_app(overrides=None):
-    app=Flask(__name__)
+    """Factory retained for isolated tests and the optional local CLI."""
+    return init_app(Flask(__name__), overrides)
+
+
+def init_app(app, overrides=None):
+    """Attach the platform to the Flask instance exported by web_main.py.
+
+    This function never starts a server or chooses a listening host/port.
+    """
     app.config['TEMPLATES_AUTO_RELOAD']=True
     app.config.update(settings())
     if overrides: app.config.update(overrides)
@@ -44,7 +52,8 @@ def create_app(overrides=None):
         from .backend.people import people
         app.register_blueprint(people)
     @app.get('/')
-    def index(): return render_template('index.html')
+    def index():
+        return render_template('index.html', **{key: session.get(key) for key in IDENTITY_FIELDS})
     @app.get('/health')
     def health():
         if app.config['DATA_MODE']=='mongodb': db().command('ping')

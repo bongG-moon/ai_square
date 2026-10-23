@@ -1,23 +1,30 @@
-"""HCP Flask entry (web_main:app) and direct execution (python web_main.py).
+"""Company Flask application, imported by index.py as ``application``.
 
-create_app() constructs the Flask app and registers the homepage and HCP SSO
-routes. Set PTAI_AUTH_MODE='sso' or 'mock' in runtime_config.py; do not duplicate
-the sample's '/' or '/login' routes here. Importing this module exports `app`
-without starting a second server. Direct execution starts the local server.
+The launcher owns server startup. This file only creates and configures ``app``;
+it does not select a server implementation, listening address, or port.
 """
+import os
 import sys
 from pathlib import Path
 
+from flask import Flask
+
+# Same effective NLS_LANG value as the supplied company base code.
+os.environ['NLS_LANG'] = '.UTF8'
+
 if __package__ in {None, ''}:
-    # Resolve only this folder; it may be renamed or deployed as the app root.
+    # Also supports copying/renaming this folder without its parent project.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _square_bootstrap import load_package
     __package__ = load_package().__name__
 
-from . import create_app
-from .__main__ import main
+from . import init_app
 
-if __name__ == '__main__':
-    main(['run', *sys.argv[1:]])
-else:
-    app = create_app()
+app = Flask(__name__)
+url_path = ''
+
+# Register the existing UI, APIs, MongoDB and SSO routes on this exact instance.
+# runtime_config.py selects 'sso' or 'mock'; hcputil is loaded only for SSO.
+# The session secret is retained from configuration/MongoDB across restarts.
+# /login and /login/<path:sub_path> are installed once by backend/auth.py.
+init_app(app)

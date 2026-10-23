@@ -4,7 +4,7 @@ Flask + MongoDB 사내 도구 공유 플랫폼입니다. 인증만 SSO 사용(ss
 
 ## 폴더 하나로 실행
 
-저장소의 `pt_ai_square` 폴더 전체를 복사합니다. 상위 프로젝트나 고정된 폴더 이름은 필요하지 않습니다. `web_main.py`가 있는 폴더에서 실행하세요.
+저장소의 `pt_ai_square` 폴더 전체를 복사합니다. 상위 프로젝트나 고정된 폴더 이름은 필요하지 않습니다. `index.py`와 `web_main.py`가 있는 폴더에서 실행하세요.
 
 1. `runtime_config.example.py`를 `runtime_config.py`로 복사합니다.
 2. 실제 `MONGODB_URI`, `MONGODB_DATABASE`와 테스트 사번 `PTAI_MOCK_USER`를 입력합니다. 기본 인증 모드는 mock입니다.
@@ -12,10 +12,12 @@ Flask + MongoDB 사내 도구 공유 플랫폼입니다. 인증만 SSO 사용(ss
 
 ```powershell
 python -m pip install -r requirements.txt
-python web_main.py
+python index.py
 ```
 
-브라우저에서 http://127.0.0.1:5080/ 을 엽니다. MongoDB 미설정 시 설정을 요청하며 대체 데이터로 전환하지 않습니다. mock에서 Waitress가 없으면 로컬 Flask 서버로 실행합니다. SSO 직접 실행은 Waitress가 필요합니다. 회사 WSGI 진입점은 해당 폴더 기준 `web_main:app`입니다. 기존 패키지 실행도 지원합니다.
+회사 기본 코드처럼 `index.py`는 `web_main.app`을 `application`으로 가져오고, 직접 실행할 때 `application.run(debug=True, host='0.0.0.0')`을 호출합니다. 포트 인자는 추가하지 않으며 Waitress로 실행 방식을 바꾸지 않습니다. 직접 실행 시 터미널에 표시된 주소로 접속하세요. 회사 실행기가 모듈을 불러오는 경우 진입점은 `index:application`이며 기존 `web_main:app`도 같은 앱을 제공합니다. 모듈을 불러오기만 하면 서버를 별도로 시작하지 않습니다.
+
+`web_main.py`는 Flask 앱과 기존 기능·SSO 경로를 준비하는 파일입니다. `python web_main.py` 대신 `python index.py`로 시작하세요. `PTAI_HOST`·`PTAI_PORT`는 선택적인 로컬 보조 명령 `python __main__.py run`에만 적용되며 회사 진입점에는 적용되지 않습니다. MongoDB 미설정 시 설정을 요청하며 대체 데이터로 전환하지 않습니다. 회사 SSO는 `PTAI_AUTH_MODE='sso'`와 사내 `hcputil` 설치가 필요합니다.
 
 `.env`는 읽지 않습니다. 프로세스 환경변수 > runtime_config.py > 기본값 순서입니다. 비밀번호·연결 URI가 들어 있는 개인 설정 파일은 Git에 포함하지 마세요.
 
@@ -29,7 +31,7 @@ python web_main.py
 - [개인 API 인증키·로컬 연동](pt_ai_square/docs/LOCAL_RECEIVER.md)
 - [상세 기획서](pt_ai_square/docs/PLAN_V3.md)
 
-서버 코드는 `backend/`, 화면 기능별 소스는 `frontend/`, 빌드 도구는 `scripts/`, 문서는 `docs/`로 정리했습니다. 앱 최상위 파일은 45개에서 11개로 줄였습니다. 새 ZIP은 새 폴더에 풀어주세요. 기존 폴더에 겹쳐 풀면 예전 최상위 파일이 남습니다. 기존 `runtime_config.py`와 실제 파일 저장소는 보존해야 합니다.
+서버 코드는 `backend/`, 화면 기능별 소스는 `frontend/`, 빌드 도구는 `scripts/`, 문서는 `docs/`로 정리했습니다. 최상위에는 회사 진입점 `index.py`와 실행·설정 파일을 둡니다. 새 ZIP은 새 폴더에 풀어주세요. 기존 폴더에 겹쳐 풀면 예전 최상위 파일이 남습니다. 기존 `runtime_config.py`와 실제 파일 저장소는 보존해야 합니다.
 
 `docs`에는 별도 실행·운영 HTML이 있습니다. 웹에서 다운로드하는 가이드는 사용자·등록자 내용만 담습니다.
 

@@ -4,7 +4,7 @@
 
 ## 1. 폴더 준비
 
-pt_ai_square 폴더 전체를 복사합니다. web_main.py, __main__.py, __init__.py, _square_bootstrap.py 등 Python 파일과 templates·static 폴더가 함께 있어야 합니다. 상위 프로젝트나 고정 폴더 이름은 필요하지 않습니다. 업데이트할 때 기존 runtime_config.py와 업로드 저장 폴더를 보존하세요.
+pt_ai_square 폴더 전체를 복사합니다. index.py, web_main.py, __main__.py, __init__.py, _square_bootstrap.py 등 Python 파일과 templates·static 폴더가 함께 있어야 합니다. 상위 프로젝트나 고정 폴더 이름은 필요하지 않습니다. 업데이트할 때 기존 runtime_config.py와 업로드 저장 폴더를 보존하세요.
 
 ## 2. 패키지 설치
 
@@ -31,8 +31,6 @@ PTAI_MOCK_USER = '1000001'
 PTAI_MOCK_NAME = '테스트 사용자'
 PTAI_MOCK_ADMIN = True
 PTAI_COOKIE_SECURE = False
-PTAI_HOST = '127.0.0.1'
-PTAI_PORT = 5080
 MONGODB_URI = '실제 MongoDB 연결 주소'
 MONGODB_DATABASE = '사용할 DB 이름'
 # 선택: 업로드 자료를 보존할 절대 경로
@@ -65,18 +63,20 @@ PTAI_AUTH_MODE = 'mock'
 ## 4. 실행과 종료
 
 ```powershell
-python web_main.py
+python index.py
 ```
 
-VS Code에서 web_main.py의 Python 파일 실행을 눌러도 됩니다. 터미널을 켜 둔 채 http://127.0.0.1:5080/ 을 엽니다. Ctrl+C로 종료하고, 설정 변경 후 다시 실행합니다. python __main__.py run도 지원합니다.
+VS Code에서 index.py의 **Python 파일 실행**을 눌러도 됩니다. 터미널을 켜 둔 채 표시되는 로컬 주소를 브라우저로 엽니다. Ctrl+C로 종료하고, 설정 변경 후 다시 실행합니다. `web_main.py`는 앱 정의용이며 단독 실행 시 웹 서버를 시작하지 않습니다.
 
-mock은 SSO 미사용이며 설정 사번으로 동작합니다. 로컬에서 Waitress가 없으면 Flask 내장 서버로 실행합니다. 디버그와 자동 재시작은 꺼져 있습니다. Flask·pymongo 기본 패키지는 여전히 필요합니다.
+index.py는 회사 기본 코드인 `application.run(debug=True, host='0.0.0.0')`를 그대로 사용합니다. 포트를 지정하거나 Waitress를 자동 선택하지 않습니다. 직접 실행의 debug=True도 유지합니다. 회사 실행기가 `index:application`을 불러올 때에는 이 실행문을 호출하지 않습니다. mock은 SSO 미사용이며 설정 사번으로 동작합니다.
+
+기존 로컬 보조 명령 `python __main__.py run`도 지원합니다. 이 보조 명령만 `PTAI_HOST`·`PTAI_PORT`를 읽으며 기본 로컬 포트는 5080입니다. 회사 기본 실행을 위해 그 값을 바꿀 필요는 없습니다.
 
 ## 5. 회사 SSO 및 배포
 
 회사 환경에서 hcputil을 설치한 뒤 PTAI_AUTH_MODE를 'sso'로 바꾸고 HTTPS 환경에서는 PTAI_COOKIE_SECURE를 True로 설정합니다. 기본 관리자 사번은 PTAI_ADMIN_IDS에 쉼표로 구분하고 추가 관리자는 관리자 메뉴에서 지정합니다. 상세 회사 인증 흐름은 HCP_DEPLOYMENT.md를 참고하세요.
 
-회사 WSGI 실행기는 이 폴더에서 web_main:app을 불러옵니다. 이때 별도 서버를 시작하지 않습니다. SSO 모드로 직접 실행할 때는 Waitress가 필요합니다. 실제 사내 인증은 회사 환경에서 검증해야 합니다. 인증 이후의 저장·권한·버전 API는 SSO 사용과 미사용이 동일합니다.
+회사 기본 진입점은 `index:application`이며, 기존 회사 실행기의 `web_main:app`도 동일한 앱을 제공합니다. 불러오기만 할 때에는 별도 서버를 시작하지 않습니다. 회사의 시작 명령·포트·프록시 설정은 기존 배포 방식대로 유지하세요. 실제 사내 인증은 회사 환경에서 검증해야 합니다. 인증 이후의 저장·권한·버전 API는 SSO 사용과 미사용이 동일합니다.
 
 ## 6. MongoDB와 파일 저장소
 
@@ -126,7 +126,7 @@ DATA_DIR 기본값은 앱 폴더의 instance입니다. DB와 DATA_DIR을 함께 
 - requirements 오류: 실행과 설치에 같은 Python을 쓰는지 확인합니다.
 - 상대 import 오류: web_main.py 한 파일만 바꾸지 말고 최신 관련 Python 파일 전체를 갱신합니다.
 - MongoDB 오류: URI·DB 이름·네트워크·계정 권한을 확인합니다. 예시 자료나 SQLite로 대체하지 않습니다.
-- 주소 사용 중: 먼저 실행한 터미널을 종료하거나 PTAI_PORT를 바꿉니다.
+- 주소 사용 중: 같은 앱을 중복 실행했는지 확인하고 본인이 켠 이전 실행을 종료합니다. 회사가 정한 포트나 시작 방식을 임의로 바꾸지 않습니다.
 
 ## 10. Skill 배포 정보 연계
 
@@ -152,4 +152,4 @@ GB는 1,024MB 기준입니다. 관리자가 처음 저장하기 전에는 runtim
 
 업로드 시작과 저장 중 여유 공간을 검사합니다. 공간 부족이나 디스크 조회 실패 시 새 업로드를 중단하고 임시 파일을 정리합니다. 기존 파일 조회·다운로드와 URL/명령어 등록은 유지합니다. HTTP 요청 파싱 중의 임시 업로드 공간은 파일 저장소 한도와 별도로 웹 서버 설정으로 관리합니다.
 
-기본 단일 Waitress 프로세스에서는 쓰기 잠금으로 동시에 저장하는 파일의 한도를 확인합니다. 여러 프로세스나 여러 서버가 하나의 저장소를 공유하는 경우 정확한 공용 최대 용량 강제에는 파일시스템의 quota 설정을 병행하세요. 자동 모드는 서버 디스크를 증설하거나 파일을 자동 삭제하는 기능이 아닙니다.
+단일 앱 프로세스에서는 쓰기 잠금으로 동시에 저장하는 파일의 한도를 확인합니다. 여러 프로세스나 여러 서버가 하나의 저장소를 공유하는 경우 정확한 공용 최대 용량 강제에는 파일시스템의 quota 설정을 병행하세요. 자동 모드는 서버 디스크를 증설하거나 파일을 자동 삭제하는 기능이 아닙니다.

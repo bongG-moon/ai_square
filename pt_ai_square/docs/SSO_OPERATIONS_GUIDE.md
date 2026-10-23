@@ -1,10 +1,10 @@
 # P&T AI SQUARE · SSO 운영 설정 상세 가이드
 
-**운영 담당자를 위한 문서 · 2026년 10월 22일 · 현재 소스 기준**
+**운영 담당자를 위한 문서 · 2026년 10월 23일 · 현재 소스 기준**
 
 회사 SSO가 준비되어 있다는 가정 아래, 플랫폼을 회사 서버에 올리고 실제 사번으로 사용하는 순서입니다. SSO는 회사 로그인을 통해 사용자가 누구인지 확인하는 기능입니다. MongoDB는 등록 정보·권한·이력을 저장하고, 서버 폴더는 업로드한 파일 원본을 보관합니다.
 
-핵심은 **web_main.py 옆의 runtime_config.py에 운영 값을 입력하고, 회사 실행기가 web_main:app을 불러오게 하는 것**입니다. 별도 아이디·비밀번호 로그인 화면은 없습니다. SSO 코드의 주석을 해제하거나 홈 화면 함수를 새로 붙일 필요도 없습니다.
+핵심은 **runtime_config.py에 운영 값을 입력하고, 회사 기본 index.py → web_main.py 구조로 실행하는 것**입니다. 회사가 정한 시작 명령과 포트를 임의로 바꾸지 않습니다. 별도 아이디·비밀번호 로그인 화면은 없으며, SSO 코드의 주석을 해제하거나 홈 화면 함수를 새로 붙일 필요도 없습니다.
 
 이 문서는 운영용 값을 실제로 적용하지 않습니다. 현재 로컬 실행 설정을 유지합니다. 회사 hcputil·SSO 서버·프록시를 통과하는 최종 로그인은 실제 운영 주소에서 확인해야 합니다.
 
@@ -13,7 +13,7 @@
 ```text
 직원 브라우저
   → 회사 HTTPS 웹 주소 / 회사 SSO
-  → 회사 웹 실행기 → web_main:app → Flask 플랫폼
+  → 회사 기본 index.py → web_main.py의 app → Flask 플랫폼
        ├─ MongoDB: 사번, 등록 정보, 버전, 권한, 이력, 알림, 인증키 해시
        └─ 서버 저장 폴더: 배포 파일 원본, 기능 요청 첨부파일
 
@@ -41,8 +41,8 @@
 | 직원이 접속할 웹 주소 | https://ai-square.example.com | 회사 배포 담당자 | 회사 도메인·HTTPS 설정, 직원 PC의 configure 명령 |
 | 앱 실행 폴더 | C:\apps\pt_ai_square | 운영자 | 회사 실행기의 작업 폴더 |
 | Python 실행 파일 | C:\apps\pt_ai_square\.venv\Scripts\python.exe | 운영자·배포 담당자 | 패키지 설치 및 실행기 설정 |
-| 웹 실행기 방식 | web_main:app을 불러오는 WSGI | 회사 배포 담당자 | 회사 실행기의 시작 설정 |
-| 내부 접속 포트 | 5080 | 회사 배포 담당자 | 직접 실행이면 PTAI_PORT, WSGI면 실행기 설정 |
+| 웹 실행기 방식 | 회사의 기존 index.py 실행 또는 index:application WSGI | 회사 배포 담당자 | 기존 회사 시작 설정 유지; web_main:app도 호환 |
+| 내부 접속 포트 | 회사 기본 실행 환경의 값 | 회사 배포 담당자 | 기존 실행기·프록시 설정 유지; 앱 코드에 별도 포트를 추가하지 않음 |
 | SSO SDK | hcputil.auth.sso.SSO | 회사 SSO 담당자 | 서버 Python에 설치 |
 | SSO 앱 등록·허용 주소·쿠키 조건 | 실제 서비스 도메인과 로그인 복귀 주소 | 회사 SSO 담당자 | 회사 SSO 설정; 아래 6절 참고 |
 | MongoDB URI | mongodb://계정:암호@서버:27017/?authSource=admin | DB 담당자 | MONGODB_URI |
@@ -59,9 +59,10 @@ pt_ai_square 폴더 전체를 운영 서버에 복사합니다. 이름을 바꾸
 
 ```text
 pt_ai_square/
-  web_main.py                  회사 실행기가 불러오는 진입점
-  __init__.py                  앱 생성 및 기능 연결
-  __main__.py                  직접 실행 처리
+  index.py                     회사 기본 시작 파일 / application 제공
+  web_main.py                  Flask app 생성 및 기능 연결
+  __init__.py                  공용 앱 초기화 / 테스트용 앱 생성
+  __main__.py                  선택적인 로컬 보조·관리 명령
   _square_bootstrap.py         상위 폴더 없이 실행하도록 연결
   config.py                   설정을 읽는 코드
   runtime_config.example.py   설정 작성 예시
@@ -79,9 +80,10 @@ pt_ai_square/
 | 파일·위치 | 일반 운영자가 수정하나요? | 설명 |
 |---|---|---|
 | runtime_config.py | 예 | 실제 주소·사번·저장 경로 입력 |
-| web_main.py | 보통 아니요 | app 객체를 제공하므로 그대로 사용 |
+| index.py | 보통 아니요 | 회사 기본 실행 코드와 포트 미지정 방식 유지 |
+| web_main.py | 보통 아니요 | app = Flask(__name__) 생성 후 기존 플랫폼 기능 연결 |
 | backend/auth.py | 보통 아니요 | 회사 SDK 인터페이스가 달라질 때 개발자가 검토 |
-| 회사 실행기의 시작 설정 | 예 | 작업 폴더, Python, web_main:app, 내부 포트 |
+| 회사 실행기의 시작 설정 | 배포 담당자와 확인 | 작업 폴더·Python 확인, 기존 시작 방식·포트 유지 |
 | templates·static | 설정 때문에 수정하지 않음 | 화면에서 주소·사번을 하드코딩하지 않음 |
 | 직원 PC의 client.json | 명령으로 설정 | Skill이 사용할 웹 주소만 보관 |
 
@@ -104,7 +106,7 @@ SSO 운영에는 회사 hcputil도 필요합니다. 아래는 앞서 제공된 �
 
 ```powershell
 & '.\.venv\Scripts\python.exe' -m pip install hcputil --index-url http://nexus.skhynix.com:8080/repository/pypi-group/simple --trusted-host nexus.skhynix.com
-& '.\.venv\Scripts\python.exe' -c "from flask import Flask; from pymongo import MongoClient; from waitress import serve; from hcputil.auth.sso import SSO; print('필수 모듈 확인 완료')"
+& '.\.venv\Scripts\python.exe' -c "from flask import Flask; from pymongo import MongoClient; from hcputil.auth.sso import SSO; print('필수 모듈 확인 완료')"
 ```
 
 마지막 명령의 성공은 모듈을 불러올 수 있다는 뜻입니다. 실제 SSO 로그인 성공까지 의미하지는 않습니다. 인터넷이 제한된 서버라면 회사 Python 패키지 저장소나 승인된 오프라인 패키지 설치 방식을 사용합니다.
@@ -150,13 +152,10 @@ PTAI_MAX_UPLOAD_MB = 128
 PTAI_STORAGE_QUOTA_MB = 51200
 PTAI_STORAGE_RESERVE_MB = 10240
 
-# python web_main.py로 직접 실행할 때만 사용하는 내부 접속 설정입니다.
-# 회사 실행기가 web_main:app을 불러오면 실행기 쪽 주소·포트를 따릅니다.
-PTAI_HOST = '0.0.0.0'
-PTAI_PORT = 5080
+# 회사 기본 index.py의 실행 방식과 포트는 여기서 바꾸지 않습니다.
 ```
 
-0.0.0.0은 서버가 접속을 받는 범위이며 브라우저에 입력할 주소가 아닙니다. 같은 서버의 프록시만 앱에 연결하는 구성이라면 담당자와 확인하여 127.0.0.1을 사용할 수 있습니다. 직원에게는 회사 HTTPS 주소를 안내합니다.
+회사 기본 index.py는 `application.run(debug=True, host='0.0.0.0')`이며 별도 포트 인자가 없습니다. 0.0.0.0은 서버가 접속을 받는 범위이며 직원이 브라우저에 입력할 주소가 아닙니다. 직원에게는 회사 HTTPS 주소를 안내합니다. `PTAI_HOST`·`PTAI_PORT`가 기존 설정에 있어도 index.py에는 적용되지 않습니다.
 
 Linux·컨테이너에서는 PTAI_DATA_DIR을 실제 영구 볼륨 경로, 예를 들어 '/data/pt_ai_square'로 바꿉니다. 코드 폴더 안의 임시 디스크에 저장하면 재배포 때 파일이 사라질 수 있으므로 실제 마운트 유지 여부를 확인합니다.
 
@@ -175,7 +174,7 @@ Linux·컨테이너에서는 PTAI_DATA_DIR을 실제 영구 볼륨 경로, 예�
 | PTAI_MAX_UPLOAD_MB | 한 HTTP 업로드 요청의 전체 크기 제한 | 파일 크기와 폼 정보가 함께 계산됨 |
 | PTAI_STORAGE_QUOTA_MB | 관리자 설정 전 기본 파일 용량 한도 | 디스크 자체가 늘어나는 것은 아님 |
 | PTAI_STORAGE_RESERVE_MB | 디스크에 남길 여유 공간 | 관리자 화면에서 한도 저장 후에는 DB의 정책이 우선 |
-| PTAI_HOST·PTAI_PORT | 직접 실행 서버의 내부 주소·포트 | 외부 HTTPS 도메인 설정을 대신하지 않음 |
+| PTAI_HOST·PTAI_PORT | 선택적인 로컬 보조 명령 __main__.py run에만 적용 | 회사 index.py·WSGI 실행 방식이나 포트를 바꾸지 않음 |
 | PTAI_MOCK_USER·PTAI_MOCK_NAME | SSO 미사용일 때의 시험 신원 | SSO에서는 실제 로그인 신원을 사용하므로 운영 직원마다 설정하지 않음 |
 
 MongoDB URI의 비밀번호에 @, :, / 같은 문자가 있으면 URI용 인코딩이 필요합니다. DB 담당자가 제공한 완성된 연결 문자열을 사용하는 것이 좋습니다. authSource는 계정을 인증할 DB이고 MONGODB_DATABASE는 앱 자료를 저장할 DB이므로 서로 다를 수 있습니다.
@@ -245,7 +244,7 @@ SSO에서 받은 현재 부서명(dept)과 관리자가 정한 검색·등록용
 
 ### 6-3. 굳이 수정하지 않아도 되는 코드
 
-회사 예제의 app = Flask(__name__), /, /login 함수를 web_main.py에 다시 붙이지 않습니다. 이미 앱 생성 과정에서 등록됩니다. SSO import도 필요할 때 수행하므로 로컬 mock에서는 hcputil 없이 실행할 수 있습니다. Oracle용 NLS_LANG이나 HTTPS 검증 경고 끄기는 이 MongoDB 앱의 필수 설정이 아닙니다.
+web_main.py에는 회사 예제처럼 `app = Flask(__name__)`, `NLS_LANG='.UTF8'`, `url_path=''`가 있습니다. 공용 초기화 함수가 이 앱에 `/`·`/login`과 기존 플랫폼 기능을 등록하므로 예제 함수를 추가로 붙이지 않습니다. SSO import는 필요할 때 수행하여 로컬 mock에서는 hcputil 없이 실행할 수 있습니다. HTTPS 검증 경고를 전역으로 끄는 설정은 추가하지 않습니다.
 
 ### 6-4. 우측 상단 이름·부서·사진 확인
 
@@ -285,31 +284,46 @@ SSO로 로그인한 뒤 우측 상단에서 “이름 TL”, 부서명, 원형 �
 
 ## 8. 웹 서버 실행하기
 
+### 회사 기본 index.py 구조 확인
+
+`index.py`는 다음 형태를 그대로 사용합니다.
+
+```python
+from web_main import app as application
+
+if __name__ == "__main__":
+    application.run(debug=True, host='0.0.0.0')
+```
+
+직접 실행할 때는 위 `debug=True`도 그대로 적용됩니다. 회사 실행기가 모듈을 불러오기만 하면 `__name__`이 `__main__`이 아니므로 run()을 호출하지 않습니다. 이 경우 요청 처리는 회사 실행기가 담당합니다. 앱이 별도 포트나 Waitress 실행을 선택하지 않습니다.
+
 ### 방법 A. 회사 실행기가 Flask 앱을 불러오는 경우
 
-회사 배포 화면에서 아래 내용을 지정합니다. 입력 항목의 정확한 이름은 회사 실행기마다 다르므로 의미를 기준으로 맞춥니다.
+회사 배포 화면에서 기존 설정을 확인합니다. 회사가 제공한 실행 방식을 이 문서만 보고 다른 방식으로 변경하지 않습니다.
 
 | 항목 | 지정할 내용 |
 |---|---|
-| 작업 폴더 | web_main.py가 있는 폴더 |
+| 작업 폴더 | index.py와 web_main.py가 있는 폴더 |
 | Python | 패키지와 hcputil을 설치한 Python |
-| 모듈·앱 진입점 | web_main:app |
-| 내부 주소·포트 | 회사 실행기가 요구하는 값 |
+| 모듈·앱 진입점 | 회사 기본 index:application; 기존 web_main:app도 동일 앱으로 호환 |
+| 내부 주소·포트 | 회사 기존 설정 유지 |
 | 외부 주소 | 직원이 접속할 회사 HTTPS 도메인 |
 | 영구 저장소 | PTAI_DATA_DIR에 연결된 폴더·볼륨 |
 
-회사 실행기가 web_main:app을 import하면 Flask 객체만 생성합니다. 별도 python web_main.py를 동시에 실행하지 않습니다. 이 방식에서는 PTAI_HOST와 PTAI_PORT 대신 회사 실행기의 포트 설정을 따릅니다.
+회사 실행기가 `index:application` 또는 `web_main:app`을 import하면 앱을 생성하고 기능만 연결합니다. 별도 `python index.py`를 동시에 실행하지 않습니다. 회사 실행기의 포트 설정을 따르며 `PTAI_HOST`·`PTAI_PORT`는 이 방식에 적용되지 않습니다.
 
 ### 방법 B. 직접 프로세스를 실행하는 경우
 
-회사에서 별도 WSGI 실행기를 제공하지 않는 경우의 예시입니다. SSO 직접 실행에는 requirements.txt의 Waitress가 필요합니다. 운영에서는 --dev를 붙이지 않습니다.
+회사에서 기본 파일을 직접 실행하도록 안내한 경우 다음과 같이 index.py를 실행합니다. VS Code에서는 index.py를 열어 **Python 파일 실행**을 눌러도 됩니다. web_main.py는 앱 정의용이며 단독 실행으로 서버를 시작하지 않습니다.
 
 ```powershell
 Set-Location 'C:\apps\pt_ai_square'
-& '.\.venv\Scripts\python.exe' web_main.py
+& '.\.venv\Scripts\python.exe' index.py
 ```
 
-내부 서버는 HTTP로 시작할 수 있으며, 직원의 외부 접속은 회사 프록시가 제공하는 HTTPS를 사용합니다. 이 명령 자체가 HTTPS 인증서를 발급하거나 회사 SSO를 등록해 주지는 않습니다. 수동 실행은 터미널이 종료되면 중단되므로 계속 운영할 때는 회사의 프로세스 관리·자동 재시작 방식에 등록합니다.
+내부 서버는 회사 기본 Flask 실행 방식으로 시작하며, 직원의 외부 접속은 회사 프록시가 제공하는 HTTPS를 사용합니다. 이 명령 자체가 HTTPS 인증서를 발급하거나 회사 SSO를 등록해 주지는 않습니다. 수동 실행은 터미널이 종료되면 중단되므로 계속 운영할 때는 회사의 기존 프로세스 관리 방식을 사용합니다.
+
+로컬에서 종전의 5080 보조 실행이 필요한 개발자는 `python __main__.py run`을 별도로 선택할 수 있습니다. `PTAI_HOST`·`PTAI_PORT`는 이 보조 명령에서만 사용하며 회사 기본 진입점을 대신하지 않습니다.
 
 ### 최초 상태 확인
 
@@ -479,7 +493,7 @@ python scripts/square_client.py --authenticate download 12 --output ./updates --
 | 증상 | 우선 확인 | 조치 |
 |---|---|---|
 | No module named hcputil | 실행 Python과 설치 Python | 회사 실행기와 같은 Python에 사내 SDK 설치 |
-| attempted relative import 오류 | web_main.py 및 _square_bootstrap.py 버전·누락 | 현재 폴더 전체를 함께 배포하고 python web_main.py로 실행 |
+| attempted relative import 오류 | index.py·web_main.py 및 _square_bootstrap.py 버전·누락 | 현재 폴더 전체를 함께 배포하고 회사 기본 index.py로 실행 |
 | MongoDB 연결 시간 초과 | URI 호스트·포트·망 연결·TLS | DB 담당자에게 서버에서의 연결 경로 확인 |
 | MongoDB 인증·권한 오류 | 계정, authSource, 인덱스 생성 권한 | 실제 URI와 대상 DB 권한 확인 |
 | HCP SSO 인증 확인 불가·503 | SDK 설치, 쿠키 검증, 6개 반환값 | backend/auth.py 계약과 회사 SDK 설정 확인 |
@@ -506,7 +520,7 @@ python scripts/square_client.py --authenticate download 12 --output ./updates --
 1. 현재 코드 버전, runtime_config.py, MongoDB, PTAI_DATA_DIR을 보존합니다.
 2. 쓰기 작업을 중단하는 점검 시간에 서버를 멈추거나 회사 배포 절차를 진행합니다.
 3. 새 코드를 배포하되 운영 설정·영구 파일 저장소를 덮어쓰지 않습니다.
-4. 필요한 패키지를 같은 Python 환경에 반영하고 서버를 시작합니다.
+4. 필요한 패키지를 같은 Python 환경에 반영하고 회사의 기존 시작 방식으로 재시작합니다. 직접 실행은 index.py, 앱 불러오기는 index:application 또는 기존 web_main:app입니다. 별도 포트 변경은 하지 않습니다.
 5. /health → SSO 로그인 → 기존 파일 다운로드 순서로 확인합니다.
 
 DB와 파일은 연결되어 있으므로 같은 시점 기준으로 백업합니다. 코드만 되돌리는 것으로 DB 구조 변경까지 복구되는 것은 아닙니다. DB나 저장 경로를 바꿀 때는 자료 이전·복구 계획을 함께 준비합니다.
@@ -528,7 +542,6 @@ PTAI_MOCK_USER = '1000001'
 PTAI_MOCK_NAME = '시험 사용자'
 PTAI_MOCK_ADMIN = True
 PTAI_COOKIE_SECURE = False
-PTAI_HOST = '127.0.0.1'
 # MONGODB_URI / MONGODB_DATABASE / PTAI_DATA_DIR도 시험용으로 지정합니다.
 ```
 

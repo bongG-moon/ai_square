@@ -59,5 +59,8 @@ for source,name in documents:
     title='P&T AI SQUARE · '+('SSO 운영 설정 상세 가이드' if source.startswith('SSO_') else '상세 기획서' if source.startswith('PLAN') else '사용자·등록자 가이드' if source.startswith('USER') else '로컬 다운로드 가이드' if source.startswith('LOCAL') else '실행·운영 가이드')
     result='<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(title)+'</title><style>'+style+'</style><header><strong>P&T AI SQUARE</strong><span>v3.3 · P&T AI SQUARE</span></header><main><nav>'+''.join(f'<a href="#{key}">{html.escape(label)}</a>' for key,label in toc)+'</nav><article>'+content+'</article></main></html>'
     (OUT/name).write_text(result,encoding='utf-8')
+    if source == 'OPERATOR_GUIDE.md':
+        # Keep the older download filename in sync with the current run guide.
+        (OUT/'P&T_AI_SQUARE_실행_사용가이드_v3.html').write_text(result,encoding='utf-8')
     if source.startswith('USER'):(BASE/'static/guides/PT_AI_SQUARE_등록가이드.html').write_text(result,encoding='utf-8')
     print(name)
