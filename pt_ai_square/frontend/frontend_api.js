@@ -17,13 +17,21 @@ async function requestAPI(url,method='GET',body){
  }finally{runtime.requestBusy--;}
 }
 async function refresh(){
- const data=await requestAPI('/api/bootstrap');Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
+ const token=runtime.refreshToken=(runtime.refreshToken||0)+1;let data;
+ try{data=await requestAPI('/api/bootstrap');}catch(error){if(token!==runtime.refreshToken)return false;throw error;}
+ // Every caller shares this generation; a slower earlier request cannot overwrite newer data.
+ if(token!==runtime.refreshToken)return false;
+ Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
  if($('#sq-server-error'))$('#sq-server-error').hidden=true;
  organizations.splice(0,organizations.length,...data.organizations);requests.splice(0,requests.length,...data.requests);Object.assign(policy,data.policy);audit.splice(0,audit.length,...data.audit);
  $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.dataMode==='dummy'?'샘플 데이터 · 조회 전용':data.authMode==='mock'?'SSO 미사용':'SSO 사용';
- $('[data-action=logout]').hidden=data.authMode==='mock';render();
+ $('[data-action=logout]').hidden=data.authMode==='mock';render();return true;
 }
-async function mutate(url,method,body,after){await requestAPI(url,method,body);await refresh();after?.();}
+async function mutate(url,method,body,after){
+ await requestAPI(url,method,body);
+ try{await refresh();return await after?.();}
+ catch(error){throw Error(`변경 내용은 저장되었습니다. 화면을 갱신하지 못했습니다. ${error.message}`);}
+}
 async function downloadVersion(id,n){
  if(server.dataMode==='dummy')throw Error('샘플 데이터는 조회 전용입니다. 실제 데이터 모드에서 다운로드해 주세요.');
  const x=getItem(id);if(x.approval&&x.access!=='approved'){requestAccess();return;}
@@ -43,14 +51,21 @@ new MutationObserver(()=>{runtime.likeRequests?.forEach((_,id)=>setLikeBusy(id,t
 actions.like=b=>{
  const id=+b.dataset.id,pending=runtime.likeRequests||(runtime.likeRequests=new Map());
  if(pending.has(id))return pending.get(id).promise;
- const operation={},liked=!state.liked.has(id);pending.set(id,operation);setLikeBusy(id,true);
+ const operation={},previousLiked=state.liked.has(id),liked=!previousLiked;
+ const previousBase=Number(getItem(id)?.likes);
+ const previousCount=Math.max(previousLiked?1:0,(Number.isFinite(previousBase)?Math.floor(previousBase):0)+(previousLiked?1:0));
+ pending.set(id,operation);setLikeBusy(id,true);
  operation.promise=(async()=>{
- const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked}),savedLiked=result.liked??liked;applyLikeResult(id,savedLiked,result.count);
+ const result=await requestAPI(`/api/tools/${id}/like`,'PUT',{liked}),savedLiked=result.liked??liked;
+ // A confirmed state write can succeed even when the separate count query is unavailable.
+ const savedCount=Math.max(savedLiked?1:0,Number.isFinite(result.count)?Math.floor(result.count):previousCount+(savedLiked?1:0)-(previousLiked?1:0));
+ applyLikeResult(id,savedLiked,savedCount);
  const heart=b.querySelector('svg');if(savedLiked&&!motion.matches&&heart?.animate)heart.animate([{transform:'scale(1)'},{transform:'scale(1.3)'},{transform:'scale(1)'}],{duration:330});
  // Keep concurrent cards independent, but do not apply older bootstrap responses last.
  runtime.likeRefresh=(runtime.likeRefresh||Promise.resolve()).catch(()=>{}).then(()=>refresh());
- try{await runtime.likeRefresh;}catch(error){applyLikeResult(id,savedLiked,result.count);showError({message:`좋아요 ${savedLiked?'추가':'취소'}는 저장되었습니다. 목록·순위를 새로고침하지 못했습니다. ${error.message}`});return;}
- announce(result.pending?'좋아요는 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':savedLiked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');
+ try{await runtime.likeRefresh;}catch(error){applyLikeResult(id,savedLiked,savedCount);showError({message:`좋아요 ${savedLiked?'추가':'취소'}는 저장되었습니다. 목록·순위를 새로고침하지 못했습니다. ${error.message}`});return;}
+ const historyPending=result.historyPending??(result.countsPending==null&&result.pending);
+ announce(historyPending&&result.countsPending?'좋아요는 저장되었습니다. 이력·집계는 다음 조회 시 다시 확인합니다.':historyPending?'좋아요는 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':result.countsPending?'좋아요는 저장되었습니다. 집계는 목록 조회 시 다시 확인합니다.':savedLiked?'좋아요를 추가하고 순위를 갱신했습니다.':'좋아요를 취소하고 순위를 갱신했습니다.');
  })().finally(()=>{pending.delete(id);setLikeBusy(id,false);});
  return operation.promise;
 };

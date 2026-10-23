@@ -121,3 +121,15 @@ def test_health_error_retains_json_and_no_automatic_retry(app, monkeypatch):
     assert response.status_code == 503 and response.is_json
     assert response.json['diagnostic']['code'] == 'DB-CONNECTION'
     assert calls == ['ping']
+
+
+def test_diagnostic_log_uses_route_template_and_effective_option_without_path_values(app,monkeypatch,caplog):
+    client,headers=ready(app)
+    endpoint=next(rule.endpoint for rule in app.url_map.iter_rules() if rule.rule=='/api/local-tokens/<token_id>')
+    def failed(token_id):raise OperationFailure(PRIVATE,225)
+    monkeypatch.setitem(app.view_functions,endpoint,failed)
+    response=client.delete('/api/local-tokens/private-row-identity?private-query-value',headers=headers)
+    assert response.status_code==503
+    assert 'method=DELETE route=/api/local-tokens/<token_id> retry_writes=False' in caplog.text
+    assert PRIVATE not in caplog.text
+    assert 'private-row-identity' not in caplog.text and 'private-query-value' not in caplog.text

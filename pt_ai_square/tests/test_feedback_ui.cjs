@@ -20,8 +20,9 @@ function setup(){
  const dialog=element('sq-dialog');dialog.open=false;
  const body=element('sq-dialog-body'),shell=element();nodes.set('.sq-shell',shell);
  element('sq-status');element('sq-modal-status');
+ element('sq-session');nodes.set('.sq-demo',element());nodes.set('[data-action=logout]',element());
  const items=[{id:1,likes:0,downloads:3},{id:2,likes:0,downloads:5}];
- const context={runtime:{},state:{liked:new Set()},items,actions:{},FormData:class{},
+ const context={runtime:{},state:{liked:new Set()},items,actions:{},FormData:class{},organizations:[],requests:[],policy:{},audit:[],render(){},renderWorkspace(){},
   document:{createElement:()=>element()},root:{addEventListener:(name,fn)=>{(listeners[name]??=[]).push(fn);}},
   MutationObserver:class{constructor(fn){observer=fn;}observe(){}},
   $:selector=>nodes.get(selector)||null,
@@ -30,7 +31,7 @@ function setup(){
   fetch:(url,options)=>{const request=deferred();requests.push({...request,url,options,body:options.body?JSON.parse(options.body):null});return request.promise;},
   fakeRefresh:()=>{const request=deferred();refreshes.push(request);return request.promise;},
  };
- vm.createContext(context);vm.runInContext(apiSource+'\nrefresh=globalThis.fakeRefresh;globalThis.serverState=server;',context,{filename:'static/app.js API'});
+ vm.createContext(context);vm.runInContext(apiSource+'\nglobalThis.realRefresh=refresh;refresh=globalThis.fakeRefresh;globalThis.serverState=server;',context,{filename:'static/app.js API'});
  function control(id,detail=false){
   const node=element();node.dataset.id=String(id);node.count=element();node.count.textContent='0';node.label=element();
   node.classList.contains=name=>!detail&&name==='sq-like';
@@ -79,6 +80,18 @@ test('a modal without a form has one visible alert inside the dialog',()=>{
  assert.equal(h.nodes.get('#ws-dialog-error').textContent,'Like failed again');
  assert.equal(h.nodes.get('#ws-dialog-error').attrs.role,'alert');assert.equal(h.nodes.has('#sq-server-error'),false);
  assert.deepEqual(h.announcements,[]);
+});
+
+test('generic mutations distinguish a saved change from failed refresh and never resubmit',async()=>{
+ const h=setup();let after=0;
+ const work=h.context.mutate('/api/tools/1','PATCH',{name:'saved'},()=>{after++;});
+ h.respond(h.requests[0],{ok:true});await tick();h.refreshes[0].reject(Error('Read unavailable'));
+ await assert.rejects(work,/변경 내용은 저장되었습니다.*Read unavailable/);
+ assert.equal(h.requests.length,1);assert.equal(after,0);
+ const failed=h.context.mutate('/api/tools/1','PATCH',{name:'unsaved'});
+ h.requests[1].reject(Error('Write unavailable'));
+ await assert.rejects(failed,error=>error.message==='Write unavailable');
+ assert.equal(h.refreshes.length,1);
 });
 
 test('rapid clicks on every copy of one tool send one PUT and wait for confirmed counts',async()=>{
@@ -135,6 +148,61 @@ test('a queued refresh failure restores its confirmed like after an earlier snap
  assert.equal(second.disabled,false);assert.equal(h.requests.length,2);
 });
 
+for(const liked of [false,true])test(`a saved ${liked?'like removal':'like'} keeps a safe provisional count when aggregation is pending`,async()=>{
+ const h=setup(),card=h.control(1);h.items[0].likes=4;
+ if(liked)h.context.state.liked.add(1);
+ card.count.textContent=String(4+(liked?1:0));const pending=h.context.actions.like(card);
+ h.respond(h.requests[0],{count:null,liked:!liked,historyPending:true,countsPending:true});await tick();
+ assert.equal(card.count.textContent,String(liked?4:5));assert.equal(h.items[0].likes,4);
+ h.refreshes[0].reject(Error('Read unavailable'));await pending;
+ assert.equal(card.count.textContent,String(liked?4:5));assert.equal(h.context.state.liked.has(1),!liked);
+ assert.equal(h.requests.length,1);assert.equal(card.disabled,false);
+});
+
+test('pending aggregation never displays a negative or NaN count and honors the saved selection',async()=>{
+ const h=setup(),card=h.control(1);h.context.state.liked.add(1);h.items[0].likes=-1;
+ const pending=h.context.actions.like(card);h.respond(h.requests[0],{count:null,liked:false,pending:true,historyPending:false,countsPending:true});await tick();
+ assert.equal(card.count.textContent,'0');assert.equal(h.items[0].likes,0);
+ h.refreshes[0].resolve();await pending;assert.match(h.announcements[0],/집계는 목록 조회 시/);
+ h.items[0].likes=NaN;const another=h.context.actions.like(card);h.respond(h.requests[1],{count:null,liked:true,historyPending:true});await tick();
+ assert.equal(card.count.textContent,'1');assert.equal(h.items[0].likes,0);
+ h.refreshes[1].resolve();await another;assert.match(h.announcements[1],/이력은 다음 조회/);
+});
+
+test('a saved like distinguishes simultaneous history and aggregation delay in one status',async()=>{
+ const h=setup(),card=h.control(1),pending=h.context.actions.like(card);
+ h.respond(h.requests[0],{liked:true,count:null,pending:true,historyPending:true,countsPending:true});await tick();
+ h.refreshes[0].resolve();await pending;
+ assert.equal(h.announcements.length,1);assert.match(h.announcements[0],/이력·집계는 다음 조회/);
+});
+
+function bootstrap(likes=0,revision=2){return {items:[{id:1,likes,liked:likes>0,downloads:3}],organizations:[],requests:[],policy:{},audit:[],user:{name:'User',org:'Team'},authMode:'mock',storage:{limitRevision:revision}};}
+
+test('global bootstrap generation rejects an earlier response after a newer caller has rendered',async()=>{
+ const h=setup();let rendered=0;h.context.render=()=>{rendered++;};
+ const earlier=h.context.realRefresh(),latest=h.context.realRefresh();
+ h.respond(h.requests[1],bootstrap(5));assert.equal(await latest,true);
+ h.respond(h.requests[0],bootstrap(0));assert.equal(await earlier,false);
+ assert.equal(h.items[0].likes,4);assert.equal(h.context.state.liked.has(1),true);assert.equal(rendered,1);
+});
+
+test('a stale bootstrap failure cannot surface after a newer successful response',async()=>{
+ const h=setup(),earlier=h.context.realRefresh(),latest=h.context.realRefresh();
+ h.respond(h.requests[1],bootstrap(2));await latest;
+ h.requests[0].reject(Error('Old read failed'));assert.equal(await earlier,false);
+ assert.equal(h.items[0].likes,1);assert.equal(h.nodes.has('#sq-server-error'),false);
+ const current=h.context.realRefresh();h.requests[2].reject(Error('Current read failed'));
+ await assert.rejects(current,/Current read failed/);
+});
+
+test('authoritative bootstrap replaces provisional like counts after a count query failure',async()=>{
+ const h=setup(),card=h.control(1);h.items[0].likes=4;h.context.refresh=h.context.realRefresh;
+ const pending=h.context.actions.like(card);h.respond(h.requests[0],{liked:true,count:null,countsPending:true});await tick();
+ assert.equal(h.items[0].likes,4);assert.equal(card.count.textContent,'5');
+ h.respond(h.requests[1],bootstrap(8));await pending;
+ assert.equal(h.items[0].likes,7);assert.equal(h.context.state.liked.has(1),true);assert.equal(h.requests.length,2);
+});
+
 test('capacity write failure stays inline with alert semantics and enables deliberate retry',async()=>{
  const h=setup(),form=h.capacity(),pending=form.submit();assert.equal(form.button.disabled,true);
  assert.equal(form.submit(),undefined);assert.equal(h.requests.length,1);
@@ -144,20 +212,49 @@ test('capacity write failure stays inline with alert semantics and enables delib
  assert.equal(h.refreshes.length,0);assert.equal(h.nodes.has('#sq-server-error'),false);assert.deepEqual(h.announcements,[]);
 });
 
-test('confirmed capacity settings/revision survive refresh failure without a second PUT',async()=>{
+test('confirmed capacity settings/revision render directly without a bootstrap or second PUT',async()=>{
  const h=setup(),form=h.capacity(),pending=form.submit(),storage={limitRevision:3,configuredQuota:5*1073741824,mode:'manual'};
- h.respond(h.requests[0],{storage,ok:true});await tick();
+ let rendered=0;h.context.renderWorkspace=()=>{rendered++;};
+ h.respond(h.requests[0],{storage,ok:true});await pending;
  assert.equal(form.form.dataset.revision,'3');assert.equal(h.context.serverState.storage.limitRevision,3);
- h.refreshes[0].reject(Error('Read unavailable'));await pending;
- assert.match(form.message.textContent,/한도 설정은 저장되었습니다/);assert.equal(form.message.attrs.role,'alert');
+ assert.equal(rendered,1);assert.equal(h.refreshes.length,0);
+ assert.match(form.message.textContent,/저장했습니다/);assert.equal(form.message.attrs.role,'status');
  assert.equal(h.requests.length,1);assert.equal(form.button.disabled,false);assert.deepEqual(h.announcements,[]);
+});
+
+test('an in-flight bootstrap cannot replace an acknowledged capacity revision with an older policy',async()=>{
+ const h=setup(),earlier=h.context.realRefresh(),form=h.capacity(),pending=form.submit();
+ h.respond(h.requests[1],{storage:{limitRevision:3},ok:true});await pending;
+ h.respond(h.requests[0],bootstrap(0,2));assert.equal(await earlier,false);
+ assert.equal(h.context.serverState.storage.limitRevision,3);assert.equal(form.form.dataset.revision,'3');
+ assert.equal(h.requests.length,2);assert.equal(h.refreshes.length,0);
+});
+
+for(const outcome of ['success','failure'])test(`an older dedicated capacity GET ${outcome} cannot override a confirmed save`,async()=>{
+ const h=setup(),form=h.capacity(),earlier=h.context.fetchStorageCapacity(),pending=form.submit();
+ h.respond(h.requests[1],{storage:{limitRevision:3,configuredQuota:9000},ok:true});await pending;
+ if(outcome==='success')h.respond(h.requests[0],{storage:{limitRevision:2,configuredQuota:1000}});
+ else h.requests[0].reject(Error('Older capacity read failed'));
+ assert.equal(await earlier,false);assert.equal(h.context.serverState.storage.limitRevision,3);
+ assert.equal(h.context.serverState.storage.configuredQuota,9000);assert.equal(form.form.dataset.revision,'3');
+ assert.equal(form.message.attrs.role,'status');assert.match(form.message.textContent,/저장했습니다/);
+ assert.equal(h.requests.length,2);assert.equal(h.refreshes.length,0);
+});
+
+test('dedicated capacity GET uses its newest response and still reports a current read error',async()=>{
+ const h=setup();h.capacity();const earlier=h.context.fetchStorageCapacity(),latest=h.context.fetchStorageCapacity();
+ h.respond(h.requests[1],{storage:{limitRevision:5}});assert.equal(await latest,true);
+ h.respond(h.requests[0],{storage:{limitRevision:4}});assert.equal(await earlier,false);
+ assert.equal(h.context.serverState.storage.limitRevision,5);
+ const current=h.context.fetchStorageCapacity();h.requests[2].reject(Error('Current capacity read failed'));
+ await assert.rejects(current,/Current capacity read failed/);
 });
 
 test('capacity validation is an alert, but pending and successful states are polite status messages',async()=>{
  const h=setup(),form=h.capacity();form.form.elements.quotaGB.value='0';form.submit();
  assert.equal(form.message.attrs.role,'alert');assert.equal(h.requests.length,0);
  form.form.elements.quotaGB.value='5';const pending=form.submit();assert.equal(form.message.attrs.role,'status');
- h.respond(h.requests[0],{storage:{limitRevision:3},ok:true});await tick();h.refreshes[0].resolve();await pending;
+ h.respond(h.requests[0],{storage:{limitRevision:3},ok:true});await pending;
  assert.equal(form.message.attrs.role,'status');assert.equal(form.message.attrs['aria-live'],'polite');
  assert.match(form.message.textContent,/저장했습니다/);assert.equal(form.button.disabled,false);
 });
@@ -167,7 +264,7 @@ test('queued secondary synchronization is reported as a saved like and saved cap
  h.respond(h.requests[0],{count:1,liked:true,pending:true});await tick();h.refreshes[0].resolve();await like;
  assert.match(h.announcements[0],/저장되었습니다/);assert.equal(h.nodes.has('#sq-server-error'),false);
  const form=h.capacity(),saved=form.submit();h.respond(h.requests[1],{storage:{limitRevision:3},pending:true});
- await tick();h.refreshes[1].resolve();await saved;assert.equal(form.message.attrs.role,'status');
+ await saved;assert.equal(h.refreshes.length,1);assert.equal(form.message.attrs.role,'status');
  assert.match(form.message.textContent,/한도 설정은 저장되었습니다/);assert.match(form.message.textContent,/다음 조회/);
 });
 
@@ -185,6 +282,20 @@ function publishSetup(){
  async function failed(){const pending=context.publish(),request=requests.at(-1);request.reject(Error('Response unavailable'));await assert.rejects(pending,/Response unavailable/);return request;}
  return {context,draft,requests,opened,failed};
 }
+
+test('concurrent programmatic publish calls send one POST and release the busy guard on failure and success',async()=>{
+ const h=publishSetup(),first=h.context.publish();assert.equal(h.context.runtime.publishBusy,true);
+ await h.context.publish();assert.equal(h.requests.length,1);
+ h.requests[0].reject(Error('Write unavailable'));await assert.rejects(first,/Write unavailable/);
+ assert.equal(h.context.runtime.publishBusy,false);assert.equal(h.context.runtime.draft,h.draft);
+ const refresh=deferred();h.context.refresh=()=>refresh.promise;
+ const next=h.context.publish();assert.equal(h.requests.length,2);
+ assert.equal(h.requests[0].metadata.clientRequestId,h.requests[1].metadata.clientRequestId);
+ h.requests[1].resolve({id:19,version:1});await tick();assert.equal(h.context.runtime.publishBusy,true);
+ await h.context.publish();assert.equal(h.requests.length,2);
+ refresh.resolve();await next;assert.equal(h.context.runtime.publishBusy,false);assert.equal(h.opened.length,1);
+ await h.context.publish();assert.equal(h.requests.length,2);
+});
 
 test('an unchanged explicit publish retry keeps its UUID even when preview/revision state changes',async()=>{
  const h=publishSetup(),first=await h.failed();assert.match(first.metadata.clientRequestId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);

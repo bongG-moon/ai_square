@@ -7,10 +7,11 @@ import uuid
 from urllib.parse import urlsplit
 from flask import Blueprint, current_app, g, jsonify, request, send_file, session
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound, Conflict
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
-from .storage import db, next_id, audit, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
+from .storage import db, next_id, audit_event, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
-from .request_files import stage_attachments, attachment_path, public_attachments
+from .request_files import stage_attachments, attachment_path, public_attachments, cleanup_unreferenced_attachments
 from .package_contract import registration_fields, normalize_workflow
 from .storage_capacity import snapshot as storage_snapshot
 from . import post_commit
@@ -83,10 +84,29 @@ def resolved(t):
         if row: data[key] = row['name']
     return data
 
-def cas(t, update):
+def add_outbox(update, entry):
+    """Preserve an existing notification when adding its durable audit job."""
+    push = update.setdefault('$push', {})
+    previous = push.get('outbox')
+    if previous is None:
+        push['outbox'] = entry
+    elif '$each' in previous:
+        previous['$each'].append(entry)
+    else:
+        push['outbox'] = {'$each': [previous, entry]}
+
+
+def deliver_pending(collection, document_id):
+    return post_commit.followup_pending('deliver-'+collection, deliver_notifications, collection, document_id)
+
+
+def cas(t, update, audit_message=None):
+    if audit_message:
+        add_outbox(update, audit_event(audit_message))
     update.setdefault('$inc', {})['revision'] = 1
     if not db().tools.update_one({'_id': t['_id'], 'revision': t['revision']}, update).modified_count:
         raise Conflict('다른 변경이 반영되었습니다. 새로고침 후 다시 시도해 주세요.')
+    return deliver_pending('tools', t['_id'])
 
 def check_revision(t, raw):
     if raw.get('expectedRevision') != t['revision']: raise Conflict('변경된 버전이 있습니다. 새로고침해 주세요.')
@@ -126,15 +146,13 @@ def access_rows():
 
 @api.get('/api/bootstrap')
 def bootstrap():
-    pending=post_commit.followup_pending('maintenance',post_commit.drain)
-    pending=post_commit.followup_pending('activity',activity.flush) or pending
-    pending=post_commit.followup_pending('notifications',deliver_notifications) or pending
     now=time.time()
     ts=list(db().tools.find({'$or':[{'deleted':{'$ne':True}}, {'owner':g.user['id']}] } if g.user['role']!='admin' else {}).sort('_id',1))
     stats=activity.statistics([t['_id'] for t in ts],g.user['id'],now)
     taxonomy=[dict(id=r['_id'],name=r['name'],kind=r['kind'],enabled=r['enabled'],order=r.get('order',0),owner=r.get('owner','')) for r in db().taxonomy.find().sort([('order',1),('name',1)])]
-    retention=db().settings.find_one({'_id':'retention'});retention.pop('_id')
-    return jsonify(items=[serialize(t,stats[t['_id']],now) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',pending=pending,unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
+    retention=db().settings.find_one({'_id':'retention'})
+    retention={key:retention[key] for key in ('keep','days')}
+    return jsonify(items=[serialize(t,stats[t['_id']],now) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
 
 @api.get('/api/tools/<int:tid>')
 def details(tid):
@@ -142,8 +160,7 @@ def details(tid):
     return jsonify(serialize(t,activity.statistics([tid],g.user['id'],time.time())[tid],time.time()))
 
 def publish_followup_pending(tid):
-    pending=post_commit.followup_pending('publish-maintenance',post_commit.drain,'tools',tid)
-    return post_commit.followup_pending('publish-notifications',deliver_notifications) or pending
+    return deliver_pending('tools',tid)
 
 @api.post('/api/tools')
 @api.post('/api/tools/<int:tid>/versions')
@@ -203,21 +220,20 @@ def publish(tid=None):
         if request_key:
             version['publishRequest']=dict(key=request_key,fingerprint=fingerprint)
         if not t: tid=next_id('tools')
-        job=post_commit.audit_job(f'publish:{tid}:{n}',g.user['id'],f'{data["name"]} v{n} 게시',
-                                  subscription={'tool':tid,'user':g.user['id']})
+        job=audit_event(f'{data["name"]} v{n} 게시', subscription={'tool':tid,'user':g.user['id']})
         if t:
             future=dict(t,data=data)
             e=event(followers(future),f'{data["name"]} v{n} 업데이트',{'type':'tool','id':tid},'release')
-            cas(t,{'$set':{'data':data,'active':n,'fallback':t['active'],'paused':False},'$push':{'versions':version,'outbox':e,'postCommit':job}})
+            pending=cas(t,{'$set':{'data':data,'active':n,'fallback':t['active'],'paused':False},'$push':{'versions':version,'outbox':{'$each':[e,job]}}})
         else:
-            try: db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'postCommit':[job]})
+            try: db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'outbox':[job]})
             except DuplicateKeyError:
                 if request_key:
                     previous_response=replay()
                     if previous_response: return previous_response
                 raise
         committed=True
-        pending=publish_followup_pending(tid)
+        if not t: pending=publish_followup_pending(tid)
         return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
     finally:
         if not committed and artifact['path']:
@@ -251,26 +267,29 @@ def edit(tid):
     current_package=next((v.get('package') for v in t['versions'] if v['n']==t['active']),None)
     if current_package and any(data[k]!=current_package[k] for k in ['platform','type']):
         raise BadRequest('프로그램·유형은 현재 배포 정보와 일치해야 합니다. 변경한 패키지를 새 버전으로 등록하세요.')
-    cas(t,{'$set':{'data':data}});audit(f'{data["name"]} 등록 정보 수정')
-    return jsonify(ok=True)
+    pending=cas(t,{'$set':{'data':data}},f'{data["name"]} 등록 정보 수정')
+    return jsonify(ok=True,pending=pending)
 
 @api.delete('/api/tools/<int:tid>')
 def delete_tool(tid):
-    t=tool(tid,True);check_revision(t,payload());cas(t,{'$set':{'deleted':True,'deletedAt':time.time()}});audit(f'{t["data"]["name"]} 휴지통 이동')
-    return jsonify(ok=True)
+    t=tool(tid,True);check_revision(t,payload())
+    pending=cas(t,{'$set':{'deleted':True,'deletedAt':time.time()}},f'{t["data"]["name"]} 휴지통 이동')
+    return jsonify(ok=True,pending=pending)
 
 @api.post('/api/tools/<int:tid>/restore')
 def restore(tid):
-    t=tool(tid,True,True);check_revision(t,payload());cas(t,{'$set':{'deleted':False}});audit(f'{t["data"]["name"]} 복원')
-    return jsonify(ok=True)
+    t=tool(tid,True,True);check_revision(t,payload())
+    pending=cas(t,{'$set':{'deleted':False}},f'{t["data"]["name"]} 복원')
+    return jsonify(ok=True,pending=pending)
 
 @api.put('/api/tools/<int:tid>/like')
 def like(tid):
     t=tool(tid);usable(t);value=payload().get('liked')
     if not isinstance(value,bool): raise BadRequest('좋아요 상태를 확인해 주세요.')
     count=activity.set_like(tid,g.user['id'],value)
-    pending=post_commit.followup_pending('like-activity',activity.flush)
-    return jsonify(liked=value,count=count,pending=pending)
+    pending=post_commit.followup_pending('like-activity',activity.flush,tid,g.user['id'],50)
+    return jsonify(liked=value,count=count,pending=pending or count is None,
+                   historyPending=pending,countsPending=count is None)
 
 @api.put('/api/tools/<int:tid>/subscription')
 def subscription(tid):
@@ -292,7 +311,7 @@ def access_request(tid):
     else:
         try: db().access.insert_one(dict(values,_id=key,outbox=[e],history=[{'status':'대기','actor':uid,'at':time.time(),'reason':reason}]))
         except DuplicateKeyError: raise Conflict('이미 신청했습니다.')
-    deliver_notifications();return jsonify(ok=True)
+    return jsonify(ok=True,pending=deliver_pending('access',key))
 
 @api.post('/api/requests/<rid>/decision')
 def decide(rid):
@@ -303,26 +322,30 @@ def decide(rid):
     if (status=='회수' and not r.get('granted')) or (status!='회수' and r['status']!='대기'): raise Conflict('이미 처리된 신청입니다.')
     reason=text(raw,'reason',2000,status in {'반려','회수'})
     e=event([r['user']],f'{t["data"]["name"]} 권한 {status}',{'type':'tool','id':r['tool']},'approval')
+    job=audit_event(f'권한 {rid} {status}',subscription={'tool':r['tool'],'user':r['user']} if status=='승인' else None)
+    e.update(audit=job['audit'])
+    if 'subscription' in job: e['subscription']=job['subscription']
     result=db().access.update_one({'_id':rid,'updated':r['updated']},{'$set':{'status':r['status'] if status=='회수' else status,'granted':status=='승인','decision':reason,'updated':time.time(),'decidedBy':g.user['id']},'$push':{'outbox':e,'history':{'status':status,'actor':g.user['id'],'at':time.time(),'reason':reason}}})
     if not result.modified_count: raise Conflict('이미 처리된 신청입니다.')
-    if status=='승인': subscribe(r['tool'],r['user'])
-    audit(f'권한 {rid} {status}');deliver_notifications();return jsonify(ok=True)
+    return jsonify(ok=True,pending=deliver_pending('access',rid))
 
 @api.post('/api/tools/<int:tid>/grants')
 def grant(tid):
     t=tool(tid,True);uid=text(payload(),'user',100)
     if not db().users.find_one({'_id':uid,'enabled':True}): raise BadRequest('로그인 이력이 있는 사용자를 선택해 주세요.')
     e=event([uid],f'{t["data"]["name"]} 조회 권한이 부여되었습니다.',{'type':'tool','id':tid},'approval')
-    db().access.update_one({'tool':tid,'user':uid},{'$setOnInsert':{'_id':f'{tid}:{uid}','reason':''},'$set':{'status':'승인','granted':True,'source':'직접 추가','decision':'','decidedBy':g.user['id'],'updated':time.time()},'$push':{'outbox':e,'history':{'status':'직접 승인','actor':g.user['id'],'at':time.time()}}},upsert=True)
-    subscribe(tid,uid);audit(f'도구 {tid} 사용자 {uid} 직접 승인');deliver_notifications();return jsonify(ok=True)
+    e.update(audit=audit_event(f'도구 {tid} 사용자 {uid} 직접 승인')['audit'],subscription={'tool':tid,'user':uid})
+    saved=db().access.find_one_and_update({'tool':tid,'user':uid},{'$setOnInsert':{'_id':f'{tid}:{uid}','reason':''},'$set':{'status':'승인','granted':True,'source':'직접 추가','decision':'','decidedBy':g.user['id'],'updated':time.time()},'$push':{'outbox':e,'history':{'status':'직접 승인','actor':g.user['id'],'at':time.time()}}},upsert=True,return_document=ReturnDocument.AFTER)
+    return jsonify(ok=True,pending=deliver_pending('access',saved['_id']))
 
 @api.post('/api/tools/<int:tid>/comments')
 def comment(tid):
     t=tool(tid);usable(t);raw=payload();kind=text(raw,'kind',20)
     if kind not in {'개선 의견','사용 후기','오류 제보','아이디어 제안'}: raise BadRequest('피드백 종류를 확인해 주세요.')
     cid=next_id('feedback');e=event([t['owner'],*all_admin_ids()],f'{g.user["name"]}님이 {t["data"]["name"]}에 피드백을 남겼습니다.',{'type':'feedback','id':tid,'feedbackId':cid},'feedback')
+    e['subscription']={'tool':tid,'user':g.user['id']}
     db().feedback.insert_one({'_id':cid,'tool':tid,'user':g.user['id'],'kind':kind,'body':text(raw,'text',4000),'created':time.time(),'status':'접수','revision':0,'replies':[],'outbox':[e]})
-    subscribe(tid,g.user['id']);deliver_notifications();return jsonify(ok=True,id=cid),201
+    return jsonify(ok=True,id=cid,pending=deliver_pending('feedback',cid)),201
 
 @api.post('/api/feedback/<int:fid>/reply')
 def feedback_reply(fid):
@@ -337,7 +360,7 @@ def feedback_reply(fid):
     e=event([c['user'],t['owner'],*all_admin_ids()],f'{t["data"]["name"]} 피드백에 답변·상태 변경이 있습니다.',{'type':'feedback','id':t['_id'],'feedbackId':fid},'feedback')
     result=db().feedback.update_one({'_id':fid,'revision':c['revision']},{'$set':{'status':status},'$inc':{'revision':1},'$push':{'outbox':e,'replies':{'user':g.user['id'],'text':body,'status':status,'created':time.time()}}})
     if not result.modified_count: raise Conflict('다른 답변이 반영되었습니다. 새로고침해 주세요.')
-    deliver_notifications();return jsonify(ok=True)
+    return jsonify(ok=True,pending=deliver_pending('feedback',fid))
 
 @api.get('/api/ideas')
 def ideas():
@@ -359,8 +382,12 @@ def idea():
     else: raw=payload()
     name=text(raw,'name',100);cat=category(raw,'category');body=text(raw,'desc',4000)
     iid=next_id('ideas');attachments=stage_attachments(request.files.getlist('attachments'))
-    db().ideas.insert_one({'_id':iid,'user':g.user['id'],'name':name,'body':body,'attachments':attachments,'category':cat['name'],'categoryId':cat['_id'],'created':time.time(),'status':'접수 대기','assignee':None,'tool':None,'revision':0,'replies':[],'outbox':[event(all_admin_ids(),f'{g.user["name"]}님의 새 기능 요청: {name}',{'type':'idea','id':iid},'idea')]})
-    deliver_notifications();return jsonify(ok=True,id=iid),201
+    try:
+        db().ideas.insert_one({'_id':iid,'user':g.user['id'],'name':name,'body':body,'attachments':attachments,'category':cat['name'],'categoryId':cat['_id'],'created':time.time(),'status':'접수 대기','assignee':None,'tool':None,'revision':0,'replies':[],'outbox':[event(all_admin_ids(),f'{g.user["name"]}님의 새 기능 요청: {name}',{'type':'idea','id':iid},'idea')]})
+    except Exception:
+        cleanup_unreferenced_attachments(attachments)
+        raise
+    return jsonify(ok=True,id=iid,pending=deliver_pending('ideas',iid)),201
 
 @api.get('/api/ideas/<int:iid>/attachments/<aid>')
 def idea_attachment(iid,aid):
@@ -400,11 +427,13 @@ def update_idea(iid):
     if updates: op['$set']=updates
     if reply: op['$push']['replies']={'user':g.user['id'],'text':reply,'created':time.time()}
     if not db().ideas.update_one({'_id':iid,'revision':i['revision']},op).modified_count: raise Conflict('다른 사용자가 먼저 처리했습니다.')
-    deliver_notifications();return jsonify(ok=True)
+    return jsonify(ok=True,pending=deliver_pending('ideas',iid))
 
 @api.get('/api/notifications')
 def notifications():
-    deliver_notifications();query={'user':g.user['id']}
+    pending=post_commit.followup_pending('activity-maintenance',activity.flush,None,None,50)
+    pending=post_commit.followup_pending('notification-maintenance',deliver_notifications) or pending
+    query={'user':g.user['id']}
     if request.args.get('unread')=='true': query['read']=False
     before=request.args.get('before')
     if before:
@@ -412,7 +441,7 @@ def notifications():
         if n: query['$or']=[{'created':{'$lt':n['created']}},{'created':n['created'],'_id':{'$lt':before}}]
     rows=list(db().notifications.find(query).sort([('created',-1),('_id',-1)]).limit(51));more=len(rows)>50;rows=rows[:50]
     for row in rows: row['id']=row.pop('_id')
-    return jsonify(notifications=rows,nextCursor=rows[-1]['id'] if more else None,unread=db().notifications.count_documents({'user':g.user['id'],'read':False}))
+    return jsonify(notifications=rows,nextCursor=rows[-1]['id'] if more else None,unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),pending=pending)
 
 @api.put('/api/notifications/read')
 def read_notifications():
@@ -439,9 +468,10 @@ def taxonomy():
     key=raw.get('id') or uuid.uuid4().hex
     if raw.get('id') and not db().taxonomy.find_one({'_id':key,'kind':kind}): raise NotFound()
     if key=='organization-0' and (not enabled or name!='공통'): raise BadRequest('공통 조직은 유지해 주세요.')
-    try: db().taxonomy.update_one({'_id':key},{'$set':{'kind':kind,'name':name,'enabled':enabled,'order':order,'owner':text(raw,'owner',100,False)}},upsert=True)
+    job=audit_event(f'{kind} {name} 설정 변경')
+    try: db().taxonomy.update_one({'_id':key},{'$set':{'kind':kind,'name':name,'enabled':enabled,'order':order,'owner':text(raw,'owner',100,False)},'$push':{'outbox':job}},upsert=True)
     except DuplicateKeyError: raise Conflict('같은 이름의 항목이 있습니다.')
-    audit(f'{kind} {name} 설정 변경');return jsonify(ok=True,id=key)
+    return jsonify(ok=True,id=key,pending=deliver_pending('taxonomy',key))
 
 @api.get('/api/admins')
 def admins():
@@ -454,8 +484,9 @@ def set_admin(uid):
     active=payload().get('active')
     if not isinstance(active,bool) or not db().users.find_one({'_id':uid,'enabled':True}): raise BadRequest('사용자와 설정값을 확인해 주세요.')
     e=event([uid],f'관리자 권한이 {"부여" if active else "해제"}되었습니다.',{'type':'admin'},'admin')
+    e['audit']=audit_event(f'관리자 {uid} {"지정" if active else "해제"}')['audit']
     db().administrators.update_one({'_id':uid},{'$set':{'active':active,'actor':g.user['id'],'updated':time.time()},'$push':{'outbox':e}},upsert=True)
-    audit(f'관리자 {uid} {"지정" if active else "해제"}');deliver_notifications();return jsonify(ok=True)
+    return jsonify(ok=True,pending=deliver_pending('administrators',uid))
 
 @api.get('/api/activity')
 def activity_history():
@@ -473,18 +504,22 @@ def rollback(tid):
     for x in vs:
         if x['n']==t['active']: x['withdrawn']=True
     data={**t['data'],**v['data'],'workflow':v['data'].get('workflow')};e=event(followers(t),f'{data["name"]} v{n}으로 복구되었습니다.',{'type':'tool','id':tid},'release')
-    cas(t,{'$set':{'data':data,'versions':vs,'active':n,'fallback':n,'paused':True},'$push':{'outbox':e}});audit(f'도구 {tid} v{n} 복구');deliver_notifications();return jsonify(ok=True)
+    pending=cas(t,{'$set':{'data':data,'versions':vs,'active':n,'fallback':n,'paused':True},'$push':{'outbox':e}},f'도구 {tid} v{n} 복구')
+    return jsonify(ok=True,pending=pending)
 
 def delete_version(tid,n):
     t=tool(tid,True,True)
     if n in {t['active'],t['fallback']}: raise Conflict('현재 배포·복구용 버전은 삭제할 수 없습니다.')
     vs=copy.deepcopy(t['versions']);v=next((v for v in vs if v['n']==n),None)
     if not v: raise NotFound()
-    v['deleted']=True;cas(t,{'$set':{'versions':vs}});audit(f'도구 {tid} v{n} 파일 삭제 예약')
+    v['deleted']=True
+    return cas(t,{'$set':{'versions':vs}},f'도구 {tid} v{n} 파일 삭제 예약')
 
 @api.delete('/api/tools/<int:tid>/versions/<int:n>')
 def remove_version(tid,n):
-    delete_version(tid,n);purge_deleted();return jsonify(ok=True)
+    pending=delete_version(tid,n)
+    pending=post_commit.followup_pending('file-purge',purge_deleted) or pending
+    return jsonify(ok=True,pending=pending)
 
 def candidates():
     p=db().settings.find_one({'_id':'retention'});result=[]
@@ -498,7 +533,8 @@ def candidates():
 def policy():
     admin();raw=payload()
     if raw.get('keep') not in {2,3,5} or raw.get('days') not in {30,90,180}: raise BadRequest('보관 기준을 확인해 주세요.')
-    db().settings.update_one({'_id':'retention'},{'$set':{'keep':raw['keep'],'days':raw['days']}});audit('보관 기준 변경');return jsonify(ok=True)
+    db().settings.update_one({'_id':'retention'},{'$set':{'keep':raw['keep'],'days':raw['days']},'$push':{'outbox':audit_event('보관 기준 변경')}})
+    return jsonify(ok=True,pending=deliver_pending('settings','retention'))
 
 @api.get('/api/storage/limits')
 def storage_limits():
@@ -516,18 +552,20 @@ def update_storage_limits():
     values={key:raw[key] for key in ['mode','quotaBytes','reserveBytes']}
     values.update(updated=time.time(),updatedBy=g.user['id'])
     revision=raw['expectedRevision']+1
-    job=post_commit.audit_job(f'storage_limits:{revision}',g.user['id'],
+    job=audit_event(
         f'파일 저장 한도 변경: {raw["mode"]}, 한도 {raw["quotaBytes"]} bytes, 여유 공간 {raw["reserveBytes"]} bytes')
+    saved_policy=dict(values,revision=revision,source='admin')
+    # Filesystem/read errors occur before the authoritative policy write.
+    saved_snapshot=storage_snapshot(policy_value=saved_policy)
     if raw['expectedRevision']==0:
-        try: db().settings.insert_one(dict(values,_id='storage_limits',revision=revision,postCommit=[job]))
+        try: db().settings.insert_one(dict(values,_id='storage_limits',revision=revision,outbox=[job]))
         except DuplicateKeyError: raise Conflict('다른 관리자가 설정을 변경했습니다. 새로고침 후 다시 적용하세요.')
     else:
         changed=db().settings.update_one({'_id':'storage_limits','revision':raw['expectedRevision']},
-            {'$set':values,'$inc':{'revision':1},'$push':{'postCommit':job}})
+            {'$set':values,'$inc':{'revision':1},'$push':{'outbox':job}})
         if not changed.matched_count: raise Conflict('다른 관리자가 설정을 변경했습니다. 새로고침 후 다시 적용하세요.')
-    pending=post_commit.followup_pending('storage-maintenance',post_commit.drain,'settings','storage_limits')
-    saved_policy=dict(values,revision=revision,source='admin')
-    return jsonify(storage=storage_snapshot(policy_value=saved_policy),ok=True,pending=pending)
+    pending=deliver_pending('settings','storage_limits')
+    return jsonify(storage=saved_snapshot,ok=True,pending=pending)
 
 @api.get('/api/storage/candidates')
 def storage_preview():
@@ -539,8 +577,21 @@ def cleanup():
     if not isinstance(chosen,list) or len(chosen)>1000: raise BadRequest('정리 대상을 확인해 주세요.')
     valid={(x['tool'],x['version']) for x in candidates()}
     if any(not isinstance(x,dict) or (x.get('tool'),x.get('version')) not in valid for x in chosen): raise Conflict('정리 대상이 변경되었습니다.')
-    for x in chosen: delete_version(x['tool'],x['version'])
-    purge_deleted();return jsonify(ok=True,pending=sum(1 for t in db().tools.find() for v in t['versions'] if v.get('deleted') and v.get('path')))
+    followups_pending=False
+    for x in chosen:
+        followups_pending=delete_version(x['tool'],x['version']) or followups_pending
+    purge_pending=post_commit.followup_pending('file-purge',purge_deleted)
+    # Deletion markers are durable. A follow-up count must not turn them into
+    # an apparent failed save; unknown counts remain explicitly pending.
+    from pymongo.errors import PyMongoError
+    try:
+        pending_files=sum(1 for t in db().tools.find() for v in t['versions'] if v.get('deleted') and v.get('path'))
+        counts_pending=False
+    except PyMongoError as error:
+        post_commit.log_deferred('purge-count',error)
+        pending_files=None;counts_pending=True
+    return jsonify(ok=True,pending=True if counts_pending else pending_files or purge_pending,
+                   pendingFiles=pending_files,countsPending=counts_pending,followupsPending=followups_pending)
 
 @api.get('/download/<int:tid>/<int:n>')
 def download(tid,n):
@@ -552,7 +603,9 @@ def download(tid,n):
     path=artifact_path(v['path'])
     if not path.is_file(): raise NotFound('배포 파일을 찾을 수 없습니다.')
     response=send_file(path,as_attachment=True,download_name=v['name'],mimetype='application/octet-stream',conditional=False)
-    if request.method!='HEAD': activity.record_download(tid,g.user['id'],n,token_id=getattr(g,'api_token_id',None),update=purpose=='update');subscribe(tid,g.user['id']);activity.flush()
+    if request.method!='HEAD':
+        activity.record_download(tid,g.user['id'],n,token_id=getattr(g,'api_token_id',None),update=purpose=='update')
+        post_commit.followup_pending('download-history',activity.flush,tid,g.user['id'],50)
     response.headers['Cache-Control']='no-store';return response
 
 @api.get('/api/tools/<int:tid>/manifest')

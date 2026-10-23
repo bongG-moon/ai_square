@@ -67,8 +67,11 @@ def init_app(app, overrides=None):
         diagnostic['reference']=secrets.token_hex(6)
         # Log only allowlisted categories, a numeric code and our reference.
         # Exception text/tracebacks may contain DB addresses or document data.
-        app.logger.error('MongoDB request failed diagnostic=%s mongo_code=%s reference=%s',
-                         diagnostic['code'], diagnostic['mongo_code'], diagnostic['reference'])
+        method=request.method if request.method in {'GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'} else 'OTHER'
+        route=request.url_rule.rule if request.url_rule else '<unmatched>'
+        app.logger.error('MongoDB request failed diagnostic=%s mongo_code=%s reference=%s method=%s route=%s retry_writes=%s',
+                         diagnostic['code'], diagnostic['mongo_code'], diagnostic['reference'],
+                         method, route, app.config.get('MONGODB_RETRY_WRITES',False))
         code_label='진단 코드: '+diagnostic['code']
         if diagnostic['mongo_code'] is not None:
             code_label+=' · MongoDB 코드: '+str(diagnostic['mongo_code'])

@@ -3,8 +3,10 @@ import hashlib
 import uuid
 from pathlib import Path
 from flask import current_app
+from pymongo.errors import PyMongoError
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 from .storage_capacity import save_upload
+from .storage import db
 
 MAX_FILE = 20 * 1024 * 1024
 EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.pdf', '.txt', '.csv', '.xlsx', '.docx', '.zip'}
@@ -41,8 +43,38 @@ def stage_attachments(files):
         return saved
     except Exception:
         for row in saved:
-            attachment_path(row['path']).unlink(missing_ok=True)
+            try:
+                attachment_path(row['path']).unlink(missing_ok=True)
+            except OSError:
+                # Cleanup must not replace the validation/storage error that
+                # explains why this upload failed.
+                current_app.logger.warning('Request attachment cleanup deferred reason=filesystem')
         raise
+
+
+def cleanup_unreferenced_attachments(files):
+    """Remove failed-request bytes only when Mongo confirms no idea refers to them.
+
+    A write may have committed even if its response was lost. Failed lookups
+    therefore preserve bytes, as do filesystem failures during cleanup.
+    """
+    for row in files:
+        key = row.get('path')
+        try:
+            path = attachment_path(key)
+        except (BadRequest, TypeError):
+            current_app.logger.warning('Request attachment cleanup deferred reason=invalid-path')
+            continue
+        try:
+            if db().ideas.find_one({'attachments.path': key}, {'_id': 1}) is not None:
+                continue
+        except PyMongoError:
+            current_app.logger.warning('Request attachment cleanup deferred reason=database')
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            current_app.logger.warning('Request attachment cleanup deferred reason=filesystem')
 
 
 def public_attachments(idea):

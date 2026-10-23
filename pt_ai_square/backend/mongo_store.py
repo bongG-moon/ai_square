@@ -7,7 +7,7 @@ import uuid
 from os import getpid
 from flask import current_app, g
 from pymongo import MongoClient, ReturnDocument
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from .artifacts import stage_upload, artifact_path, used_bytes
 
 # A company WSGI runner may import web_main before forking its workers. Each
@@ -25,11 +25,16 @@ if hasattr(os, 'register_at_fork'):
     os.register_at_fork(after_in_child=_after_fork)
 
 
+def mongo_client(config):
+    """Use identical explicit connection options in serving and diagnostics."""
+    return MongoClient(config['MONGODB_URI'],
+                       serverSelectionTimeoutMS=config['MONGODB_TIMEOUT_MS'],
+                       retryWrites=config.get('MONGODB_RETRY_WRITES', False),
+                       connect=False)
+
+
 def _connect(app):
-    client = MongoClient(app.config['MONGODB_URI'],
-                         serverSelectionTimeoutMS=app.config['MONGODB_TIMEOUT_MS'],
-                         retryWrites=app.config.get('MONGODB_RETRY_WRITES',False),
-                         connect=False)
+    client = mongo_client(app.config)
     try:
         database = client[app.config['MONGODB_DATABASE']]
         client.admin.command('ping')
@@ -98,14 +103,89 @@ def all_admin_ids():
 def event(recipients, title, target, kind='update'):
     return {'id': uuid.uuid4().hex, 'recipients': sorted(set(recipients) - {g.user['id']}), 'title': title, 'target': target, 'kind': kind, 'created': time.time()}
 
-def deliver_notifications():
-    # The source mutation atomically writes its outbox. Retry delivery is idempotent.
-    for collection in ['tools', 'access', 'feedback', 'ideas', 'administrators']:
-        for doc in db()[collection].find({'outbox.0': {'$exists': True}}, {'outbox': 1}):
-            for e in doc['outbox']:
-                for uid in e['recipients']:
-                    db().notifications.update_one({'_id': e['id'] + ':' + uid}, {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'], 'kind': e['kind'], 'created': e['created'], 'read': False}}, upsert=True)
-                db()[collection].update_one({'_id': doc['_id']}, {'$pull': {'outbox': {'id': e['id']}}})
+def audit_event(message, subscription=None):
+    """Create an event for the same atomic document write as its mutation."""
+    eid, created = uuid.uuid4().hex, time.time()
+    value = {'id': eid, 'created': created,
+             'audit': {'_id': eid, 'user': g.user['id'], 'action': message, 'created': created}}
+    if subscription is not None:
+        value['subscription'] = subscription
+    return value
+
+
+def best_effort(operation, callback, *args):
+    """Run secondary work only; primary writes must propagate their failures."""
+    from .post_commit import followup_pending
+    return not followup_pending(operation, callback, *args)
+
+
+def _deliver_event(e):
+    entry = e.get('audit')
+    if entry:
+        # Operational builds used the enclosing event ID as the audit key and
+        # may omit a duplicated _id inside the optional audit payload.
+        entry = dict(entry)
+        entry.setdefault('_id', e['id'])
+        db().audit.update_one({'_id': entry['_id']}, {'$setOnInsert': entry}, upsert=True)
+    subscription = e.get('subscription')
+    if subscription:
+        # Preserve an explicit unsubscribe even when delivery was delayed.
+        db().subscriptions.update_one(subscription, {'$setOnInsert': {'enabled': True}}, upsert=True)
+    token_update = e.get('tokenUpdate')
+    if token_update:
+        fields = token_update['fields']
+        if set(fields) - {'revoked', 'revokedAt', 'replacedBy'}:
+            raise ValueError('Unsupported deferred token fields')
+        db().local_tokens.update_one({'id': token_update['id'], 'user': token_update['user']},
+                                     {'$set': fields})
+    for uid in e.get('recipients', []):
+        db().notifications.update_one(
+            {'_id': e['id'] + ':' + uid},
+            {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'],
+                              'kind': e['kind'], 'created': e['created'], 'read': False}}, upsert=True)
+
+
+def deliver_notifications(collection_name=None, document_id=None):
+    """Deliver bounded, idempotent outbox work; leave failed events durable."""
+    from .post_commit import DeliveryResult, deliver_job, log_deferred
+    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users')
+    collections = supported if collection_name is None else (collection_name,)
+    if any(name not in supported for name in collections):
+        raise ValueError('Unsupported outbox collection')
+    count, pending = 0, False
+    for name in collections:
+        collection = db()[name]
+        query = {'outbox.0': {'$exists': True}}
+        if name in {'tools', 'settings'}:
+            query = {'$or': [query, {'postCommit.0': {'$exists': True}}]}
+        if document_id is not None:
+            query['_id'] = document_id
+        try:
+            rows = list(collection.find(query, {'outbox': 1, 'postCommit': 1}).limit(51))
+        except PyMongoError as error:
+            log_deferred('outbox-scan', error)
+            pending = True
+            continue
+        pending = len(rows) > 50 or pending
+        for doc in rows[:50]:
+            events = [('outbox', e) for e in doc.get('outbox', [])]
+            # Pre-upgrade jobs share the same per-document delivery budget, so
+            # an upgrade cannot double the work done in one maintenance call.
+            if name in {'tools', 'settings'}:
+                events += [('postCommit', e) for e in doc.get('postCommit', [])]
+            pending = len(events) > 50 or pending
+            for queue, e in events[:50]:
+                try:
+                    if queue == 'postCommit':
+                        deliver_job(collection, doc['_id'], e)
+                    else:
+                        _deliver_event(e)
+                        collection.update_one({'_id': doc['_id']}, {'$pull': {'outbox': {'id': e['id']}}})
+                    count += 1
+                except PyMongoError as error:
+                    log_deferred('outbox-event', error)
+                    pending = True
+    return DeliveryResult(count, pending)
 
 def purge_deleted():
     for t in db().tools.find({'versions': {'$elemMatch': {'deleted': True, 'path': {'$ne': None}}}}):

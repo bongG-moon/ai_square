@@ -2,7 +2,7 @@ import time
 import uuid
 from flask import current_app
 from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from .storage import db
 
 def init_activity(app):
@@ -12,14 +12,46 @@ def init_activity(app):
 
 def is_mongo(): return True
 
-def flush():
-    count = 0
-    for row in db().activity_state.find({'outbox.0': {'$exists': True}}):
-        for e in row['outbox']:
-            db().activity.update_one({'_id': e['_id']}, {'$setOnInsert': e}, upsert=True)
-            db().activity_state.update_one({'_id': row['_id']}, {'$pull': {'outbox': {'_id': e['_id']}}})
-            count += 1
-    return count
+def flush(tool_id=None, user_id=None, limit=0):
+    """Deliver scoped activity events; callers bound maintenance with limit=50."""
+    from .post_commit import DeliveryResult, log_deferred
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+        raise ValueError('Activity delivery limit must be a nonnegative integer')
+    query = {'outbox.0': {'$exists': True}}
+    if tool_id is not None:
+        query['tool'] = tool_id
+    if user_id is not None:
+        query['user'] = user_id
+    count, pending = 0, False
+    try:
+        rows = db().activity_state.find(query)
+        if limit:
+            rows = rows.limit(limit + 1)
+        for index, row in enumerate(rows):
+            if limit and index >= limit:
+                pending = True
+                break
+            events = row['outbox']
+            pending = len(events) > 50 or pending
+            for e in events[:50]:
+                try:
+                    db().activity.update_one({'_id': e['_id']}, {'$setOnInsert': e}, upsert=True)
+                    if e['kind'] == 'download':
+                        # The state write durably records this intent. Delayed
+                        # delivery never overrides an explicit later opt-out.
+                        db().subscriptions.update_one(
+                            {'tool': e['tool'], 'user': e['user']},
+                            {'$setOnInsert': {'enabled': True}}, upsert=True)
+                    db().activity_state.update_one(
+                        {'_id': row['_id']}, {'$pull': {'outbox': {'_id': e['_id']}}})
+                    count += 1
+                except PyMongoError as error:
+                    log_deferred('activity-event', error)
+                    pending = True
+    except PyMongoError as error:
+        log_deferred('activity-scan', error)
+        pending = True
+    return DeliveryResult(count, pending)
 
 def set_like(tid, uid, liked):
     key = f'like:{tid}:{uid}'
@@ -34,7 +66,14 @@ def set_like(tid, uid, liked):
         'firstLikedAt': {'$ifNull': ['$firstLikedAt', {'$ifNull': ['$created', now]}]},
         'outbox': {'$concatArrays': [{'$ifNull': ['$outbox', []]}, [e]]}
     }}])
-    return db().activity_state.count_documents({'tool': tid, 'kind': 'like', 'liked': True})
+    try:
+        return db().activity_state.count_documents({'tool': tid, 'kind': 'like', 'liked': True})
+    except PyMongoError as error:
+        # Both primary writes above succeeded. A stale/unavailable count must
+        # not turn an acknowledged selection into a reported save failure.
+        from .post_commit import log_deferred
+        log_deferred('like-count', error)
+        return None
 
 def record_download(tid, uid, version, token_id=None, update=False):
     now = time.time()
@@ -81,7 +120,8 @@ def statistics(ids, uid, now):
     return stats
 
 def history(before=None):
-    flush()
+    from .post_commit import followup_pending
+    followup_pending('activity-history', flush, None, None, 50)
     query = {}
     if before:
         # Cursor is the last event ID; pair timestamp with ID to preserve ties.

@@ -6,7 +6,8 @@ import secrets
 import time
 from flask import Blueprint, g, jsonify, render_template, request, session
 from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Unauthorized
-from .storage import db, public_user, audit
+from .storage import db, public_user, audit_event, deliver_notifications
+from .post_commit import followup_pending
 
 local_access = Blueprint('local_access', __name__)
 READ_ENDPOINTS = {
@@ -81,8 +82,10 @@ def page():
 @local_access.get('/api/local-tokens')
 def tokens():
     from . import activity
-    activity.flush()
     uid = g.user['id']
+    history_pending = followup_pending(
+        'key-activity', lambda: activity.flush(user_id=uid, limit=50))
+    followups_pending = followup_pending('key-maintenance', deliver_notifications, 'users', uid)
     current_id = current_connection_key(uid)
     rows = list(db().local_tokens.find({'user': uid}, {'_id': 0, 'id': 1, 'name': 1, 'created': 1, 'expires': 1, 'revoked': 1, 'scope': 1, 'replacedBy': 1}).sort('created', -1))
     # Upload provenance is committed atomically with the release. Download
@@ -127,7 +130,8 @@ def tokens():
     return jsonify(tokens=rows, currentKeyId=current_id,
                    connectionKey=next((r for r in rows if r['id'] == current_id), None),
                    csrf=session['csrf'], employee=dict(id=uid, name=g.user['name']),
-                   usage=dict(uploads=sum(upload_counts.values()), downloads=sum(download_counts.values())), history=history)
+                   usage=dict(uploads=sum(upload_counts.values()), downloads=sum(download_counts.values())), history=history,
+                   historyPending=history_pending, followupsPending=followups_pending)
 
 
 @local_access.post('/api/local-tokens')
@@ -143,41 +147,59 @@ def issue():
         raise BadRequest('KEY 이름은 1~60자입니다.')
     if not isinstance(scope, str) or scope not in {'read', 'publish'}:
         raise BadRequest('조회·다운로드 또는 업로드 포함 권한을 선택하세요.')
-    current_connection_key(g.user['id'])
+    previous_id = current_connection_key(g.user['id'])
     token = 'ptsq_' + secrets.token_urlsafe(32)
     now = time.time()
     row = dict(_id=hashlib.sha256(token.encode()).hexdigest(), id=secrets.token_hex(16),
                user=g.user['id'], name=name.strip(), created=now, expires=None, revoked=False, scope=scope)
     db().local_tokens.insert_one(row)
-    # A single document update is the cutover point. Never revoke all other rows
-    # here: a concurrent reissue may already have created the next valid key.
-    previous = db().users.find_one_and_update(
-        {'_id': row['user'], 'enabled': {'$ne': False}},
-        {'$set': {'activeConnectionKeyId': row['id'], 'connectionKeyUpdatedAt': now}})
-    if not previous:
-        db().local_tokens.update_one({'_id': row['_id']}, {'$set': {'revoked': True}})
-        raise Unauthorized('현재 사용자 상태를 확인하세요.')
-    previous_id = previous.get('activeConnectionKeyId')
-    if previous_id:
-        db().local_tokens.update_one({'user': row['user'], 'id': previous_id},
-                                    {'$set': {'revoked': True, 'revokedAt': now, 'replacedBy': row['id']}})
-    audit('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드'))
-    if current_connection_key(row['user']) != row['id']:
+    # The pointer and follow-up event share one atomic cutover. Compare the
+    # previous pointer so a simultaneous rotation cannot annotate the wrong key.
+    # A failed write is never blindly replayed; only an acknowledged CAS miss is.
+    for _ in range(5):
+        event = audit_event('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드'))
+        if previous_id:
+            event['tokenUpdate'] = {'user': row['user'], 'id': previous_id,
+                                    'fields': {'revoked': True, 'revokedAt': now, 'replacedBy': row['id']}}
+        previous = db().users.find_one_and_update(
+            {'_id': row['user'], 'enabled': {'$ne': False}, 'activeConnectionKeyId': previous_id},
+            {'$set': {'activeConnectionKeyId': row['id'], 'connectionKeyUpdatedAt': now},
+             '$push': {'outbox': event}})
+        if previous is not None:
+            break
+        current = db().users.find_one({'_id': row['user']}, {'enabled': 1, 'activeConnectionKeyId': 1})
+        if not current or not current.get('enabled', True):
+            raise Unauthorized('현재 사용자 상태를 확인하세요.')
+        previous_id = current.get('activeConnectionKeyId')
+    else:
         raise Conflict('다른 화면에서 KEY가 다시 발급되었습니다. 현재 화면을 새로고침하세요.')
+    pending = followup_pending('key-maintenance', deliver_notifications, 'users', row['user'])
+    # Do not turn a confirmed cutover into failure because a later read failed.
+    # A subsequent concurrent rotation may naturally supersede this issued key.
     return jsonify(token=token, id=row['id'], expires=row['expires'], scope=scope,
-                   replaced=bool(previous_id)), 201
+                   replaced=bool(previous_id), followupsPending=pending), 201
 
 
 @local_access.delete('/api/local-tokens/<token_id>')
 def revoke(token_id):
     uid = g.user['id']
     current_connection_key(uid)
+    now = time.time()
+    event = audit_event('개인 API 인증키 취소')
+    event['tokenUpdate'] = {'user': uid, 'id': token_id, 'fields': {'revoked': True, 'revokedAt': now}}
     # CAS preserves a newer key if revoke races with reissue.
-    db().users.update_one({'_id': uid, 'activeConnectionKeyId': token_id},
-                          {'$set': {'activeConnectionKeyId': None, 'connectionKeyUpdatedAt': time.time()}})
-    db().local_tokens.update_one({'id': token_id, 'user': uid}, {'$set': {'revoked': True, 'revokedAt': time.time()}})
-    audit('개인 API 인증키 취소')
-    return jsonify(ok=True)
+    result = db().users.update_one({'_id': uid, 'activeConnectionKeyId': token_id},
+                                  {'$set': {'activeConnectionKeyId': None, 'connectionKeyUpdatedAt': now},
+                                   '$push': {'outbox': event}})
+    if not result.matched_count:
+        # Cancelling an older key still records the request atomically without
+        # disturbing a newer pointer. New issue IDs are never reused.
+        result = db().users.update_one({'_id': uid, 'activeConnectionKeyId': {'$ne': token_id}},
+                                      {'$push': {'outbox': event}})
+        if not result.matched_count:
+            raise Conflict('KEY 상태가 변경되었습니다. 현재 화면을 새로고침하세요.')
+    pending = followup_pending('key-maintenance', deliver_notifications, 'users', uid)
+    return jsonify(ok=True, followupsPending=pending)
 
 
 @local_access.get('/api/catalog/options')

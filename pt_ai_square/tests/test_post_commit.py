@@ -44,7 +44,7 @@ def test_publish_replays_durable_effects_without_duplicate_version(
     predicates = {
         'subscription': lambda name, query, change: name == 'subscriptions',
         'audit': lambda name, query, change: name == 'audit',
-        'completion': lambda name, query, change: name == 'tools' and 'postCommit' in change.get('$pull', {}),
+        'completion': lambda name, query, change: name == 'tools' and 'outbox' in change.get('$pull', {}),
     }
     with monkeypatch.context() as fault:
         fail_update(fault, predicates[failure])
@@ -57,8 +57,9 @@ def test_publish_replays_durable_effects_without_duplicate_version(
         stored = db().tools.find_one({'_id': 1})
         assert stored['active'] == number and stored['revision'] == number
         assert len(stored['versions']) == number
-        assert [job['_id'] for job in stored['postCommit']] == [f'publish:1:{number}']
-        assert stored['postCommit'][0]['audit']['user'] == 'owner'
+        jobs = [job for job in stored['outbox'] if 'audit' in job]
+        assert len(jobs) == 1 and jobs[0]['audit']['user'] == 'owner'
+        audit_id = jobs[0]['audit']['_id']
     # A later explicit opt-out wins even if the original subscribe never ran.
     assert client.put('/api/tools/1/subscription', headers=headers,
                       json={'enabled': False}).status_code == 200
@@ -67,10 +68,10 @@ def test_publish_replays_durable_effects_without_duplicate_version(
     assert replay.json['pending'] is False and replay.json['version'] == number
     with app.app_context():
         assert len(db().tools.find_one({'_id': 1})['versions']) == number
-        assert db().tools.find_one({'_id': 1})['postCommit'] == []
-        assert db().audit.count_documents({'_id': f'post-commit:publish:1:{number}'}) == 1
+        assert db().tools.find_one({'_id': 1})['outbox'] == []
+        assert db().audit.count_documents({'_id': audit_id}) == 1
         assert db().subscriptions.find_one({'tool': 1, 'user': 'owner'})['enabled'] is False
-        assert post_commit.drain() == 0
+        assert post_commit.drain() == post_commit.DeliveryResult()
 
 
 def test_publish_notification_failure_keeps_outbox_and_bootstrap_readable(app, monkeypatch):
@@ -84,12 +85,12 @@ def test_publish_notification_failure_keeps_outbox_and_bootstrap_readable(app, m
         result = publish(client, headers, tid=1, revision=1)
         assert result.status_code == 201 and result.json['pending'] is True
         response = client.get('/api/bootstrap')
-        assert response.status_code == 200 and response.json['pending'] is True
+        assert response.status_code == 200
         assert response.json['items'][0]['active'] == 2
         with app.app_context():
             stored = db().tools.find_one({'_id': 1})
-            assert stored['postCommit'] == [] and len(stored['outbox']) == 1
-    assert client.get('/api/bootstrap').json['pending'] is False
+            assert len(stored['outbox']) == 1
+    assert client.get('/api/notifications').json['pending'] is False
     with app.app_context():
         assert db().tools.find_one({'_id': 1})['outbox'] == []
         assert db().notifications.count_documents({'user': 'member', 'kind': 'release'}) == 1
@@ -113,12 +114,13 @@ def test_capacity_commit_retains_audit_and_uses_saved_policy(app, monkeypatch, r
     with app.app_context():
         row = db().settings.find_one({'_id': 'storage_limits'})
         assert row['revision'] == revision + 1 and row['quotaBytes'] == 7 * 1024**3
-        assert [j['_id'] for j in row['postCommit']] == [f'storage_limits:{revision + 1}']
-    assert client.get('/api/bootstrap').status_code == 200
+        assert len(row['outbox']) == 1
+        audit_id = row['outbox'][0]['audit']['_id']
+    assert client.get('/api/notifications').status_code == 200
     with app.app_context():
-        assert db().settings.find_one({'_id': 'storage_limits'})['postCommit'] == []
-        assert db().audit.count_documents({'_id': f'post-commit:storage_limits:{revision + 1}'}) == 1
-        assert post_commit.drain() == 0
+        assert db().settings.find_one({'_id': 'storage_limits'})['outbox'] == []
+        assert db().audit.count_documents({'_id': audit_id}) == 1
+        assert post_commit.drain() == post_commit.DeliveryResult()
 
 
 def test_like_flush_failure_returns_saved_state_and_recovers_once(app, monkeypatch):
@@ -136,22 +138,23 @@ def test_like_flush_failure_returns_saved_state_and_recovers_once(app, monkeypat
         fail_update(fault, lambda name, query, change: name == 'activity')
         result = client.put('/api/tools/1/like', headers=headers, json={'liked': True})
         assert result.status_code == 200
-        assert result.json == {'liked': True, 'count': 1, 'pending': True}
+        assert result.json == {'liked': True, 'count': 1, 'pending': True,
+                               'historyPending': True, 'countsPending': False}
         response = client.get('/api/bootstrap')
-        assert response.status_code == 200 and response.json['pending'] is True
+        assert response.status_code == 200
         assert response.json['items'][0]['liked'] is True
         assert response.json['items'][0]['likes'] == 1
         with app.app_context():
             row = db().activity_state.find_one({'_id': 'like:1:owner'})
             assert row['liked'] is True and len(row['outbox']) == 1
     assert calls == [(1, 'owner', True)]
-    assert client.get('/api/bootstrap').json['pending'] is False
+    assert client.get('/api/notifications').json['pending'] is False
     with app.app_context():
         assert db().activity.count_documents({'tool': 1, 'kind': 'like'}) == 1
         assert db().activity_state.find_one({'_id': 'like:1:owner'})['outbox'] == []
 
 
-def test_bootstrap_attempts_all_followups_and_preserves_primary_read_failure(app, monkeypatch):
+def test_bootstrap_skips_all_followups_and_preserves_primary_read_failure(app, monkeypatch):
     client, headers = ready(app)
     assert publish(client, headers).status_code == 201
     calls = []
@@ -166,9 +169,9 @@ def test_bootstrap_attempts_all_followups_and_preserves_primary_read_failure(app
     monkeypatch.setattr(mongo_api.activity, 'flush', failed('activity'))
     monkeypatch.setattr(mongo_api, 'deliver_notifications', failed('notifications'))
     response = client.get('/api/bootstrap')
-    assert response.status_code == 200 and response.json['pending'] is True
+    assert response.status_code == 200
     assert response.json['items'][0]['id'] == 1
-    assert calls == ['maintenance', 'activity', 'notifications']
+    assert calls == []
     monkeypatch.setattr(mongo_api.activity, 'statistics', failed('primary-statistics'))
     response = client.get('/api/bootstrap')
     assert response.status_code == 503

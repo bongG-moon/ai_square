@@ -1,5 +1,10 @@
 function storageSize(bytes){return bytes==null?'확인 불가':bytes>=1073741824?`${(bytes/1073741824).toFixed(2)} GB`:`${(bytes/1048576).toFixed(1)} MB`;}
-async function fetchStorageCapacity(){const r=await requestAPI('/api/storage/limits');server.storage={...server.storage,...r.storage};}
+async function fetchStorageCapacity(){
+ const token=runtime.storageToken=(runtime.storageToken||0)+1;let result;
+ try{result=await requestAPI('/api/storage/limits');}catch(error){if(token!==runtime.storageToken)return false;throw error;}
+ if(token!==runtime.storageToken)return false;
+ server.storage={...server.storage,...result.storage};return true;
+}
 function storageCapacityPanel(){
  const s=server.storage||{},dummy=server.dataMode==='dummy',auto=s.mode==='auto';
  const pct=s.quota>0?Math.min(100,s.used/s.quota*100):0;
@@ -20,9 +25,12 @@ root.addEventListener('submit',e=>{
  if(!Number.isFinite(quota)||!Number.isFinite(reserve)||quotaBytes<1048576||reserve<0){showError({message:'한도는 최소 1MB, 여유 공간은 0 이상으로 입력하세요.'},message);return;}
  form.dataset.busy='true';const button=form.querySelector('[type=submit]');button.disabled=true;message.setAttribute('role','status');message.setAttribute('aria-live','polite');message.textContent='저장하고 있습니다.';
  return requestAPI('/api/storage/limits','PUT',{mode:form.elements.mode.value,quotaBytes,reserveBytes,expectedRevision:Number(form.dataset.revision)})
- .then(async result=>{
+ .then(result=>{
+  // A bootstrap started before this save must not restore an older policy/revision.
+  runtime.refreshToken=(runtime.refreshToken||0)+1;
+  runtime.storageToken=(runtime.storageToken||0)+1;
   server.storage={...server.storage,...result.storage};form.dataset.revision=String(server.storage.limitRevision);
-  try{await refresh();}catch(error){showError({message:`한도 설정은 저장되었습니다. 화면을 새로고침하지 못했습니다. ${error.message}`},$('#ws-capacity-message'));return;}
+  renderWorkspace();
   const status=$('#ws-capacity-message');if(status){status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent=result.pending?'한도 설정은 저장되었습니다. 이력은 다음 조회 시 동기화됩니다.':'저장했습니다. 기존 파일은 그대로 유지됩니다.';}
  })
  .catch(error=>{showError(error,$('#ws-capacity-message'));})

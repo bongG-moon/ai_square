@@ -38,7 +38,8 @@ pt_ai_square/
 | 도구 등록·수정·권한·버전 API | backend/mongo_api.py |
 | MongoDB 초기화·프로세스별 연결·사용자·권한 | backend/mongo_store.py |
 | MongoDB 오류 분류·사용자 진단 안내 | backend/mongo_errors.py / templates/database_error.html |
-| 게시·저장 공간의 저장 후 이력·구독 작업 재처리 | backend/post_commit.py |
+| 이력·구독·알림 outbox 전달 / 이전 postCommit 형식 호환 | backend/mongo_store.py / backend/post_commit.py |
+| 읽기 전용 MongoDB 연결 진단 | scripts/diagnose_mongo.py |
 | 좋아요·다운로드 집계 | backend/mongo_activity.py |
 | 파일 검사·저장 / 배포 정보 검사 | backend/artifacts.py / backend/package_contract.py |
 | 개인 API 인증키·로컬 다운로드 | backend/local_access.py |
@@ -56,7 +57,13 @@ backend/api.py·storage.py·activity.py는 MongoDB 구현을 연결하는 짧은
 
 `mongo_store.py`는 프로세스 ID를 확인해 각 작업 프로세스가 자기 MongoClient와 연결 풀을 사용하게 합니다. 같은 프로세스의 여러 스레드는 클라이언트를 공유합니다. `config.py`의 선택 설정 `PTAI_MONGODB_RETRY_WRITES`는 생략하면 `False`이며 URI의 `retryWrites`보다 우선합니다. 기존 `runtime_config.py`에 필수로 추가할 값은 없습니다. `True`는 DB 제품·드라이버·실행 환경을 검증한 뒤 선택하고, 쓰기 결과 확인과 읽기 재시도 설정은 유지합니다.
 
-게시·저장 공간 한도 저장은 주 기록과 후속 이력·구독 작업을 함께 보관하고, `post_commit.py`가 이후 조회 등에서 남은 작업을 중복 없이 처리합니다. 좋아요는 `mongo_activity.py`의 상태와 활동 대기열을 함께 저장합니다. 후속 처리 실패는 `pending`으로 반환하여 이미 저장된 결과와 구분합니다. 일반 변경 요청 전체를 자동 재실행하지 않습니다. 225는 `mongo_errors.py`에서 `DB-SESSION-ORDER`로 분류하며, 뜻과 운영 반영 절차는 `docs/SSO_OPERATIONS_GUIDE.md` 13-2절에 있습니다.
+변경 요청은 주 기록과 후속 이력·구독·알림 이벤트를 같은 문서에 저장합니다. `mongo_store.py`가 `tools`, `access`, `feedback`, `ideas`, `administrators`, `settings`, `taxonomy`, `users`의 outbox를 전달하고, `post_commit.py`는 이전 버전이 남긴 postCommit 작업도 이어서 처리합니다. 좋아요·다운로드는 `mongo_activity.py`의 상태와 활동 대기열을 함께 저장합니다. 주 저장이 끝난 뒤 후속 처리만 실패하면 이미 저장된 결과와 대기 상태를 구분합니다. 일반 변경 요청 전체를 자동 재실행하지 않습니다.
+
+`/api/bootstrap` 목록 조회는 후속 작업을 재처리하지 않습니다. 저장 요청은 해당 문서·도구·사용자 범위의 후속 작업을 처리하고, 남은 작업은 알림 조회에서 다시 시도합니다. 일반 outbox는 컬렉션당 최대 50개 문서·문서당 최대 50개 이벤트, 활동 대기열은 한 번에 최대 50개 상태 문서를 처리합니다. 이는 응답 시간의 상한을 보장하지 않습니다. 상주 백그라운드 worker는 없으므로 접속자가 없거나 DB 실패가 계속되면 작업이 남을 수 있습니다.
+
+화면은 저장 결과와 후속 조회 실패를 구분합니다. `frontend_api.js`는 목록 조회 순서와 동일 도구 좋아요 중복 요청을 제어하고, `frontend_publish.js`는 게시 요청 ID·동시 게시 차단을 관리합니다. `frontend_storage.js`는 저장 응답의 정책·revision을 직접 반영합니다. 실제 서비스가 읽는 `static/app.js`에도 같은 내용을 반영해야 합니다.
+
+225는 `mongo_errors.py`에서 기존 이름 `DB-SESSION-ORDER`로 분류합니다. 운영 보고서의 `DB-TRANSACTION-ORDER`와 같은 MongoDB 225를 뜻합니다. `scripts/diagnose_mongo.py`는 웹과 같은 `mongo_client(config)` 연결 옵션을 사용하며 ping·hello·buildInfo만 요청합니다. 자세한 절차와 검증 범위는 `docs/SSO_OPERATIONS_GUIDE.md` 13-2·13-3절, `docs/OPERATOR_GUIDE.md`의 저장 성공과 후속 작업 재처리 항목을 참고하세요.
 
 ## 빌드·검증 명령
 
