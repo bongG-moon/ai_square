@@ -9,6 +9,7 @@ from pt_ai_square.backend.storage import db, ensure_user
 
 class FixtureSSO:
     """Test-only identity provider, passed through the existing SSO adapter."""
+    redirect_url='https://platform.example.test/'
     def __init__(self,request):self.uid=request.cookies.get('test_employee','')
     def check_day_cookie(self,cookie):return bool(self.uid)
     def get_sso_info(self,cookie):return (self.uid,self.uid,'','공통','','')
@@ -27,6 +28,7 @@ def app(tmp_path):
 def ready(app,uid='owner'):
     c=app.test_client()
     c.set_cookie('test_employee',uid)
+    assert c.get('/login').status_code==302
     with c.session_transaction() as s:s['csrf']='test-csrf-'+uid
     return c,{'X-CSRF-Token':'test-csrf-'+uid}
 

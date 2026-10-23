@@ -1,6 +1,8 @@
 from urllib.parse import parse_qs,urlsplit,quote
+import time
 import pytest
 from pt_ai_square.backend.storage import db
+from .conftest import ready,publish
 
 @pytest.fixture
 def hcp(app):
@@ -54,6 +56,7 @@ def test_company_flask_instance_keeps_sso_routes_and_template_identity(app,hcp):
         client = company.test_client()
         assert client.get('/').status_code == 302
         client.set_cookie('company', 'valid')
+        assert client.get('/login').status_code == 302
         with template_rendered.connected_to(capture, company):
             response = client.get('/')
         assert response.status_code == 200
@@ -68,13 +71,14 @@ def test_company_flask_instance_keeps_sso_routes_and_template_identity(app,hcp):
 
 def test_sso_profile_refresh_keeps_employee_references_and_connection_key(app,hcp):
     client,_,SSO=hcp
-    client.set_cookie('company','valid');client.get('/api/bootstrap')
+    client.set_cookie('company','valid');client.get('/login')
     with app.app_context():
         old=db().users.find_one({'_id':'0012345'})
         db().users.update_one({'_id':'0012345'},{'$set':{'activeConnectionKeyId':'keep-key'}})
         db().tools.insert_one({'_id':77,'owner':'0012345','deleted':False})
         db().access.insert_one({'tool':77,'user':'0012345','granted':True})
     SSO.get_sso_info=lambda self,cookie: ('0012345','바뀐 이름','Test Employee','변경 부서','employee@example.test','D001')
+    with client.session_transaction() as session:session.clear()
     # Use the profile-only endpoint so the deliberately minimal ownership
     # fixture is not rendered as a catalog item.
     response=client.get('/login')
@@ -87,19 +91,24 @@ def test_sso_profile_refresh_keeps_employee_references_and_connection_key(app,hc
         assert db().tools.find_one({'_id':77})['owner']=='0012345'
         assert db().access.find_one({'tool':77})['user']=='0012345'
 
-def test_session_flag_cannot_replace_valid_sso_cookie(app,hcp):
+def test_session_flag_alone_cannot_replace_verified_sso_login(app,hcp):
     client,_,_=hcp
     with client.session_transaction() as session:session.update(logFlag=True,emp_no='admin')
     response=client.get('/api/bootstrap')
     assert response.status_code==401
     assert parse_qs(urlsplit(response.json['login']).query)['ORIGIN']==['http://localhost/']
     with client.session_transaction() as session:assert 'emp_no' not in session and 'logFlag' not in session
-    client.set_cookie('company','valid');assert client.get('/api/bootstrap').status_code==200
+    client.set_cookie('company','valid')
+    assert client.get('/api/bootstrap').status_code==401
+    assert client.get('/login').status_code==302
+    assert client.get('/api/bootstrap').status_code==200
+    # Local login is bounded independently of SDK cookies on API requests.
+    with client.session_transaction() as session:session['_hcp_login']['at']=time.time()-8*3600-1;session.modified=True
     client.set_cookie('company','expired');assert client.get('/api/bootstrap').status_code==401
     with client.session_transaction() as session:assert 'logFlag' not in session
 
 def test_disabled_account_does_not_loop_through_sso(app,hcp):
-    client,_,_=hcp;client.set_cookie('company','valid');client.get('/api/bootstrap')
+    client,_,_=hcp;client.set_cookie('company','valid');client.get('/login')
     with app.app_context():db().users.update_one({'_id':'0012345'},{'$set':{'enabled':False}})
     assert client.get('/login').status_code==403
     with client.session_transaction() as session:assert 'logFlag' not in session
@@ -123,3 +132,111 @@ def test_mock_bypasses_hcp_and_sets_employee_session(app):
 def test_invalid_sdk_redirect_is_configuration_error(hcp,target):
     client,_,SSO=hcp;SSO.redirect_url=target
     assert client.get('/login').status_code==503
+
+
+def test_refresh_and_admin_delete_do_not_reenter_login_sdk(app):
+    """Reproduce an SDK that only accepts login requests with ORIGIN."""
+    calls=[]
+    class LoginOnlySSO:
+        redirect_url='https://platform.example.test/'
+        def __init__(self,request):
+            calls.append((request.method,request.path))
+            if request.method!='GET' or request.path!='/login' or not request.args.get('ORIGIN'):
+                raise RuntimeError('SDK requires login context')
+            self.uid=request.cookies.get('employee')
+        def check_day_cookie(self,cookie):return bool(self.uid)
+        def get_sso_info(self,cookie):return (self.uid,self.uid,'','공통','','D1')
+    app.config['SSO_FACTORY']=LoginOnlySSO
+    clients={}
+    for uid in ['owner','admin','other']:
+        client=app.test_client();client.set_cookie('employee',uid)
+        first=client.get('/')
+        assert first.status_code==302
+        assert client.get(first.location).status_code==302
+        bootstrap=client.get('/api/bootstrap').json
+        clients[uid]=(client,{'X-CSRF-Token':bootstrap['csrf']})
+    owner,h=clients['owner'];admin,ah=clients['admin'];other,oh=clients['other']
+    # A valid platform session works even if the SSO cookie is absent on APIs.
+    for client,_ in clients.values():client.delete_cookie('employee')
+    for _ in range(3):
+        assert owner.get('/').status_code==200
+        assert owner.get('/api/bootstrap').status_code==200
+    assert publish(owner,h).status_code==201
+    assert publish(owner,h,tid=1,revision=1,changes='update').status_code==201
+    assert owner.get('/download/1/2').status_code==200
+    assert other.delete('/api/tools/1',json={'expectedRevision':2},headers=oh).status_code==403
+    assert admin.delete('/api/tools/1',json={'expectedRevision':2}).status_code==403
+    assert admin.delete('/api/tools/1',json={'expectedRevision':2},headers=ah).status_code==200
+    with app.app_context():assert db().tools.find_one({'_id':1})['deleted'] is True
+    assert calls==[('GET','/login')]*3
+
+
+def test_session_reads_current_admin_and_enabled_status(app):
+    owner,h=ready(app);assert publish(owner,h).status_code==201
+    with app.app_context():db().administrators.insert_one({'_id':'extra-admin','active':True})
+    admin,ah=ready(app,'extra-admin')
+    assert admin.get('/api/bootstrap').json['user']['role']=='admin'
+    with app.app_context():db().administrators.update_one({'_id':'extra-admin'},{'$set':{'active':False}})
+    assert admin.delete('/api/tools/1',json={'expectedRevision':1},headers=ah).status_code==403
+    with app.app_context():db().users.update_one({'_id':'owner'},{'$set':{'enabled':False}})
+    assert owner.get('/api/bootstrap').status_code==401
+    assert owner.delete('/api/tools/1',json={'expectedRevision':1},headers=h).status_code==401
+
+
+@pytest.mark.parametrize('bad_stamp',[None,0,'yesterday',True,float('inf')])
+def test_missing_or_invalid_session_stamp_requires_login(hcp,bad_stamp):
+    client,seen,_=hcp;client.set_cookie('company','valid');client.get('/login')
+    calls=len(seen)
+    with client.session_transaction() as session:
+        session['_hcp_login']['at']=bad_stamp;session.modified=True
+    assert client.get('/api/bootstrap').status_code==401
+    assert len(seen)==calls  # API responds with a login URL, never calls SDK.
+
+
+def test_session_lifetime_is_absolute_and_logout_clears_identity(app,hcp,monkeypatch):
+    from pt_ai_square.backend import auth
+    client,seen,_=hcp;client.set_cookie('company','valid')
+    start=time.time();monkeypatch.setattr(auth.time,'time',lambda:start)
+    client.get('/login');csrf=client.get('/api/bootstrap').json['csrf']
+    monkeypatch.setattr(auth.time,'time',lambda:start+7*3600)
+    assert client.get('/api/bootstrap').status_code==200
+    with client.session_transaction() as session:assert session['_hcp_login']['at']==start
+    monkeypatch.setattr(auth.time,'time',lambda:start+8*3600+1)
+    assert client.get('/api/bootstrap').status_code==401
+    assert len(seen)==1
+    # Login again, then explicit logout clears the verified session too.
+    client.get('/login');csrf=client.get('/api/bootstrap').json['csrf']
+    assert client.post('/api/logout',headers={'X-CSRF-Token':csrf}).status_code==200
+    assert client.get('/api/bootstrap').status_code==401
+
+
+def test_mock_identity_cannot_be_reused_as_sso(app):
+    app.config.update(AUTH_MODE='mock',MOCK_USER='admin')
+    client=app.test_client();assert client.get('/api/bootstrap').status_code==200
+    app.config['AUTH_MODE']='sso'
+    assert client.get('/api/bootstrap').status_code==401
+
+
+@pytest.mark.parametrize('stage',['initialize','check_day_cookie','get_sso_info'])
+def test_sdk_error_logs_stage_without_sensitive_exception_values(app,hcp,caplog,stage):
+    client,_,SSO=hcp;client.set_cookie('company','valid')
+    def broken(*args):raise RuntimeError('secret-cookie-secret-token')
+    setattr(SSO,'__init__' if stage=='initialize' else stage,broken)
+    assert client.get('/login').status_code==503
+    assert f'HCP SSO failure stage={stage} error=RuntimeError' in caplog.text
+    assert 'secret-cookie-secret-token' not in caplog.text
+    assert client.get('/api/bootstrap').status_code==401
+    with client.session_transaction() as session:assert '_hcp_login' not in session
+
+
+def test_login_database_error_is_not_reported_as_sso_error(app,hcp,monkeypatch,caplog):
+    from pymongo.errors import AutoReconnect
+    from pt_ai_square.backend import auth
+    client,_,_=hcp;client.set_cookie('company','valid')
+    def unavailable(*args,**kwargs):raise AutoReconnect('private database address')
+    monkeypatch.setattr(auth,'ensure_user',unavailable)
+    response=client.get('/login')
+    assert response.status_code==503 and 'MongoDB' in response.json['error']
+    assert 'HCP SSO failure' not in caplog.text
+    assert 'private database address' not in caplog.text
+    with client.session_transaction() as session:assert '_hcp_login' not in session

@@ -25,11 +25,13 @@ def test_readonly_legacy_migration_preserves_ids_and_retry(app,tmp_path):
 
 def test_sso_mapping_and_fail_closed(app):
     class SSO:
+        redirect_url='https://platform.example.test/'
         def __init__(self,request):pass
         def check_day_cookie(self,cookie):return True
         def get_sso_info(self,cookie):return ('employee','직원','','장비팀','','D100')
     app.config.update(AUTH_MODE='sso',SSO_FACTORY=SSO)
     c=app.test_client();c.set_cookie('company','test')
+    assert c.get('/login').status_code==302
     first=c.get('/api/bootstrap');assert first.status_code==200
     org_id=first.json['user']['orgId']
     with app.app_context():db().taxonomy.update_one({'_id':org_id},{'$set':{'name':'장비기술팀'}})
@@ -39,7 +41,10 @@ def test_sso_mapping_and_fail_closed(app):
     class Broken(SSO):
         def get_sso_info(self,cookie):raise RuntimeError('failure')
     app.config['SSO_FACTORY']=Broken
-    assert c.get('/api/bootstrap').status_code==503
+    assert c.get('/api/bootstrap').status_code==200
+    with c.session_transaction() as session:session.clear()
+    assert c.get('/login').status_code==503
+    assert c.get('/api/bootstrap').status_code==401
 
 def test_python_config_and_native_env_priority(monkeypatch,tmp_path):
     from pt_ai_square import config
