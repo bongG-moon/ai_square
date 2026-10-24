@@ -1,0 +1,77 @@
+/* Scoped access editor: neutral glass, readable controls, explicit review before save. */
+#square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list){width:820px;max-width:calc(100% - 32px)}
+#square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) .sq-modal-head{padding:24px 28px 20px}
+#square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) .sq-modal-head h2{font-size:24px;line-height:1.4;font-weight:650}
+#square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) #sq-dialog-body{padding:24px 28px 28px}
+#square-app .ws-grant-manager{font-size:14px;line-height:1.65;word-break:keep-all;overflow-wrap:anywhere}
+#square-app .ws-grant-intro{display:flex;gap:14px;align-items:flex-start;margin-bottom:22px}
+#square-app .ws-grant-intro>span{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:14px;background:#eff3ff;color:var(--sq-blue)}
+#square-app .ws-grant-intro svg{width:21px;height:21px}
+#square-app .ws-grant-intro strong{display:block;font-size:16px;font-weight:600;margin:1px 0 5px}
+#square-app .ws-grant-intro p{font-size:13px;color:#73737b;margin:0;line-height:1.65}
+#square-app .ws-grant-info{font-size:12px;line-height:1.75;color:#77777f;margin:12px 0 18px}
+#square-app .ws-grant-modes{width:fit-content;margin-bottom:22px;border-radius:14px}
+#square-app .ws-grant-modes button{display:flex;align-items:center;gap:8px;font-size:13px;min-height:40px;padding:9px 16px}
+#square-app .ws-grant-modes svg{width:17px;height:17px}
+#square-app [data-grant-form] .sq-field{margin:0;gap:8px}
+#square-app [data-grant-form] .sq-field>span{font-size:14px;font-weight:550}
+#square-app [data-grant-form] :is(textarea,input){font-size:14px;padding:13px 15px;border-radius:13px;background:#f9f9fb;border-color:#e1e3ea}
+#square-app [data-grant-form] textarea{min-height:100px;line-height:1.7;resize:vertical}
+#square-app [data-grant-form] .sq-field small{font-size:12px;color:#85858d;line-height:1.65}
+#square-app .ws-grant-check{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:16px}
+#square-app .ws-grant-check>span{font-size:12px;color:#85858d;max-width:440px}
+#square-app .ws-grant-manager :is(.sq-primary,.sq-secondary){font-size:13px;min-height:40px;padding:9px 17px;white-space:nowrap}
+#square-app .ws-grant-warning{border:1px solid #f0dfc7;border-radius:12px;padding:12px 14px;background:#fcf8f0;color:#896130;font-size:13px;line-height:1.75;margin:20px 0 14px}
+#square-app .ws-grant-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:22px 0 10px}
+#square-app .ws-grant-preview-head strong{font-size:14px;font-weight:600}
+#square-app .ws-grant-preview-head>span{font-size:12px;color:#85858d}
+#square-app .ws-grant-candidates{max-height:280px;overflow:auto;border:1px solid #e7e8ef;border-radius:14px;background:#fafbfe}
+#square-app .ws-grant-candidate{display:flex;align-items:center;gap:13px;padding:13px 16px;cursor:pointer;border-bottom:1px solid #e9eaf0;transition:background .18s}
+#square-app .ws-grant-candidate:last-child{border-bottom:0}
+#square-app .ws-grant-candidate:hover{background:#f2f5fe}
+#square-app .ws-grant-candidate:has(:checked){background:#f0f4ff}
+#square-app .ws-grant-candidate>input{width:17px;height:17px;accent-color:var(--sq-blue);flex:none;margin:0;min-height:0}
+#square-app .ws-grant-candidate>span{flex:1;min-width:0}
+#square-app .ws-grant-candidate strong{font-size:14px;font-weight:550;display:block}
+#square-app .ws-grant-candidate small{display:block;font-size:12px;color:#7c7e88;font-weight:400;line-height:1.65}
+#square-app .ws-grant-candidate strong small{display:inline;margin-left:5px}
+#square-app .ws-grant-candidate>svg{width:18px;height:18px;color:#8794b2}
+#square-app .ws-grant-save{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:22px;padding-top:20px;border-top:1px solid #e8e9ef}
+#square-app #ws-grant-notice{margin:0;font-size:13px;line-height:1.7;color:#586b96;flex:1}
+#square-app .ws-grant-save .sq-primary:disabled{opacity:.45;cursor:not-allowed;transform:none}
+#square-app .ws-grant-existing{margin-top:26px;padding:0 18px;border:1px solid #e6e7ee;border-radius:16px;background:#f8f9fc80}
+#square-app .ws-grant-existing>summary{display:flex;align-items:center;gap:10px;list-style:none;cursor:pointer;font-size:14px;font-weight:550;padding:16px 0}
+#square-app .ws-grant-existing>summary::-webkit-details-marker{display:none}
+#square-app .ws-grant-existing>summary>span{font-size:12px;background:#ebeef7;padding:1px 7px;border-radius:6px;color:#677497}
+#square-app .ws-grant-existing>summary>svg{margin-left:auto;width:16px;height:16px;color:#8b8e98;transition:transform .18s}
+#square-app .ws-grant-existing[open]>summary>svg{transform:rotate(180deg)}
+#square-app .ws-grant-existing h3{font-size:13px;font-weight:600;margin:22px 0 8px;color:#555863}
+#square-app .ws-grant-existing h3 small{font-weight:400;color:#9699a3;margin-left:5px}
+#square-app .ws-grant-existing>.sq-note{font-size:12px;margin:8px 0 18px;color:#8b8d96}
+#square-app .ws-grant-member{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #e8e9ee}
+#square-app .ws-grant-member:last-child{border-bottom:0;margin-bottom:8px}
+#square-app .ws-grant-member>div{flex:1;min-width:0}
+#square-app .ws-grant-member strong{display:block;font-size:13px;font-weight:550}
+#square-app .ws-grant-member small{display:block;font-size:12px;color:#858892;font-weight:400}
+#square-app .ws-grant-member strong small{display:inline;margin-left:4px}
+#square-app .ws-grant-member-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:#edeff6;color:#8490ab;flex:none}
+#square-app .ws-grant-member-icon svg{width:17px;height:17px}
+#square-app .ws-grant-member .sq-secondary{min-height:36px;padding:7px 13px;font-size:12px}
+#square-app .ws-grant-tool-list .ws-row{padding:16px 4px}
+#square-app .ws-grant-panel-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+#square-app .ws-grant-filterbar{display:flex;margin:0 0 14px;justify-content:flex-start}
+#square-app #sq-workspace:has(>.ws-summary) .ws-empty>svg{display:block}
+#square-app .ws-grant-manager :is(button,input,textarea,summary):focus-visible{outline:3px solid #4972df55;outline-offset:3px}
+@media(max-width:620px){
+ #square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) .sq-modal-head{padding:20px}
+ #square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) #sq-dialog-body{padding:20px}
+ #square-app #sq-dialog:has(.ws-grant-manager,.ws-grant-tool-list) .sq-modal-head h2{font-size:21px}
+ #square-app .ws-grant-modes{width:100%}
+ #square-app .ws-grant-modes button{justify-content:center;flex:1;padding:9px 10px}
+ #square-app .ws-grant-check{align-items:flex-end;gap:12px}
+ #square-app .ws-grant-save{flex-direction:column;align-items:stretch;gap:14px}
+ #square-app .ws-grant-save p:empty{display:none}
+ #square-app .ws-grant-existing{padding:0 13px}
+ #square-app .ws-grant-preview-head{align-items:flex-start;flex-direction:column;gap:3px}
+}
+@media(prefers-reduced-motion:reduce){#square-app .ws-grant-manager *{transition:none!important}}

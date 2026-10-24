@@ -5,45 +5,55 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='local_access.css') }}">
 <script defer src="{{ url_for('static', filename='local_access.js') }}"></script>
 </head><body><main class="local-shell">
-<a class="local-back" href="{{ url_for('index') }}">← P&T AI SQUARE</a>
+<a class="local-back" href="{{ url_for('index') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>P&T AI SQUARE</a>
 <header class="local-heading"><span class="local-eyebrow">PERSONAL CONNECTION</span>
-<h1>나의 도구를 연결하는,<br><span>하나의 KEY.</span></h1>
-<p>내 사번에 연결된 API 인증키로 도구를 받고 등록하세요.<br>사번마다 한 개의 KEY만 사용할 수 있습니다.</p></header>
+<h1>나의 도구를 연결하는, <span>하나의 KEY.</span></h1>
+<p>내 사번에 연결된 API 인증키로 도구를 받고 등록하세요. 사번마다 한 개의 KEY만 사용할 수 있습니다.</p></header>
+<div class="local-layout">
+<div class="local-personal-column">
 <section class="local-card local-key-card" aria-labelledby="key-title">
 <div class="local-card-head"><div><span class="local-eyebrow">MY CONNECTION KEY</span><h2 id="key-title">내 연결 KEY</h2></div><span id="key-state" class="local-key-state">확인 중</span></div>
-<div class="local-employee"><span class="local-key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="9" r="4.5"/><path d="m11.5 12.5 7 7H22v-3.5h-3v-3h-3.5"/></svg></span><div><strong id="employee">로그인 정보를 확인하고 있습니다.</strong><p id="current-key-detail">발급 상태를 확인하고 있습니다.</p></div></div>
+<div class="local-employee"><span class="local-key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="4.5"/><path d="m11.5 12.5 7 7H22v-3.5h-3v-3h-3.5"/></svg></span><div><strong id="employee">로그인 정보를 확인하고 있습니다.</strong><p id="current-key-detail">발급 상태를 확인하고 있습니다.</p></div></div>
 <form id="token-form"><label>KEY 이름<input id="token-name" value="내 연결 KEY" maxlength="60" required></label>
 <label>허용 작업<select id="token-scope"><option value="read">조회·다운로드</option><option value="publish">업로드 포함</option></select></label>
 <div class="local-form-actions"><button id="key-issue" class="sq-primary" type="submit" disabled>연결 KEY 발급</button><button id="key-revoke" class="sq-secondary" type="button" hidden>KEY 사용 취소</button></div></form>
-<p class="local-key-lifetime">새로 발급하는 KEY는 유효기간 제한 없이 사용합니다. 재발급하거나 사용을 취소하면 기존 KEY는 해제됩니다.</p>
-<p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 관리자 KEY도 본인 도구만 게시할 수 있으며 도구 삭제·권한 변경은 허용하지 않습니다.</p>
+<div class="local-key-notes"><p class="local-key-lifetime"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></svg><span><strong>새 KEY는 유효기간 제한 없이 사용합니다.</strong></span></p>
+<p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 관리자 KEY도 본인 도구만 게시할 수 있으며 도구 삭제·권한 변경은 허용하지 않습니다.</p></div>
 <div id="issued" class="local-issued" hidden><strong>새 연결 KEY가 준비되었습니다.</strong><p>원문은 지금 한 번만 표시됩니다. 연결할 프로그램의 인증키 입력란에 넣어주세요.</p>
 <div class="local-secret-row"><input id="secret" type="password" readonly aria-label="발급된 개인 API 인증키" autocomplete="off"><button id="copy-token" class="sq-secondary" type="button">KEY 복사</button></div><small>KEY 원문은 서버에 저장하지 않습니다. 잃어버리면 재발급해 주세요.</small></div>
 <p id="status" role="status" aria-live="polite"></p>
 </section>
-<section class="local-card"><div class="local-card-head"><div><span class="local-eyebrow">CONNECT YOUR WORK</span><h2>내 PC에서 시작하기</h2></div></div>
-<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('local_access.mcp_download') }}" download><strong>로컬 MCP 받기 <span aria-hidden="true">↗</span></strong><span>사이트 주소 자동 설정 · 다운로드 폴더 자동 생성 · 개인 KEY로 연결</span></a></div>
-<p>ZIP을 풀고 <strong>Connect.cmd</strong>를 실행하세요. 서버 주소와 다운로드 위치가 자동으로 표시됩니다. 개인 KEY를 입력하고 <strong>연결하기</strong>를 누르면 본인 이름·부서가 표시됩니다. HTTP 사이트는 연결 안내를 한 번 확인합니다.</p>
-<p>파일은 내 사용자 폴더의 <strong>AI_SQUARE\downloads</strong> 아래 서버·도구·버전별로 저장됩니다. 실제 설치 시에는 프로젝트 또는 내 계정 범위를 선택합니다. 다른 폴더의 자료를 등록할 때는 AI에 원본 폴더 선택 창을 열어 달라고 요청하세요.</p>
-<details class="local-details"><summary>처음 MCP를 설치하는 경우</summary><p>Python 3.11 이상이 필요합니다. 연결 창에는 KEY만 입력합니다. Claude Code 등에 MCP를 처음 등록하는 경우 아래 명령으로 실행 환경을 준비한 뒤 ZIP 안 README의 MCP 등록 순서를 따르세요. 이미 MCP를 등록했다면 실행 경로는 유지할 수 있습니다.</p>
+<section class="local-card local-activity-card" aria-labelledby="activity-title"><div class="local-card-head"><div><span class="local-eyebrow">MY ACTIVITY</span><h2 id="activity-title">연결 이용 이력</h2></div><button id="refresh-usage" class="sq-secondary" type="button">새로고침</button></div>
+<div class="local-activity-grid"><div class="local-activity-summary"><div class="local-usage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 16v-5m5 5V5m5 11V8"/></svg><strong id="usage">이용 건수를 확인하고 있습니다.</strong></div>
+<p>업로드는 게시된 버전마다 1건입니다. 다운로드는 웹·API를 합쳐 같은 사번·도구당 최초 1회만 반영하며 반복 수신과 업데이트는 제외합니다. KEY를 재발급해도 이력은 유지됩니다.</p></div>
+<div><h3>최근 API 이용 이력</h3><ul id="history"></ul></div></div>
+<details class="local-details"><summary>이전 KEY 이력 <span id="key-history-count"></span></summary><p>이전 KEY는 사용할 수 없습니다. 사용 건수 확인을 위한 기록만 보관합니다.</p><ul id="tokens"></ul></details>
+</section>
+</div>
+<section class="local-card local-connect-card" aria-labelledby="connect-title">
+<div class="local-card-head"><div><span class="local-eyebrow">CONNECT YOUR WORK</span><h2 id="connect-title">내 PC에서 시작하기</h2></div></div>
+<a class="local-download" href="{{ url_for('local_access.mcp_download') }}" download><span class="local-download-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></span><div><strong>로컬 MCP 받기</strong><small>사이트 주소와 다운로드 폴더를 자동으로 설정해요.</small></div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>
+<ol class="local-connect-steps">
+<li><div><strong>압축을 풀고 Connect.cmd 실행</strong><p>Python 3.11 이상이 필요합니다. 서버 주소와 다운로드 위치가 자동으로 표시됩니다.</p></div></li>
+<li><div><strong>개인 KEY 입력 후 연결하기</strong><p>본인 이름·부서가 표시되면 완료입니다. HTTP 사이트는 연결 안내를 한 번 확인합니다.</p></div></li>
+<li><div><strong>사용하는 AI에서 도구 검색·다운로드</strong><p>실제 설치할 때 프로젝트 또는 내 계정 범위를 선택합니다. 처음 MCP를 등록한다면 아래 안내를 확인하세요.</p></div></li>
+</ol>
+<p class="local-path-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span>받은 파일은 내 사용자 폴더의 <code>AI_SQUARE\downloads</code>에 서버·도구·버전별로 보관됩니다.</span></p>
+<details class="local-details"><summary>처음 MCP를 설치하는 경우</summary><p>Claude Code 등에 MCP를 처음 등록하는 경우 아래 명령으로 실행 환경을 준비한 뒤 ZIP 안 README의 MCP 등록 순서를 따르세요. 이미 MCP를 등록했다면 실행 경로는 유지할 수 있습니다.</p>
 <pre>python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe run_mcp.py connect</pre>
 <p>연결 창을 사용할 수 없는 환경에서는 <code>python run_mcp.py setup</code>을 실행하세요. 이 사이트에서 받은 ZIP은 주소를 포함하므로 서버 주소·작업 폴더를 입력하지 않습니다. KEY는 숨김 입력으로 받습니다.</p>
-<p>Windows에서는 KEY를 사용자 계정으로 암호화해 보관합니다. KEY는 채팅에 붙여넣지 마세요. Claude의 Connected 표시는 MCP 실행 상태이며 실제 계정 연결은 위 연결 창 또는 connection_status로 확인합니다. KEY 재발급 후에는 Connect.cmd에서 새 KEY로 다시 연결하세요.</p></details>
-<p>Python 3.11 이상이 필요합니다. 필요한 Skill을 받아 압축을 풀고 사용하는 AI에 등록하세요.</p>
-<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download><strong>다운로드용 Skill 받기 <span aria-hidden="true">↗</span></strong><span>도구 검색 · 파일 받기 · 최신 버전 확인</span></a><a class="local-connect-item" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download><strong>배포·자동 등록 Skill 받기 <span aria-hidden="true">↗</span></strong><span>파일 준비 · 신규 등록 · 새 버전 게시</span></a></div>
+<p>Windows에서는 KEY를 사용자 계정으로 암호화해 보관합니다. KEY는 채팅에 붙여넣지 마세요. Claude의 Connected 표시는 MCP 실행 상태이며 실제 계정 연결은 위 연결 창 또는 connection_status로 확인합니다. KEY 재발급 후에는 Connect.cmd에서 새 KEY로 다시 연결하세요.</p>
+<p>다른 폴더의 자료를 등록할 때는 AI에 원본 폴더 선택 창을 열어 달라고 요청하세요.</p></details>
+<details class="local-details"><summary>Skill로 연결하기</summary><p>필요한 Skill을 받아 압축을 풀고 사용하는 AI에 등록하세요. Python 3.11 이상이 필요합니다.</p>
+<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download><strong>다운로드용 Skill <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 5v9l9 5 9-5V8M12 13v9M7.5 5.5l9 5"/></svg></strong><span>도구 검색 · 파일 받기 · 최신 버전 확인</span></a><a class="local-connect-item" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download><strong>배포·자동 등록 Skill <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 5v9l9 5 9-5V8M12 13v9M7.5 5.5l9 5"/></svg></strong><span>파일 준비 · 신규 등록 · 새 버전 게시</span></a></div>
 <p>배포 Skill은 웹에서 파일·내용·공개 범위를 승인한 뒤 AI 대화에서 게시를 이어갑니다. EXE 자동 변환은 하지 않습니다. MCP의 자동 설치는 지원하는 설치 정보가 있는 항목에 한합니다.</p>
-<details class="local-details"><summary>연결 명령어 보기</summary><p>압축을 푼 Skill 폴더에서 아래 명령을 실행하세요. 마지막 명령의 1은 검색 결과의 도구 ID로 바꿉니다.</p>
+<p>압축을 푼 Skill 폴더에서 아래 명령을 실행하세요. 마지막 명령의 1은 검색 결과의 도구 ID로 바꿉니다.</p>
 <pre>python scripts/square_client.py configure --url {{ request.url_root.rstrip('/') }}{% if request.scheme == 'http' %} --allow-http{% endif %}
 python scripts/square_client.py --authenticate search "회의록"
 python scripts/square_client.py --authenticate download 1 --output ./downloads</pre>
 <p>KEY가 없으면 발급 화면으로 안내합니다. 재발급 후에는 연결한 프로그램들의 KEY도 새 값으로 바꿔주세요. 로컬 mock 시험은 인증키 없이도 같은 PC에서 사용할 수 있습니다.</p></details>
-<p class="local-future">로컬 MCP와 Skill은 위에서 연결할 수 있습니다. CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤 이용할 수 있습니다.</p>
+<p class="local-future">CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤 이용할 수 있습니다.</p>
 </section>
-<section class="local-card"><div class="local-card-head"><div><span class="local-eyebrow">MY ACTIVITY</span><h2>연결 이용 이력</h2></div><button id="refresh-usage" class="sq-secondary" type="button">새로고침</button></div>
-<div class="local-usage"><strong id="usage">이용 건수를 확인하고 있습니다.</strong></div>
-<p>업로드는 게시된 버전마다 1건입니다. 다운로드는 웹·API를 합쳐 같은 사번·도구당 최초 1회만 반영하며 반복 수신과 업데이트는 제외합니다. KEY를 재발급해도 이력은 유지됩니다.</p>
-<h3>최근 API 이용 이력</h3><ul id="history"></ul>
-<details class="local-details"><summary>이전 KEY 이력 <span id="key-history-count"></span></summary><p>이전 KEY는 사용할 수 없습니다. 사용 건수 확인을 위한 기록만 보관합니다.</p><ul id="tokens"></ul></details>
-</section></main></body></html>
+</div></main></body></html>

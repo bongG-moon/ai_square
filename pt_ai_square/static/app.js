@@ -250,7 +250,7 @@ const actions={
  'rank-page':b=>changeRank(+b.dataset.page),
  'rank-mode':b=>{if(b.dataset.mode===state.rankMode)return;state.rankMode=b.dataset.mode;state.rankPage=0;render();},
  autoplay:()=>{state.auto=!state.auto;schedule();},
- 'rank-info':()=>openModal('좋아요 2점, 다운로드 1점.','인기 TOP 10 집계 기준',`<div class="sq-detail-hero"><h3>최근의 관심과 꾸준한 인기를<br>나누어 살펴보세요.</h3><p><strong>실시간</strong>은 집계 시각부터 최근 7일, <strong>누적</strong>은 전체 기간을 기준으로 합니다. 두 순위 모두 좋아요 × 2 + 다운로드 × 1로 계산합니다.</p></div><div class="sq-callout">좋아요는 한 사람·한 도구당 한 번 반영하며, 취소하면 점수가 빠집니다. 다시 눌러도 최초 좋아요 날짜가 유지되어 최근 점수를 반복해서 올릴 수 없습니다.<br><br>다운로드는 같은 사용자·도구의 전체 기간 최초 수신만 1점입니다. 반복 수신과 업데이트는 추가 점수가 없으며, 실시간 순위는 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.<br><br>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위 행에 표시되는 좋아요·다운로드 수도 선택한 기간 기준입니다.</div><p class="sq-note">접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 뒤집어 보여주며, 페이지 전환 자체는 재집계가 아닙니다. 다운로드 수는 서버 응답 기준이며 설치 완료 수가 아닙니다.</p>${button('rank-refresh','집계 새로고침','sq-primary')}`),
+ 'rank-info':()=>openModal('좋아요 2점, 다운로드 1점.','동료들이 많이 찾는 도구 · 집계 기준',`<div class="sq-detail-hero"><h3>최근의 관심과 꾸준한 인기를<br>나누어 살펴보세요.</h3><p><strong>실시간</strong>은 집계 시각부터 최근 7일, <strong>누적</strong>은 전체 기간을 기준으로 합니다. 두 순위 모두 좋아요 × 2 + 다운로드 × 1로 계산합니다.</p></div><div class="sq-callout">좋아요는 한 사람·한 도구당 한 번 반영하며, 취소하면 점수가 빠집니다. 다시 눌러도 최초 좋아요 날짜가 유지되어 최근 점수를 반복해서 올릴 수 없습니다.<br><br>다운로드는 같은 사용자·도구의 전체 기간 최초 수신만 1점입니다. 반복 수신과 업데이트는 추가 점수가 없으며, 실시간 순위는 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.<br><br>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위 행에 표시되는 좋아요·다운로드 수도 선택한 기간 기준입니다.</div><p class="sq-note">접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 뒤집어 보여주며, 페이지 전환 자체는 재집계가 아닙니다. 다운로드 수는 서버 응답 기준이며 설치 완료 수가 아닙니다.</p>${button('rank-refresh','집계 새로고침','sq-primary')}`),
  'rank-refresh':()=>{state.snapshot++;render();closeModal();announce('다음 가상 집계를 반영했습니다. 화면 페이지 전환과 순위 재집계는 별개입니다.');},
  'close-dialog':closeModal,
  'cancel-confirm':()=>{$('#sq-confirm').close();runtime.confirm=null;},
@@ -534,7 +534,7 @@ function renderWorkspace(){
  if(work.tab==='trash'&&isAdmin)html+=deletionJobsPanel();
  if(work.tab==='requests'){
   const all=requests.filter(r=>isAdmin||r.ownerId===server.user.id);const filtered=all.filter(r=>work.requestFilter==='대기'?r.status==='대기':work.requestFilter==='승인됨'?r.granted:!r.granted&&r.status!=='대기');
-  html+=`<div class="ws-panel-head"><div><h2>조회 권한 관리</h2><p>신청자와 실제 권한 보유자를 구분해서 관리합니다.</p></div><div class="ws-segment">${['대기','승인됨','처리 이력'].map(s=>button('access-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.requestFilter}"`)).join('')}</div></div><div class="ws-list">${filtered.map(r=>`<article class="ws-row"><span class="ws-avatar">${esc(r.who.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(r.who)} <small>${esc(r.user)}</small></strong><p>${esc(r.name)} · ${esc(r.source)}</p><p class="ws-message">${esc(r.reason||'직접 권한을 부여한 사용자입니다.')}</p>${r.decision?`<p>${esc(r.decision)}</p>`:''}</div>${badge(r.granted?'승인됨':r.status==='승인'?'권한 회수':r.status)}<div class="sq-row-actions">${r.status==='대기'?button('access-decision','승인','sq-primary',`data-request="${r.id}" data-status="승인"`)+button('access-decision','반려','sq-secondary',`data-request="${r.id}" data-status="반려"`):r.granted?button('access-decision','권한 회수','sq-secondary',`data-request="${r.id}" data-status="회수"`):''}${button('access-history','이력','sq-link',`data-request="${r.id}"`)}</div></article>`).join('')||blank('shield-check','처리할 항목이 없습니다.','권한 신청과 승인 결과가 여기에 표시됩니다.')}</div>`;
+  html+=`<div class="ws-panel-head"><div><h2>조회 권한 관리</h2><p>신청을 처리하거나, 기능별로 여러 사람·부서에 권한을 부여하세요.</p></div><div class="ws-grant-panel-tools">${button('grant-tools',icon('users')+' 기능별 권한 설정','sq-secondary')}</div></div><div class="ws-grant-filterbar"><div class="ws-segment">${['대기','승인됨','처리 이력'].map(s=>button('access-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.requestFilter}"`)).join('')}</div></div><div class="ws-list">${filtered.map(r=>`<article class="ws-row"><span class="ws-avatar">${esc(r.who.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(r.who)} <small>${esc(r.user)}</small></strong><p>${esc(r.name)} · ${esc(r.source)}</p><p class="ws-message">${esc(r.reason||'직접 권한을 부여한 사용자입니다.')}</p>${r.decision?`<p>${esc(r.decision)}</p>`:''}</div>${badge(r.granted?'승인됨':r.status==='승인'?'권한 회수':r.status)}<div class="sq-row-actions">${r.status==='대기'?button('access-decision','승인','sq-primary',`data-request="${r.id}" data-status="승인"`)+button('access-decision','반려','sq-secondary',`data-request="${r.id}" data-status="반려"`):r.granted?button('access-decision','권한 회수','sq-secondary',`data-request="${r.id}" data-status="회수"`):''}${button('access-history','이력','sq-link',`data-request="${r.id}"`)}</div></article>`).join('')||blank('shield-check','처리할 항목이 없습니다.','권한 신청과 승인 결과가 여기에 표시됩니다.')}</div>`;
  }
  if(work.tab==='feedback'){const feedback=list.flatMap(x=>x.comments.map(c=>({...c,toolName:x.name}))).sort((a,b)=>b.created-a.created);html+=`<div class="ws-panel-head"><div><h2>동료들의 피드백</h2><p>의견을 확인하고 답변과 처리 상태를 남겨주세요.</p></div></div>${feedback.map(c=>`<button class="ws-row ws-click" data-action="feedback-open" data-id="${c.tool}"><span class="ws-avatar">${icon('message-square')}</span><span class="ws-row-main"><strong>${esc(c.toolName)}</strong><span>${esc(c.author)} · ${esc(c.text)}</span></span>${badge(c.status)}${icon('chevron-right')}</button>`).join('')||blank('messages-square','아직 피드백이 없습니다.','사용자가 남긴 의견을 이곳에서 확인할 수 있습니다.')}`;}
  if(work.tab==='taxonomy')html+=taxonomyPanel();
@@ -568,7 +568,7 @@ detail=async function(id,tab='intro'){
 function lockedDetail(x){runtime.detailId=x.id;openModal('조회 권한이 필요합니다.',x.name,`<div class="ws-lock"><span class="ws-lock-icon">${icon('lock-keyhole')}</span><h3>${x.access==='pending'?'신청을 검토하고 있습니다.':'승인 후 상세 내용을 볼 수 있어요.'}</h3><p>목록은 누구나 볼 수 있지만, 상세 내용과 배포 파일은<br>등록자 또는 관리자의 승인 후 이용할 수 있습니다.</p>${x.accessDecision?`<div class="sq-callout">${esc(x.accessDecision)}</div>`:''}<div class="sq-actions">${x.access==='pending'?badge('승인 대기'):button('request-access','조회 권한 신청','sq-primary')}</div><small>처리 결과는 내 알림에서 알려드릴게요.</small></div>`);}
 function renderIdeas(){
  const rows=(work.ideas||[]).filter(i=>work.ideaFilter==='전체'||i.status===work.ideaFilter);
- workspace.innerHTML=`<div class="ws-board-head"><div class="ws-segment">${['전체','접수 대기','개발 중','구현 완료'].map(s=>button('idea-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.ideaFilter}"`)).join('')}</div>${button('idea',icon('plus')+' 새 기능 요청','sq-primary')}</div><div class="ws-idea-grid">${rows.map(i=>`<button class="ws-idea-card" data-action="idea-open" data-id="${i.id}"><div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)}</span></div><h2>${esc(i.name)}</h2><p>${esc(i.body)}</p><div class="ws-idea-foot"><span>${i.assigneeName?'담당 '+esc(i.assigneeName):'함께 만들 동료를 기다려요'}</span>${icon('arrow-up-right')}</div></button>`).join('')||blank('lightbulb','작은 불편함에서 좋은 도구가 시작됩니다.','필요한 기능을 요청하고 동료들과 함께 만들어 보세요.')}</div>`;mountIcons();
+ workspace.innerHTML=`<div class="ws-board-head"><div class="ws-segment">${['전체','접수 대기','개발 중','구현 완료'].map(s=>button('idea-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.ideaFilter}"`)).join('')}</div>${button('idea',icon('plus')+' 새 기능 요청','sq-primary')}</div><div class="ws-idea-grid">${rows.map(i=>`<button class="ws-idea-card" data-action="idea-open" data-id="${i.id}"><div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)}</span></div><h2>${esc(i.name)}</h2><p>${esc(i.body)}</p><div class="ws-idea-foot"><span>${i.assigneeName?'담당 '+esc(i.assigneeName):'함께 만들 동료를 기다려요'}</span>${icon('app-window')}</div></button>`).join('')||blank('lightbulb','작은 불편함에서 좋은 도구가 시작됩니다.','필요한 기능을 요청하고 동료들과 함께 만들어 보세요.')}</div>`;mountIcons();
 }
 async function loadIdeas(){work.ideas=(await requestAPI('/api/ideas')).ideas;}
 async function ideaDetail(id){
@@ -578,7 +578,7 @@ async function ideaDetail(id){
  const i=work.ideas.find(x=>x.id===+id);if(!i)throw Error('요청을 찾을 수 없습니다.');work.idea=i;
  if(i.deletionPending){openModal(i.name,'기능 요청 · 삭제 처리 중',`<div class="sq-callout"><strong>삭제 작업을 마무리하고 있습니다.</strong><p>이 요청은 수정할 수 없습니다. 삭제를 다시 시도하면 남은 파일과 데이터 정리를 이어갑니다.</p></div><div class="sq-actions">${server.user.role==='admin'?button('idea-delete','삭제 다시 시도','sq-secondary ws-danger',`data-id="${i.id}"`):''}</div>`);return;}
  const owner=server.user.role==='admin'||i.assignee===server.user.id;
- openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.deletionPending?'삭제 처리 중':i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div>${server.user.role==='admin'?`<div class="ws-idea-admin">${button('idea-delete',icon('trash-2')+(i.deletionPending?'삭제 다시 시도':'요청 삭제'),'sq-link ws-danger',`data-id="${i.id}"`)}<span>요청 내용·답변·첨부파일을 삭제합니다.</span></div>`:''}<form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options(server.user.role==='admin'?['접수 대기','담당자 지정','개발 중','구현 완료','보류']:[i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
+ openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.deletionPending?'삭제 처리 중':i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('app-window')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div>${server.user.role==='admin'?`<div class="ws-idea-admin">${button('idea-delete',icon('trash-2')+(i.deletionPending?'삭제 다시 시도':'요청 삭제'),'sq-link ws-danger',`data-id="${i.id}"`)}<span>요청 내용·답변·첨부파일을 삭제합니다.</span></div>`:''}<form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options(server.user.role==='admin'?['접수 대기','담당자 지정','개발 중','구현 완료','보류']:[i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
 }
 
 async function inbox(loadMore=false){
@@ -833,10 +833,10 @@ root.addEventListener('submit',e=>{
 // People, connection entry and declared workflows share the existing page shell.
 let peopleRanks=null,peopleRanksError='',peopleRanksLoading=false,peopleLoadSerial=0,profileSignature='';
 const baseRankItems=rankItems,baseRankRow=rankRowHTML,baseRenderRanks=renderRanks;
-const basePeopleRender=render,basePeopleRefresh=refresh,baseRankInfo=actions['rank-info'];
+const basePeopleRender=render,basePeopleRefresh=refresh;
 const peopleModes=$('.sq-rank-modes');
 peopleModes.setAttribute('aria-label','도구·구성원 순위');
-peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','기여도 순위','','type="button" data-mode="people" aria-pressed="false"'));
+peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','함께한 동료','','type="button" data-mode="people" aria-pressed="false"'));
 $('.sq-chart-controls').insertAdjacentHTML('beforeend','<span id="sq-my-rank" class="sq-my-rank" hidden></span>');
 $('#sq-session').classList.add('sq-profile');
 $('#sq-session').insertAdjacentHTML('afterend',`<a id="sq-connection-key" class="sq-quiet sq-key-link" href="/local-access" aria-label="내 연결 KEY 발급·관리" title="연결 KEY 발급·관리">${icon('key-round')}</a>`);
@@ -880,11 +880,11 @@ rankRowHTML=function(row,rank){
 renderRanks=function(){
  baseRenderRanks();const isPeople=state.rankMode==='people';
  $('.sq-chart').dataset.rankType=isPeople?'people':'tools';
- $('#sq-chart-title').innerHTML=isPeople?'기여도 순위 <span lang="en">TOP 10</span>':'인기 <span lang="en">TOP 10</span>';
+ $('#sq-chart-title').textContent=isPeople?'함께한 동료':'동료들이 많이 찾는 도구';
  $('.sq-chart-labels>span:last-child').textContent=isPeople?'공유 기여도':'좋아요 · 다운로드';
  const me=$('#sq-my-rank');me.hidden=!isPeople;
  if(!isPeople)return;
- $('#sq-rank-range').textContent='기여도 순위';$('#sq-rank-period').textContent='전체 기간 · 구성원 기여도';
+ $('#sq-rank-range').textContent='함께한 동료';$('#sq-rank-period').textContent='전체 기간 · 공유 기여도';
  const own=peopleRanks?.me;me.textContent=own?.rank?`내 순위 ${num(own.rank)}위 · ${num(own.score)}점`:'도구를 공유하고 함께 성장해요';
  if(peopleRanks?.asOf)$('#sq-chart-time').textContent=new Date(peopleRanks.asOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});
  if(peopleRanksLoading&&!peopleRanks)$('#sq-rank-list').innerHTML='<div class="sq-empty" role="status">공유 기여도를 집계하고 있어요.</div>';
@@ -906,9 +906,15 @@ actions['rank-mode']=async b=>{
 };
 actions['rank-retry']=async()=>{const pending=loadPeopleRanks();render();await pending;render();};
 actions['rank-info']=()=>{
- if(state.rankMode!=='people')return baseRankInfo();
+ const people=state.rankMode==='people';
  const weights=peopleRanks?.weights||{registered:5,likes:2,downloads:1};
- openModal('함께 쓰는 도구를 만든 사람들.','기여도 순위 · 전체 기간',`<div class="sq-detail-hero"><h3>나눈 노하우가 쌓이는 순위.</h3><p>등록한 도구와 그 도구를 이용한 동료들의 반응을 모아 공유 기여도를 보여드립니다.</p></div><div class="sq-power-formula"><span>등록 도구 <strong>× ${weights.registered}</strong></span><span>받은 좋아요 <strong>× ${weights.likes}</strong></span><span>고유 다운로드 <strong>× ${weights.downloads}</strong></span></div><div class="sq-callout">전체 기간을 기준으로 집계합니다. 도구는 버전 수와 관계없이 한 번만 반영합니다. 좋아요 취소·삭제된 도구·비활성 사용자는 순위에 반영하지 않습니다.<br><br>본인 도구에 대한 좋아요·다운로드, 같은 사람이 같은 도구를 반복 다운로드하거나 업데이트한 이력은 추가 점수가 없습니다. 조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다.</div><p class="sq-note">${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 고유 다운로드 수 → 사번 순으로 정렬합니다.')}</p>${button('rank-refresh','집계 새로고침','sq-primary')}`);
+ const score=(label,weight,symbol,unit)=>`<div class="sq-score-tile"><span class="sq-score-symbol" aria-hidden="true">${icon(symbol)}</span><span class="sq-score-label">${label}</span><strong>${esc(weight)}<small>점</small></strong><span class="sq-score-unit">${unit}</span></div>`;
+ const rule=(title,copy)=>`<li><span aria-hidden="true">${icon('check')}</span><div><strong>${title}</strong><p>${copy}</p></div></li>`;
+ const formula=people?score('등록한 도구',weights.registered,'package','도구 1개당')+score('받은 좋아요',weights.likes,'heart','좋아요 1개당')+score('고유 다운로드',weights.downloads,'arrow-down-to-line','사용자·도구당 최초 1회'):score('좋아요',2,'heart','한 사람·한 도구당')+score('다운로드',1,'arrow-down-to-line','사용자·도구당 최초 1회');
+ const periods=people?'<div class="sq-ranking-period-note">전체 기간에 쌓인 공유 활동을 합산합니다.</div>':`<div class="sq-ranking-periods" aria-label="집계 기간 안내"><div${state.rankMode==='recent'?' class="is-current"':''}><strong>실시간</strong><span>집계 시각부터 최근 7일</span></div><div${state.rankMode==='total'?' class="is-current"':''}><strong>누적</strong><span>전체 기간</span></div></div>`;
+ const rules=people?rule('버전이 늘어도, 도구는 한 번만','등록한 도구 수와 동료들이 보낸 좋아요·다운로드를 더합니다.')+rule('반복 활동은 추가 점수 없이','본인 도구에 대한 반응, 반복 다운로드와 업데이트는 제외합니다.')+rule('현재 유효한 공유 활동만','취소한 좋아요, 삭제된 도구와 비활성 사용자는 반영하지 않습니다.'):rule('좋아요는 한 번씩 반영','취소하면 점수가 빠지고, 다시 눌러도 최초 좋아요 날짜를 유지합니다.')+rule('처음 받은 다운로드만 반영','같은 사람이 같은 도구를 다시 받거나 업데이트해도 점수가 늘지 않습니다.');
+ const details=people?`<li>조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다.</li><li>${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 고유 다운로드 수 → 사번 순으로 정렬합니다.')}</li>`:'<li>실시간 다운로드 점수에는 전체 기간 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.</li><li>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위에 표시된 활동 수도 선택한 기간 기준입니다.</li><li>접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 전환하는 애니메이션은 재집계와 별개입니다.</li><li>다운로드 수는 서버의 파일 응답 기준이며 PC 설치 완료 수가 아닙니다.</li>';
+ openModal(people?'함께한 동료 · 집계 기준':'동료들이 많이 찾는 도구 · 집계 기준','순위 안내',`<section class="sq-ranking-guide"><p class="sq-ranking-intro">${people?'도구를 나눈 동료들을 소개합니다. 등록한 도구와 동료들의 반응을 바탕으로 공유 기여도 상위 10명을 보여드립니다.':'동료들의 좋아요와 다운로드를 모아 상위 10개 도구를 보여드립니다. 최근의 관심은 실시간으로, 꾸준한 이용은 누적으로 살펴보세요.'}</p><div class="sq-score-grid${people?' sq-score-grid-three':''}">${formula}</div>${periods}<div class="sq-ranking-rules"><h3>이렇게 반영해요</h3><ul>${rules}</ul></div><details class="sq-ranking-details"><summary>세부 집계 기준<span aria-hidden="true">${icon('chevron-down')}</span></summary><ul>${details}</ul></details><footer class="sq-ranking-footer"><span>${icon('refresh-cw')} 최신 활동으로 다시 확인할 수 있어요.</span>${button('rank-refresh','집계 새로고침','sq-secondary')}</footer></section>`);
 };
 function workflowDiagram(workflow){
  const steps=Array.isArray(workflow?.steps)?workflow.steps.slice(0,8):[];
@@ -976,6 +982,77 @@ root.addEventListener('submit',e=>{
   await afterWorkspaceSave(async()=>{await loadAxWorkspace();if(listToken===runtime.detailLoadToken&&state.route==='ax'){renderAxWorkspace();announce('배포 파일을 등록했습니다.');}},form);
  })().catch(error=>{if(errorToken===runtime.detailLoadToken)showError(error);}).finally(()=>{axUploadBusy=false;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=!!form.dataset.saved);});
 },true);
+
+// Owner/admin access management. All matching and authorization happen on the server.
+let grantState=null,grantSequence=0;
+function grantLive(s){return grantState===s&&$('#sq-dialog').open&&runtime.detailLoadToken===s.dialogToken;}
+function grantCandidateKey(row){return row.code?'code:'+row.code:'name:'+row.name;}
+function grantTargets(s){return s.mode==='users'?(s.preview?.users||[]):(s.preview?.departments||[]);}
+function grantSelected(s){return grantTargets(s).filter(row=>s.selected.has(s.mode==='users'?row.id:grantCandidateKey(row)));}
+function grantCanSave(s){return !!s.preview&&!s.busy&&!(s.preview.unknown||[]).length&&grantSelected(s).length>0;}
+function grantResultRows(s){
+ if(!s.preview)return '';
+ const rows=grantTargets(s),unknown=s.preview.unknown||[];
+ return `${unknown.length?`<p class="ws-grant-warning" role="alert">확인되지 않은 사번: ${unknown.map(esc).join(', ')}. 로그인 이력이 있는 사번인지 확인한 뒤 다시 입력해 주세요.</p>`:''}<div class="ws-grant-preview-head"><strong>확인한 대상 ${rows.length}${s.mode==='users'?'명':'개 부서'}</strong><span>추가할 대상을 선택하세요.</span></div><div class="ws-grant-candidates">${rows.map(row=>{const key=s.mode==='users'?row.id:grantCandidateKey(row);return `<label class="ws-grant-candidate"><input type="checkbox" data-grant-select="${esc(key)}" ${s.selected.has(key)?'checked':''} ${s.busy?'disabled':''}><span><strong>${esc(row.name)}${s.mode==='users'?` <small>${esc(row.id)}</small>`:''}</strong><small>${s.mode==='users'?esc(row.dept||'부서 정보 없음'):`${row.code?'부서 코드 '+esc(row.code):'부서명 정확히 일치'} · 현재 ${row.memberCount}명`}</small></span>${s.mode==='department'?icon('building-2'):icon('user-round')}</label>`;}).join('')||'<p class="sq-note">일치하는 대상이 없습니다. 정확한 사번 또는 부서 이름·코드를 확인해 주세요.</p>'}</div>`;
+}
+function renderGrantManager(s){
+ if(!grantLive(s))return;
+ const snap=s.snapshot||{users:[],departments:[]},count=snap.users.length+snap.departments.length;
+ $('#sq-dialog-body').innerHTML=`<section class="ws-grant-manager"><div class="ws-grant-intro"><span>${icon('shield-check')}</span><div><strong>함께 사용할 동료를 추가하세요.</strong><p>개인 또는 부서에 조회·다운로드 권한을 부여합니다. 등록자와 관리자는 기본으로 조회할 수 있습니다.</p></div></div>${!getItem(s.tool)?.approval?'<p class="ws-grant-info">현재 전체 공개된 기능입니다. 아래 설정은 ‘승인 후 조회’를 사용하는 동안 적용됩니다.</p>':''}<div class="ws-segment ws-grant-modes" role="group" aria-label="권한 추가 방식">${button('grant-mode',icon('users')+' 사번으로 추가','',`data-mode="users" aria-pressed="${s.mode==='users'}" ${s.busy?'disabled':''}`)}${button('grant-mode',icon('building-2')+' 팀·부서로 추가','',`data-mode="department" aria-pressed="${s.mode==='department'}" ${s.busy?'disabled':''}`)}</div><form data-grant-form="preview"><label class="sq-field"><span>${s.mode==='users'?'사번 여러 개':'팀명 또는 부서 코드'}</span>${s.mode==='users'?`<textarea name="value" data-grant-input rows="3" maxlength="12000" placeholder="1000001, 1000002&#10;1000003" required ${s.busy?'disabled':''}>${esc(s.value)}</textarea>`:`<input name="value" data-grant-input value="${esc(s.value)}" maxlength="100" placeholder="예: 융합기술팀 또는 D12345" required ${s.busy?'disabled':''}>`}<small>${s.mode==='users'?'쉼표·공백·줄바꿈으로 구분해 최대 100명까지 입력하세요. 중복 사번은 한 번만 반영합니다.':'로그인 이력이 있는 구성원의 SSO 부서를 검색합니다. 이름이 같으면 부서 코드를 확인해 선택하세요.'}</small></label><div class="ws-grant-check"><span>${s.mode==='users'?'확인 후 추가할 사람을 선택할 수 있어요.':'부서 코드를 우선 적용하며, 부서 변경은 다음 SSO 로그인 때 반영됩니다.'}</span><button class="sq-secondary" type="submit" ${s.busy?'disabled':''}>${s.busy?'처리 중…':'대상 확인'}</button></div></form><div id="ws-grant-preview">${grantResultRows(s)}</div><div class="ws-grant-save"><p id="ws-grant-notice" role="status">${esc(s.notice||'')}</p>${button('grant-save','선택한 대상 추가','sq-primary',`id="ws-grant-save" ${grantCanSave(s)?'':'disabled'}`)}</div><details class="ws-grant-existing" ${count?'open':''}><summary>현재 부여한 권한 <span>${count}</span>${icon('chevron-down')}</summary><p class="ws-grant-info">개인 권한과 부서 권한 중 하나라도 있으면 조회할 수 있습니다. 개인 권한을 회수해도 부서 권한이 있으면 유지됩니다.</p><h3>부서 권한 <small>${snap.departments.length}</small></h3>${snap.departments.map(row=>`<div class="ws-grant-member"><span class="ws-grant-member-icon">${icon('building-2')}</span><div><strong>${esc(row.name)}</strong><small>${row.code?'부서 코드 '+esc(row.code):'부서명 일치'} · 현재 ${row.memberCount}명</small></div>${button('grant-revoke-department','회수','sq-secondary',`data-rule="${esc(row.id)}" ${s.busy?'disabled':''}`)}</div>`).join('')||'<p class="sq-note">추가된 부서가 없습니다.</p>'}<h3>개인 권한 <small>${snap.users.length}</small></h3>${snap.users.map(row=>`<div class="ws-grant-member"><span class="ws-grant-member-icon">${icon('user-round')}</span><div><strong>${esc(row.name)} <small>${esc(row.id)}</small></strong><small>${esc(row.dept||'부서 정보 없음')} · ${esc(row.source||'직접 추가')}</small></div>${button('grant-revoke-user','회수','sq-secondary',`data-request="${esc(row.requestId)}" ${s.busy?'disabled':''}`)}</div>`).join('')||'<p class="sq-note">추가된 개인 권한이 없습니다.</p>'}</details></section>`;
+ mountIcons();updateGrantSaveButton(s);
+}
+function updateGrantSaveButton(s){const b=$('#ws-grant-save');if(b&&grantLive(s)){b.disabled=!grantCanSave(s);const count=grantSelected(s).length;b.textContent=s.busy?'처리 중…':count?`선택한 ${count}${s.mode==='users'?'명':'개 부서'} 추가`:'선택한 대상 추가';}}
+async function openGrantManager(id){
+ const tool=+id,x=getItem(tool);if(!x?.canManage)throw Error('등록자 또는 관리자만 권한을 변경할 수 있습니다.');
+ openModal('조회 권한 관리',x.name,'<p class="sq-note" role="status">권한 정보를 불러오고 있습니다.</p>');
+ const s=grantState={tool,mode:'users',value:'',preview:null,selected:new Set(),busy:false,notice:'',sequence:++grantSequence,dialogToken:runtime.detailLoadToken,snapshot:null};
+ try{const result=await requestAPI(`/api/tools/${tool}/grants`);if(!grantLive(s))return;s.snapshot=result;renderGrantManager(s);}catch(error){if(grantLive(s))throw error;}
+}
+async function previewGrantTargets(s){
+ if(!grantLive(s)||s.busy)return;
+ const sequence=++grantSequence,mode=s.mode,value=s.value.trim();s.sequence=sequence;s.preview=null;s.selected.clear();
+ if(!value){s.notice='사번 또는 부서를 입력해 주세요.';renderGrantManager(s);return;}
+ s.notice='대상을 확인하고 있습니다.';renderGrantManager(s);
+ try{const result=await requestAPI(`/api/tools/${s.tool}/grants/preview`,'POST',{mode,value});if(!grantLive(s)||s.sequence!==sequence)return;s.preview=result;s.selected=new Set(mode==='users'?(result.users||[]).map(x=>x.id):[]);s.notice='';renderGrantManager(s);}
+ catch(error){if(!grantLive(s)||s.sequence!==sequence)return;s.notice=error.message;renderGrantManager(s);}
+}
+async function reloadSavedGrants(s,message){
+ s.notice=message;
+ try{const snapshot=await requestAPI(`/api/tools/${s.tool}/grants`);if(grantLive(s))s.snapshot=snapshot;await refresh();}
+ catch(error){if(grantLive(s))s.notice=message+' 목록을 갱신하지 못했습니다. 권한 창을 다시 열어 현재 반영 여부를 확인해 주세요.';}
+}
+async function saveGrantTargets(){
+ const s=grantState;if(!s||!grantLive(s)||!grantCanSave(s))return;
+ const selected=grantSelected(s);s.busy=true;s.notice='권한을 추가하고 있습니다.';renderGrantManager(s);
+ try{
+  const result=await requestAPI(`/api/tools/${s.tool}/grants${s.mode==='department'?'/departments':''}`,'POST',s.mode==='users'?{users:selected.map(x=>x.id)}:{departments:selected.map(x=>({code:x.code,name:x.name})),expectedRevision:s.snapshot.revision});
+  if(!grantLive(s))return;
+  const failed=result.failed||[],saved=(result.saved||[]).length,existing=(result.alreadyGranted||[]).length;
+  let message=s.mode==='users'?`${saved}명 추가${existing?`, ${existing}명은 이미 권한이 있습니다`:''}.`:`${selected.length}개 부서 권한을 적용했습니다.`;
+  if(failed.length){const ids=new Set(failed.map(x=>x.id));s.preview={mode:'users',users:selected.filter(x=>ids.has(x.id)),unknown:[]};s.selected=ids;message+=` ${failed.length}명은 저장 결과를 확인하지 못했습니다: ${failed.map(x=>x.id).join(', ')}. 현재 권한 목록을 확인한 뒤 이 대상만 다시 추가하세요.`;}
+  else{s.preview=null;s.selected.clear();s.value='';}
+  await reloadSavedGrants(s,message);
+ }catch(error){if(grantLive(s))s.notice=error.uncertain?'서버 응답을 확인하지 못했습니다. 권한 창을 다시 열어 반영 여부를 확인한 뒤 재시도해 주세요.':error.message;}
+ finally{s.busy=false;if(grantLive(s))renderGrantManager(s);}
+}
+async function revokeGrant(kind,id){
+ const s=grantState;if(!s||!grantLive(s)||s.busy)return;
+ ask(kind==='department'?'이 부서의 조회 권한을 회수할까요?':'이 개인의 조회 권한을 회수할까요?',kind==='department'?'이 부서의 구성원은 부서 권한으로 조회할 수 없게 됩니다. 별도로 받은 개인 권한은 유지됩니다.':'부서 권한이 있다면 개인 권한을 회수해도 조회할 수 있습니다.',async()=>{
+  if(!grantLive(s)||s.busy)return;s.busy=true;renderGrantManager(s);
+  try{await requestAPI(kind==='department'?`/api/tools/${s.tool}/grants/departments/${encodeURIComponent(id)}`:`/api/requests/${encodeURIComponent(id)}/decision`,kind==='department'?'DELETE':'POST',kind==='department'?{expectedRevision:s.snapshot.revision}:{status:'회수',reason:'권한 관리에서 직접 회수'});if(grantLive(s))await reloadSavedGrants(s,'권한을 회수했습니다.');}
+  catch(error){if(grantLive(s))s.notice=error.uncertain?'서버 응답을 확인하지 못했습니다. 권한 창을 다시 열어 회수 여부를 확인해 주세요.':error.message;}
+  finally{s.busy=false;if(grantLive(s))renderGrantManager(s);}
+ },'권한 회수');
+}
+actions['grant-users']=b=>openGrantManager(b.dataset.id);
+actions['grant-mode']=b=>{const s=grantState;if(!s||s.busy||!grantLive(s))return;s.mode=b.dataset.mode;s.value='';s.preview=null;s.selected.clear();s.notice='';s.sequence=++grantSequence;renderGrantManager(s);};
+actions['grant-save']=saveGrantTargets;
+actions['grant-revoke-department']=b=>revokeGrant('department',b.dataset.rule);
+actions['grant-revoke-user']=b=>revokeGrant('user',b.dataset.request);
+actions['grant-tools']=()=>{const rows=items.filter(x=>!x.deleted&&x.canManage);openModal('기능별 권한 설정','권한 관리',`<div class="ws-grant-tool-list">${rows.map(x=>`<button class="ws-row ws-click" data-action="grant-users" data-id="${x.id}"><span class="sq-tool-icon" data-type="${esc(x.type)}">${icon(x.icon)}</span><span class="ws-row-main"><strong>${esc(x.name)}</strong><span>${esc(x.org)} · ${x.approval?'승인 후 조회':'전체 공개'}</span></span>${icon('chevron-right')}</button>`).join('')||blank('package-open','등록한 기능이 없습니다.','먼저 기능을 등록해 주세요.')}</div>`);};
+root.addEventListener('submit',e=>{if(!e.target.matches('[data-grant-form="preview"]'))return;e.preventDefault();e.stopImmediatePropagation();const s=grantState;if(s)previewGrantTargets(s).catch(showError);},true);
+root.addEventListener('input',e=>{if(!e.target.matches('[data-grant-input]'))return;const s=grantState;if(!s||s.busy||!grantLive(s))return;s.value=e.target.value;s.sequence=++grantSequence;s.preview=null;s.selected.clear();s.notice='';$('#ws-grant-preview').innerHTML='';$('#ws-grant-notice').textContent='';updateGrantSaveButton(s);});
+root.addEventListener('change',e=>{if(!e.target.matches('[data-grant-select]'))return;const s=grantState;if(!s||s.busy||!grantLive(s))return;const key=e.target.dataset.grantSelect;e.target.checked?s.selected.add(key):s.selected.delete(key);updateGrantSaveButton(s);});
 
 // END WORKSPACE EXTENSION
 refresh().catch(showError);setInterval(()=>{if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);},300000);

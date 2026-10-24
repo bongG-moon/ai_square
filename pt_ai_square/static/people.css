@@ -85,3 +85,64 @@
 }
 @media(max-width:400px){#square-app .sq-workflow-count{display:none}}
 @media(prefers-reduced-motion:reduce){#square-app .sq-key-link,#square-app .sq-workflow-heading,#square-app .sq-workflow-step,#square-app .sq-workflow-chevron{transition:none}#square-app .sq-key-link{transform:none!important}}
+
+/* Shared explanation layout: a compact formula, readable rules and optional detail. */
+#square-app #sq-dialog:has(.sq-ranking-guide){width:min(740px,calc(100% - 40px));background:rgba(253,253,254,.97);box-shadow:0 24px 90px #18213826,inset 0 1px 0 white}
+#square-app #sq-dialog:has(.sq-ranking-guide) .sq-modal-head{padding:24px 28px 20px;border-bottom:1px solid #e9eaf0;background:#ffffffc9}
+#square-app #sq-dialog:has(.sq-ranking-guide) .sq-modal-head h2{font-size:23px;font-weight:650;letter-spacing:-.015em;line-height:1.4}
+#square-app #sq-dialog:has(.sq-ranking-guide) .sq-kicker{font-size:11px;color:var(--sq-muted);margin-bottom:6px}
+#square-app #sq-dialog:has(.sq-ranking-guide) .sq-modal-head>.sq-icon{width:34px;height:34px;background:#f0f1f5}
+#square-app #sq-dialog:has(.sq-ranking-guide) #sq-dialog-body{padding:22px 28px 24px}
+#square-app .sq-ranking-intro{font-size:13px;color:var(--sq-muted);line-height:1.75;margin-bottom:20px}
+#square-app .sq-score-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#square-app .sq-score-grid-three{grid-template-columns:repeat(3,minmax(0,1fr))}
+#square-app .sq-score-tile{display:grid;grid-template-columns:32px 1fr;align-items:center;gap:10px;padding:18px;border:1px solid #e7eaf1;border-radius:17px;background:#ffffffc9;box-shadow:0 4px 12px #17213804,inset 0 1px 0 #fff}
+#square-app .sq-score-symbol{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;color:var(--sq-blue);background:#eef2fc}
+#square-app .sq-score-symbol svg{width:17px;height:17px}
+#square-app .sq-score-label{font-size:12px;font-weight:550;color:#424650}
+#square-app .sq-score-tile>strong{grid-column:1/-1;color:var(--sq-blue);font-family:var(--sq-en);font-size:30px;line-height:1.2;letter-spacing:-.035em;font-weight:600;margin-top:2px}
+#square-app .sq-score-tile>strong small{font-family:var(--sq-ko);font-size:12px;letter-spacing:0;color:var(--sq-muted);font-weight:400;margin-left:5px}
+#square-app .sq-score-unit{grid-column:1/-1;font-size:11px;color:var(--sq-muted);margin-top:-5px}
+#square-app .sq-ranking-periods{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+#square-app .sq-ranking-periods>div{display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid #e9ebf1;border-radius:12px;background:#f5f6f8}
+#square-app .sq-ranking-periods>div.is-current{border-color:#dce4f8;background:#f0f4fd}
+#square-app .sq-ranking-periods strong{font-size:12px;font-weight:600;color:#555b67;white-space:nowrap}
+#square-app .sq-ranking-periods .is-current strong{color:var(--sq-blue)}
+#square-app .sq-ranking-periods span,#square-app .sq-ranking-period-note{font-size:11px;color:var(--sq-muted)}
+#square-app .sq-ranking-period-note{margin:11px 0 0;text-align:right}
+#square-app .sq-ranking-rules{margin-top:24px}
+#square-app .sq-ranking-rules h3{font-size:13px;font-weight:600;margin-bottom:14px}
+#square-app .sq-ranking-rules ul{margin:0;padding:0;list-style:none;display:grid;gap:15px}
+#square-app .sq-ranking-rules li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px}
+#square-app .sq-ranking-rules li>span{display:grid;place-items:center;height:22px;border-radius:50%;background:#f0f3fa;color:#6d83b7}
+#square-app .sq-ranking-rules li>span svg{width:13px;height:13px}
+#square-app .sq-ranking-rules strong{font-size:12px;font-weight:550;line-height:1.6}
+#square-app .sq-ranking-rules p{font-size:12px;line-height:1.7;color:var(--sq-muted);margin-top:3px}
+#square-app .sq-ranking-details{margin-top:22px;border:1px solid #e8eaf0;border-radius:12px;background:#f7f8fa;overflow:hidden}
+#square-app .sq-ranking-details summary{display:flex;align-items:center;justify-content:space-between;list-style:none;cursor:pointer;gap:10px;font-size:12px;color:#59606e;padding:13px 15px;transition:background .18s ease}
+#square-app .sq-ranking-details summary::-webkit-details-marker{display:none}
+#square-app .sq-ranking-details summary>span{display:grid;place-items:center;transition:transform .2s ease}
+#square-app .sq-ranking-details summary svg{width:15px;height:15px}
+#square-app .sq-ranking-details[open] summary>span{transform:rotate(180deg)}
+#square-app .sq-ranking-details summary:focus-visible{outline:2px solid var(--sq-blue);outline-offset:-3px;border-radius:10px}
+#square-app .sq-ranking-details ul{margin:0;padding:0 19px 16px 31px;color:var(--sq-muted);display:grid;gap:8px;font-size:12px;line-height:1.75}
+#square-app .sq-ranking-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:22px;padding-top:18px;border-top:1px solid #e8eaf0}
+#square-app .sq-ranking-footer>span{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--sq-muted)}
+#square-app .sq-ranking-footer>span svg{width:13px;height:13px}
+#square-app .sq-ranking-footer .sq-secondary{padding:9px 15px;font-size:12px;min-height:38px;border:1px solid #e2e7f1;background:#f0f3fa;color:var(--sq-blue);white-space:nowrap}
+@media(hover:hover){#square-app .sq-ranking-details summary:hover{background:#eef1f7}}
+@media(max-width:560px){
+ #square-app #sq-dialog:has(.sq-ranking-guide){width:calc(100% - 24px)}
+ #square-app #sq-dialog:has(.sq-ranking-guide) .sq-modal-head{padding:20px 20px 16px}
+ #square-app #sq-dialog:has(.sq-ranking-guide) .sq-modal-head h2{font-size:20px}
+ #square-app #sq-dialog:has(.sq-ranking-guide) #sq-dialog-body{padding:18px 20px 20px}
+ #square-app .sq-score-grid{gap:8px}
+ #square-app .sq-score-tile{padding:13px;grid-template-columns:1fr;gap:8px}
+ #square-app .sq-score-tile>strong{font-size:27px}
+ #square-app .sq-score-unit{font-size:10px;line-height:1.5}
+ #square-app .sq-ranking-periods{gap:8px}
+ #square-app .sq-ranking-periods>div{display:grid;gap:2px;padding:10px 12px}
+ #square-app .sq-ranking-footer{flex-wrap:wrap;gap:12px}
+ #square-app .sq-ranking-footer .sq-secondary{margin-left:auto}
+}
+@media(prefers-reduced-motion:reduce){#square-app .sq-ranking-details summary,#square-app .sq-ranking-details summary>span{transition:none}}

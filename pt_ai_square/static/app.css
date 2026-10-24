@@ -1636,7 +1636,7 @@ html,body{margin:0;padding:0;min-height:100%;background:#f5f5f7;color-scheme:lig
  #square-app :is(.sq-secondary,.sq-icon,.sq-auto):not(:disabled):hover{background:#e8e8ed}
  #square-app .sq-search>button:hover{background:#e8e8ed}
  #square-app .sq-link:hover svg[data-lucide="chevron-right"],#square-app .sq-link:hover svg[data-lucide="arrow-right"]{transform:translateX(3px)}
- #square-app .sq-link:hover svg[data-lucide="arrow-up-right"]{transform:translate(2px,-2px)}
+ #square-app .sq-link:hover svg:is([data-lucide="book-open"],[data-lucide="app-window"]){transform:translateY(-1px)}
  #square-app nav :is(button,a):not([aria-current=page]):hover{color:#285e9d}
  #square-app nav :is(button,a):not([aria-current=page]):hover::after{transform:scaleX(.65)}
  #square-app :is(.sq-platforms button,.sq-type-chips button,.sq-rank-pages button):not([aria-pressed=true]):not(:disabled):hover{background:#ffffffd9;color:#285e9d;transform:translateY(-1px)}

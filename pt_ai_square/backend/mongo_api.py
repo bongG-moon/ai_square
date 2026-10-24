@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from flask import Blueprint, current_app, g, jsonify, request, send_file, session
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound, Conflict
 from pymongo import ReturnDocument
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from .storage import db, next_id, audit_event, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
 from .request_files import stage_attachments, attachment_path, public_attachments, cleanup_unreferenced_attachments
@@ -17,6 +17,7 @@ from .storage_capacity import snapshot as storage_snapshot
 from . import post_commit
 from . import permanent_delete
 from .install_profiles import normalize_install_profile
+from . import department_access
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -35,9 +36,16 @@ def tool(tid, manage=False, trash=False):
 
 def allowed(t, uid=None):
     uid = uid or g.user['id']
+    profile = g.user if uid == g.user['id'] else db().users.find_one({'_id': uid})
+    if not profile or not profile.get('enabled', True): return False
     if uid == t['owner'] or uid in all_admin_ids(): return True
     if not t['data'].get('approval'): return True
-    return bool(db().access.find_one({'tool': t['_id'], 'user': uid, 'granted': True}))
+    if db().access.find_one({'tool': t['_id'], 'user': uid, 'granted': True}): return True
+    if not t.get('departmentGrants'): return False
+    # Read exact stored SSO fields, not the editable catalog organization alias.
+    profile = db().users.find_one({'_id': uid, 'enabled': True})
+    return bool(profile and any(department_access.group_matches(rule, profile)
+                               for rule in t['departmentGrants']))
 
 def usable(t):
     if not allowed(t): raise Forbidden('조회 권한이 필요합니다. 권한을 신청해 주세요.')
@@ -416,13 +424,92 @@ def decide(rid):
 
 @api.post('/api/tools/<int:tid>/grants')
 def grant(tid):
-    t=tool(tid,True);uid=text(payload(),'user',100)
-    if not db().users.find_one({'_id':uid,'enabled':True}): raise BadRequest('로그인 이력이 있는 사용자를 선택해 주세요.')
+    t=grant_tool(tid);raw=payload()
+    ids=department_access.employee_ids(raw.get('users') if 'users' in raw else [text(raw,'user',100)])
+    _,unknown=department_access.resolve_employees(ids)
+    if unknown: raise BadRequest('확인할 수 없는 사번이 있습니다. 로그인 이력이 있는 활성 사용자만 선택해 주세요.')
+    saved=[];already=[];failed=[];pending=False
+    for uid in ids:
+        try:
+            old=db().access.find_one({'tool':tid,'user':uid,'granted':True})
+            if old:
+                already.append(uid)
+                continue
+            job_pending=grant_employee(t,uid)
+            saved.append(uid);pending=job_pending or pending
+        except PyMongoError as error:
+            # Some members may already be saved. Never label the whole batch
+            # a success or roll back independently committed grants.
+            post_commit.log_deferred('bulk-grant-result-uncertain',error)
+            failed.append({'id':uid,'error':'저장 결과를 확인하지 못했습니다. 권한 목록을 새로 확인한 뒤 다시 시도해 주세요.'})
+    return jsonify(ok=not failed,saved=saved,alreadyGranted=already,failed=failed,pending=pending),207 if failed else 200
+
+def grant_tool(tid):
+    # Defense in depth in addition to the API KEY endpoint allowlist.
+    if getattr(g,'api_token_id',None) or request.headers.get('Authorization'):
+        raise Forbidden('연결 KEY로는 조회 권한을 변경하거나 권한 목록을 볼 수 없습니다.')
+    return tool(tid,True)
+
+def grant_employee(t,uid):
+    tid=t['_id']
     e=event([uid],f'{t["data"]["name"]} 조회 권한이 부여되었습니다.',{'type':'tool','id':tid},'approval')
     e.update(audit=audit_event(f'도구 {tid} 사용자 {uid} 직접 승인')['audit'],subscription={'tool':tid,'user':uid})
     saved=db().access.find_one_and_update({'tool':tid,'user':uid},{'$setOnInsert':{'_id':f'{tid}:{uid}','reason':''},'$set':{'status':'승인','granted':True,'source':'직접 추가','decision':'','decidedBy':g.user['id'],'updated':time.time()},'$push':{'outbox':e,'history':{'status':'직접 승인','actor':g.user['id'],'at':time.time()}}},upsert=True,return_document=ReturnDocument.AFTER)
     pending=cleanup_late_tool_write(tid)
-    return jsonify(ok=True,pending=deliver_pending('access',saved['_id']) or pending)
+    return deliver_pending('access',saved['_id']) or pending
+
+@api.get('/api/tools/<int:tid>/grants')
+def grants(tid):
+    t=grant_tool(tid);rows=[]
+    for access in db().access.find({'tool':tid,'granted':True}):
+        profile=db().users.find_one({'_id':access['user']})
+        user=department_access.employee(profile or {'_id':access['user']})
+        rows.append(dict(user,requestId=access['_id'],source=access.get('source','신청'),
+                         enabled=bool(profile and profile.get('enabled',True)),
+                         inheritedDepartments=[dict(id=rule['id'],name=rule['name'],code=rule['code'])
+                             for rule in t.get('departmentGrants',[])
+                             if profile and department_access.group_matches(rule,profile)]))
+    return jsonify(users=rows,departments=department_access.department_rules(t),revision=t['revision'])
+
+@api.post('/api/tools/<int:tid>/grants/preview')
+def preview_grants(tid):
+    grant_tool(tid);raw=payload();mode=raw.get('mode');value=text(raw,'value',12000)
+    if mode=='users':
+        users,unknown=department_access.resolve_employees(department_access.employee_ids(value))
+        return jsonify(mode=mode,users=users,unknown=unknown,count=len(users))
+    if mode!='department': raise BadRequest('사번 또는 부서 검색을 선택해 주세요.')
+    if len(value)>200: raise BadRequest('부서 이름 또는 코드는 200자 이내로 입력해 주세요.')
+    term=value.casefold()
+    rows=[row for row in department_access.departments() if term in row['name'].casefold() or term in row['code'].casefold()]
+    return jsonify(mode=mode,departments=rows[:30],count=len(rows),truncated=len(rows)>30)
+
+@api.post('/api/tools/<int:tid>/grants/departments')
+def grant_departments(tid):
+    t=grant_tool(tid);raw=payload()
+    if 'expectedRevision' in raw: check_revision(t,raw)
+    selected=department_access.selected_departments(raw.get('departments'))
+    existing={row['id']:row for row in t.get('departmentGrants',[])}
+    added=[row for row in selected if row['id'] not in existing]
+    if len(existing)+len(added)>department_access.MAX_DEPARTMENTS:
+        raise BadRequest('한 도구에는 최대 50개 부서의 권한을 설정할 수 있습니다.')
+    pending=False
+    if added:
+        rules=[*existing.values(),*added]
+        pending=cas(t,{'$set':{'departmentGrants':rules}},f'도구 {tid} 부서 조회 권한 {len(added)}개 추가')
+        t=dict(t,departmentGrants=rules,revision=t['revision']+1)
+    # No post-commit reads are required to report the committed rule.
+    return jsonify(ok=True,departments=[dict(row,memberCount=None) for row in t.get('departmentGrants',[])],revision=t['revision'],pending=pending)
+
+@api.delete('/api/tools/<int:tid>/grants/departments/<rule_id>')
+def revoke_department(tid,rule_id):
+    t=grant_tool(tid);raw=request.get_json(silent=True) or {}
+    if not isinstance(raw,dict): raise BadRequest('요청 형식을 확인해 주세요.')
+    if 'expectedRevision' in raw: check_revision(t,raw)
+    rules=[row for row in t.get('departmentGrants',[]) if row['id']!=rule_id]
+    if len(rules)==len(t.get('departmentGrants',[])):
+        return jsonify(ok=True,revision=t['revision'],pending=False)
+    pending=cas(t,{'$set':{'departmentGrants':rules}},f'도구 {tid} 부서 조회 권한 회수')
+    return jsonify(ok=True,revision=t['revision']+1,pending=pending)
 
 @api.post('/api/tools/<int:tid>/comments')
 def comment(tid):

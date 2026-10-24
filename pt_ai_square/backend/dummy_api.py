@@ -60,6 +60,11 @@ def install_dummy(app):
             return jsonify(files=[dict(row,created=now-i*86400) for i,row in enumerate(rows)],canManage=admin)
         if path == 'deletions':
             return jsonify(jobs=[])
+        if path.startswith('tools/') and path.endswith('/grants'):
+            parts=path.split('/')
+            item=next((x for x in items if len(parts)==3 and str(x['id'])==parts[1] and x['canManage']),None)
+            if not item: raise NotFound()
+            return jsonify(users=[],departments=[],revision=item['revision'],dummy=True)
         if path.startswith('ax-workspace/') and path.endswith('/download'):
             return jsonify(error=MESSAGE,dummy=True),409
         responses={'ideas':dict(ideas=fixture['ideas']), 'notifications':dict(notifications=[],nextCursor=None,unread=0), 'admins':dict(admins=[dict(id=user['id'],name=user['name'],base=True)] if admin else []), 'activity':dict(events=[],nextCursor=None,backend='dummy'), 'storage/candidates':dict(candidates=[]), 'storage/limits':dict(storage=bootstrap['storage'])}

@@ -248,28 +248,124 @@
 @media(max-width:700px){#square-app .ws-capacity-cards{grid-template-columns:1fr;gap:10px}#square-app .ws-capacity-cards article{padding:18px}#square-app .ws-capacity-cards strong{font-size:25px}#square-app .ws-capacity-choices{grid-template-columns:1fr}#square-app .ws-capacity-meter>div:first-child{flex-direction:column}}
 
 /* AX Workspace uses the same neutral glass and primary actions as the catalog. */
-#square-app .ws-ax-intro{display:flex;align-items:center;gap:22px;padding:26px 28px;margin-bottom:26px;border:1px solid #ffffff;border-radius:24px;background:#ffffffbb;backdrop-filter:blur(18px);box-shadow:0 10px 28px #22223a06}
+#square-app .ws-ax-intro{display:flex;align-items:center;gap:16px;padding:20px 24px;margin-bottom:20px;border:1px solid #ffffff;border-radius:20px;background:#ffffffbb;backdrop-filter:blur(18px);box-shadow:0 10px 28px #22223a06}
 #square-app .ws-ax-intro>div{flex:1;min-width:0}
-#square-app .ws-ax-intro h2{font-size:22px;font-weight:600;letter-spacing:-.6px;margin:0 0 8px}
-#square-app .ws-ax-intro p{font-size:14px;line-height:1.7;color:var(--sq-muted);margin:0}
-#square-app .ws-ax-symbol{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;flex-shrink:0;border-radius:17px;background:#edf2ff;color:var(--sq-blue,#4873e2)}
-#square-app .ws-ax-symbol svg{width:25px;height:25px}
-#square-app .ws-ax-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+#square-app .ws-ax-intro h2{font-size:19px;font-weight:600;letter-spacing:-.4px;margin:0 0 5px}
+#square-app .ws-ax-intro p{font-size:13px;line-height:1.65;color:var(--sq-muted);margin:0}
+/* The shared Lucide rule uses --icon-size with !important. Set it on this tile. */
+#square-app .ws-ax-symbol{--icon-size:28px;display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;flex-shrink:0;border-radius:13px;background:#edf2ff;color:var(--sq-blue,#4873e2)}
+#square-app .ws-ax-symbol svg{width:28px;height:28px;stroke-width:1.65}
+#square-app .ws-ax-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
 #square-app .ws-ax-grid>.ws-empty{grid-column:1/-1}
-#square-app .ws-ax-card{display:flex;flex-direction:column;min-width:0;padding:26px;background:#ffffffce;border:1px solid #fff;border-radius:24px;box-shadow:0 8px 24px #22223a08;backdrop-filter:blur(18px);transition:transform .25s,box-shadow .25s}
-#square-app .ws-ax-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
-#square-app .ws-ax-card h2{font-size:21px;line-height:1.4;font-weight:600;margin:0 0 12px;overflow-wrap:anywhere}
-#square-app .ws-ax-card>p{font-size:13px;line-height:1.8;color:var(--sq-muted);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 22px}
-#square-app .ws-ax-file{margin-top:auto;padding:15px 0;border-top:1px solid #e9e9ef}
+#square-app .ws-ax-card{display:flex;flex-direction:column;min-width:0;padding:20px;background:#ffffffce;border:1px solid #fff;border-radius:20px;box-shadow:0 8px 24px #22223a08;backdrop-filter:blur(18px);transition:transform .25s,box-shadow .25s}
+#square-app .ws-ax-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+#square-app .ws-ax-card h2{font-size:18px;line-height:1.4;font-weight:600;margin:0 0 8px;overflow-wrap:anywhere}
+#square-app .ws-ax-card>p{font-size:13px;line-height:1.6;color:var(--sq-muted);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 14px}
+#square-app .ws-ax-file{margin-top:auto;padding:11px 0;border-top:1px solid #e9e9ef}
 #square-app .ws-ax-file strong{display:block;overflow-wrap:anywhere;font-weight:500;font-size:12px}
-#square-app .ws-ax-file span,#square-app .ws-ax-count{display:block;font-size:12px;color:var(--sq-muted);margin-top:6px}
-#square-app .ws-ax-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px}
+#square-app .ws-ax-file span,#square-app .ws-ax-count{display:block;font-size:12px;color:var(--sq-muted);margin-top:4px}
+#square-app .ws-ax-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:8px;flex-wrap:wrap}
 #square-app .ws-ax-card-footer small{font-size:11px;color:var(--sq-muted)}
-#square-app .ws-ax-card-footer a{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;font-size:13px}
+#square-app .ws-ax-card-footer a{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 14px;text-decoration:none;white-space:nowrap;font-size:13px;margin-left:auto}
+#square-app .ws-ax-intro>.sq-primary{min-height:38px;padding:8px 15px;font-size:13px}
+#square-app .ws-ax-intro+.ws-board-head{margin-bottom:18px}
 #square-app #sq-ax-form>.ws-upload-area{margin-top:24px}
 #square-app #sq-ax-form>.sq-note{margin-top:18px}
 #square-app .ws-ax-filters{max-width:100%;overflow-x:auto;flex-shrink:1}
 #square-app .ws-ax-filters button{white-space:nowrap;flex-shrink:0}
 @media(hover:hover) and (prefers-reduced-motion:no-preference){#square-app .ws-ax-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px #22223a12}}
 @media(max-width:1100px){#square-app .ws-ax-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){#square-app .ws-ax-grid{grid-template-columns:1fr}#square-app .ws-ax-intro{flex-wrap:wrap;padding:22px;gap:16px}#square-app .ws-ax-intro h2{font-size:18px}#square-app .ws-ax-intro p{font-size:12px}#square-app .ws-ax-intro>.sq-primary{margin-left:auto}#square-app .ws-ax-card{padding:22px}#square-app .ws-ax-count{display:none}}
+@media(max-width:700px){#square-app .ws-ax-grid{grid-template-columns:1fr}#square-app .ws-ax-intro{flex-wrap:wrap;padding:18px;gap:12px}#square-app .ws-ax-intro h2{font-size:18px}#square-app .ws-ax-intro p{font-size:12px}#square-app .ws-ax-intro>.sq-primary{margin-left:auto}#square-app .ws-ax-card{padding:18px}#square-app .ws-ax-count{display:none}}
+
+/* Compact management surfaces. The direct summary is present only in manage/admin;
+   dialogs, the catalog, requests and AX Workspace retain their existing styles. */
+#square-app #sq-workspace:has(>.ws-summary){padding-bottom:16px}
+#square-app #sq-workspace:has(>.ws-summary)>.ws-summary{gap:18px;padding:0 4px 20px;align-items:center}
+#square-app #sq-workspace:has(>.ws-summary) .ws-summary>div{padding-left:20px;border-color:#dedfe6}
+#square-app #sq-workspace:has(>.ws-summary) .ws-summary>div:first-child{padding-left:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-summary span{font-size:12px;margin-bottom:5px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-summary strong{font-size:28px;line-height:1.2;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+#square-app #sq-workspace:has(>.ws-summary) .ws-summary strong small{font-size:12px;margin-left:5px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-surface{padding:0 22px 16px;border-radius:22px;background:rgba(255,255,255,.83);box-shadow:0 7px 28px #20263308,inset 0 1px 0 #fff}
+#square-app #sq-workspace:has(>.ws-summary) .ws-tabs{margin:0 -22px;padding:8px 22px 0;gap:4px;border-bottom-color:#e8e9ee}
+#square-app #sq-workspace:has(>.ws-summary) .ws-tabs button{min-height:43px;padding:10px 14px;border-radius:10px 10px 0 0;font-size:13px;font-weight:500;line-height:1.5;color:#7a7d87}
+#square-app #sq-workspace:has(>.ws-summary) .ws-tabs button[aria-pressed=true]{color:var(--sq-blue);background:#f5f7fc;border-bottom-color:var(--sq-blue);font-weight:600}
+#square-app #sq-workspace:has(>.ws-summary) .ws-panel-head{gap:16px;padding:20px 0 13px;min-width:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-panel-head>div{min-width:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-panel-head h2{font-size:19px;line-height:1.4;letter-spacing:0;margin:0 0 4px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-panel-head h3{font-size:16px;line-height:1.4;letter-spacing:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-panel-head p{font-size:12px;line-height:1.6;color:#7b7d86}
+#square-app #sq-workspace:has(>.ws-summary) .ws-list{display:grid;gap:0;margin:0;padding:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row{gap:12px;min-height:72px;padding:12px 0;margin:0;border-color:#edeef2;align-items:center}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row .sq-tool-icon{width:38px;height:38px;border-radius:12px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row .sq-tool-icon svg{width:19px;height:19px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row-main strong{font-size:15px;line-height:1.45;font-weight:600}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row-main p,#square-app #sq-workspace:has(>.ws-summary) .ws-row-main>span{font-size:12px;line-height:1.55;margin-top:4px;color:#81838c}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row-main small{font-size:12px;color:#92949d}
+#square-app #sq-workspace:has(>.ws-summary) .ws-row-main .ws-message{font-size:12px;line-height:1.6;color:#60646f}
+#square-app #sq-workspace:has(>.ws-summary) .ws-avatar{width:36px;height:36px;font-size:13px;background:#f5f6fa;border-color:#e8eaf0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-badge{font-size:11px;line-height:1.2;font-weight:500;border-radius:99px;padding:6px 9px}
+#square-app #sq-workspace:has(>.ws-summary) .sq-row-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions button,.ws-row>.sq-secondary,.ws-row>.sq-primary,.ws-row>.sq-icon,.ws-panel-head>.sq-primary,.ws-panel-head>.sq-secondary,.ws-panel-head>.sq-link,.ws-summary-action>.sq-primary){min-height:38px;padding:8px 13px;border:1px solid #e4e7ee;border-radius:11px;font-size:13px;line-height:1.5;font-weight:500;white-space:nowrap;box-sizing:border-box;transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .sq-link,.sq-row-actions .sq-secondary,.ws-row>.sq-secondary,.ws-panel-head>.sq-secondary,.ws-panel-head>.sq-link){color:#52617c;background:#f6f7fa;text-decoration:none}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .sq-primary,.ws-row>.sq-primary,.ws-panel-head>.sq-primary,.ws-summary-action>.sq-primary){color:#fff;background:var(--sq-blue);border-color:transparent}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .sq-icon,.ws-row>.sq-icon){width:38px;height:38px;min-width:38px;padding:0;background:#f7f7f9;color:#89909e;border-radius:11px}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions button,.ws-row>button,.ws-panel-head>button,.ws-summary-action>button) svg{width:16px;height:16px}
+#square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions button,.ws-row>button,.ws-panel-head>button):focus-visible{outline:3px solid #4972df60;outline-offset:3px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-danger{color:#9d7076!important}
+#square-app #sq-workspace:has(>.ws-summary) .ws-empty{padding:34px 20px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-empty>svg{width:28px;height:28px;margin-bottom:12px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-empty h3{font-size:16px;margin-bottom:7px;letter-spacing:0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-empty p{font-size:12px;line-height:1.6}
+#square-app #sq-workspace:has(>.ws-summary) .ws-segment{padding:3px;border-radius:11px;gap:2px;background:#f4f5f8;border-color:#e6e8ef}
+#square-app #sq-workspace:has(>.ws-summary) .ws-segment button{min-height:36px;padding:7px 12px;font-size:12px;line-height:1.5;border-radius:8px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy{gap:18px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy section{padding:0 16px 4px;border-radius:16px;border-color:#e8eaf0;background:#ffffffa8}
+#square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy .ws-panel-head{padding:14px 0 10px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy .ws-row{min-height:65px;padding:10px 0}
+#square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy .ws-row-main strong{font-size:14px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-order{width:18px;font-size:11px;color:#a0a4b0;font-variant-numeric:tabular-nums}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-cards{gap:12px;margin:4px 0 20px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-cards article{padding:18px;border-radius:16px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-cards strong{font-size:27px;margin:8px 0 4px}
+#square-app #sq-workspace:has(>.ws-summary) #sq-capacity-form{margin-top:22px;padding-top:20px}
+#square-app #sq-workspace:has(>.ws-summary) #sq-capacity-form legend{font-size:16px;margin-bottom:14px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-choices{gap:12px;margin-bottom:18px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-choices label{padding:15px;border-radius:13px}
+#square-app #sq-workspace:has(>.ws-summary) #sq-capacity-form .sq-form-grid{gap:16px}
+#square-app #sq-workspace:has(>.ws-summary) #sq-capacity-form .sq-actions{margin-top:18px}
+#square-app #sq-workspace:has(>.ws-summary) .ws-capacity-foot{margin-top:20px;padding-top:16px}
+#square-app #sq-workspace:has(>.ws-summary) .sq-activity-list{gap:8px;margin:12px 0}
+#square-app #sq-workspace:has(>.ws-summary) .sq-activity-row{padding:12px 15px;border:1px solid #eceef3;background:#fafbfc;border-radius:12px}
+@media(hover:hover) and (pointer:fine){
+ #square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .sq-link,.sq-row-actions .sq-secondary,.ws-row>.sq-secondary,.ws-panel-head>.sq-secondary,.ws-panel-head>.sq-link):not(:disabled):hover{background:#edf1f8;border-color:#d8dfed;color:#3c5e9c;text-decoration:none;transform:none;box-shadow:0 2px 7px #25345306}
+ #square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .sq-primary,.ws-row>.sq-primary,.ws-panel-head>.sq-primary,.ws-summary-action>.sq-primary):not(:disabled):hover{background:#3e65cf;transform:none;box-shadow:0 3px 10px #29489b16}
+ #square-app #sq-workspace:has(>.ws-summary) :is(.sq-row-actions .ws-danger,.ws-row>.ws-danger):not(:disabled):hover{background:#fff3f3;border-color:#edd9dc;color:#ab4c59!important;transform:none;box-shadow:none}
+}
+@media(max-width:760px){
+ #square-app #sq-workspace:has(>.ws-summary)>.ws-summary{gap:14px 10px;padding:0 2px 16px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-summary>div{padding-left:12px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-summary strong{font-size:25px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-summary-action{padding-left:0;justify-content:flex-start}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-surface{padding:0 16px 12px;border-radius:19px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-tabs{margin:0 -16px;padding:7px 16px 0}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-tabs button{padding:9px 12px;font-size:13px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-panel-head{padding:17px 0 12px;gap:12px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:8px 11px;padding:13px 0}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row .sq-row-actions{grid-column:2/-1;width:auto;justify-content:flex-start;padding-top:3px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy .ws-row{grid-template-columns:18px minmax(0,1fr) auto}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy{gap:14px}
+}
+@media(max-width:480px){
+ #square-app #sq-workspace:has(>.ws-summary) .ws-panel-head h2{font-size:18px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row{grid-template-columns:34px minmax(0,1fr)}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row .sq-tool-icon{width:34px;height:34px;border-radius:11px}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row>.ws-badge{grid-column:2;justify-self:start}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row>:is(.sq-secondary,.sq-primary){grid-column:2;justify-self:start}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-row .sq-row-actions{grid-column:2;gap:5px}
+ #square-app #sq-workspace:has(>.ws-summary) .sq-row-actions button{padding:8px 10px}
+ #square-app #sq-workspace:has(>.ws-summary) .sq-row-actions .sq-icon{padding:0}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-taxonomy .ws-row{grid-template-columns:18px minmax(0,1fr) auto}
+ #square-app #sq-workspace:has(>.ws-summary) .ws-segment{width:100%;overflow-x:auto}
+}
+@media(prefers-reduced-motion:reduce){#square-app #sq-workspace:has(>.ws-summary) :is(button,.ws-row){transition:none}}
