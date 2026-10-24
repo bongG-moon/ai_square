@@ -13,6 +13,7 @@ local_access = Blueprint('local_access', __name__)
 READ_ENDPOINTS = {
     'local_access.search', 'api.details', 'api.manifest', 'api.version_check',
     'api.deployment_info', 'api.download', 'local_access.options', 'local_access.publish_targets',
+    'local_access.integration_me', 'publish_drafts.details',
 }
 
 
@@ -67,10 +68,11 @@ def token_user():
         raise Unauthorized('인증키가 만료·취소되었거나 사용자가 비활성 상태입니다.')
     read = request.method in {'GET', 'HEAD'} and request.endpoint in READ_ENDPOINTS
     publish = (row.get('scope', 'read') == 'publish' and request.method == 'POST'
-               and request.endpoint in {'api.publish', 'api.inspect_package'})
+               and request.endpoint in {'api.publish', 'api.inspect_package', 'publish_drafts.create', 'publish_drafts.commit'})
     if not (read or publish):
         raise Forbidden('이 인증키에 허용되지 않은 작업입니다.')
     g.api_token_id = row['id']
+    g.api_token_scope = row.get('scope', 'read')
     return public_user(user)
 
 
@@ -212,44 +214,39 @@ def options():
 
 @local_access.get('/api/publish-targets')
 def publish_targets():
-    from .mongo_api import manager
     package_id = request.args.get('packageId', '')
-    if not re.fullmatch(r'[a-z][a-z0-9.-]{2,79}', package_id):
+    q = request.args.get('q', '').strip()
+    if package_id and not re.fullmatch(r'[a-z][a-z0-9.-]{2,79}', package_id):
         raise BadRequest('packageId를 확인하세요.')
-    rows = db().tools.find({'deleted': {'$ne': True}, 'versions.package.packageId': package_id})
+    if len(q) > 200:
+        raise BadRequest('검색어는 200자 이내로 입력하세요.')
+    query = {'deleted': {'$ne': True}, 'purge': {'$exists': False}, 'owner': g.user['id']}
+    if package_id:
+        # A declared identity is stronger than a human-readable name, which can
+        # change between releases. Only fall back to similarity without an ID.
+        query['versions.package.packageId'] = package_id
+    elif q:
+        query['$or'] = [{'data.' + key: {'$regex': re.escape(q), '$options': 'i'}}
+                        for key in ('name', 'desc', 'workTags')]
+    rows = db().tools.find(query).sort('_id', -1).limit(20)
     return jsonify(items=[dict(id=t['_id'], name=t['data']['name'], revision=t['revision'])
-                          for t in rows if manager(t)])
+                          for t in rows])
 
 
 @local_access.get('/api/catalog')
 def search():
-    from .mongo_api import allowed, resolved, TYPE_ALIASES
-    q = request.args.get('q', '').strip()
-    kind = request.args.get('type', '')
-    if len(q) > 200:
-        raise BadRequest('검색어는 200자 이내로 입력하세요.')
-    try:
-        limit = int(request.args.get('limit', '20'))
-        offset = int(request.args.get('offset', '0'))
-    except ValueError:
-        raise BadRequest('limit와 offset은 정수입니다.')
-    if not 1 <= limit <= 100 or not 0 <= offset <= 100000:
-        raise BadRequest('limit는 1~100, offset은 0~100000입니다.')
-    query = {'deleted': {'$ne': True}}
-    if q:
-        query['$or'] = [{'data.' + key: {'$regex': re.escape(q), '$options': 'i'}} for key in ['name', 'desc', 'workTags', 'category']]
-    if kind:
-        kind = TYPE_ALIASES.get(kind, kind)
-        if kind not in {'MCP/Tool', 'Skill', '플러그인/하네스'}:
-            raise BadRequest('도구 유형을 확인하세요.')
-        query['data.type'] = {'$in': [kind] + [k for k, v in TYPE_ALIASES.items() if v == kind]}
-    if request.args.get('orgId'):
-        query['data.orgId'] = request.args['orgId']
-    rows = list(db().tools.find(query).sort('_id', 1).skip(offset).limit(limit + 1))
-    items = []
-    for row in rows[:limit]:
-        data = resolved(row)
-        items.append(dict(id=row['_id'], **{k: data[k] for k in ['name', 'desc', 'type', 'platform', 'org', 'orgId', 'category', 'workTags']},
-                          access='approved' if allowed(row) else 'permission_required'))
-    return jsonify(items=items, total=db().tools.count_documents(query),
-                   nextOffset=offset + limit if len(rows) > limit else None)
+    from .catalog_search import search_catalog
+    return search_catalog()
+
+
+@local_access.get('/api/integration/me')
+def integration_me():
+    key_id = getattr(g, 'api_token_id', None)
+    scope = getattr(g, 'api_token_scope', None)
+    return jsonify(user=dict(id=g.user['id'], name=g.user['name'],
+                             dept=g.user.get('dept', g.user.get('org', '')),
+                             dept_cd=g.user.get('dept_cd', ''), role=g.user['role']),
+                   key=dict(id=key_id, scope=scope) if key_id else None,
+                   capabilities=dict(search=True, download=True,
+                                     publishDraft=bool(key_id and scope == 'publish'),
+                                     approvalRequired=True))

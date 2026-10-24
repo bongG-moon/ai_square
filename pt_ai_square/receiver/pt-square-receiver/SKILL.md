@@ -13,7 +13,7 @@ description: Search P&T AI SQUARE, view tool details, check releases, and downlo
 
 1. 설정 파일이 없으면 사용자에게 접속 주소를 확인한다. 주소를 모르면 실제 접속을 완료했다고 말하지 않는다.
    `python scripts/square_client.py configure --url http://127.0.0.1:5080`
-   localhost는 자기 PC 시험용이다. 사내 운영 주소는 HTTPS를 사용한다.
+   localhost는 자기 PC 시험용이다. 사내 HTTP는 KEY가 암호화 없이 전송됨을 최초 연결 시 설명하고 사용자 확인 후 configure 명령에 --allow-http를 붙인다. 해당 주소만 허용하며 다른 주소로 자동 전달하지 않는다.
 2. `python scripts/square_client.py search "업무 검색어"`로 검색한다.
    `--type Skill`, `--org-id organization-0`, `--offset 20` 필터/페이지를 사용할 수 있다.
    `nextOffset`이 있으면 필요에 따라 다음 페이지를 조회한다.

@@ -71,11 +71,14 @@ def init_db(app):
             db()[collection].create_index(keys, unique=True)
         db().notifications.create_index([('user', 1), ('created', -1)])
         db().local_tokens.create_index([('user', 1), ('expires', -1)])
+        db().publish_drafts.create_index([('user', 1), ('status', 1), ('expires', 1)])
         db().activity.create_index([('user', 1), ('kind', 1), ('created', -1)])
         db().tools.create_index('versions.apiUsage.user')
         db().tools.create_index('versions.publishRequest.key', unique=True, sparse=True)
         db().tools.create_index([('owner', 1), ('deleted', 1)])
         db().ideas.create_index([('status', 1), ('created', -1)])
+        db().workspace_files.create_index([('created', -1)])
+        db().deletion_jobs.create_index([('state', 1), ('created', 1)])
         db().activity.create_index([('tool', 1), ('created', -1)])
         for kind, names in [('organization', ['공통', '제조팀', '장비팀', '기술팀']), ('category', ['공통 업무', '제조', '장비', '기술'])]:
             for order, name in enumerate(names):
@@ -128,6 +131,21 @@ def _deliver_event(e):
         entry.setdefault('_id', e['id'])
         db().audit.update_one({'_id': entry['_id']}, {'$setOnInsert': entry}, upsert=True)
     subscription = e.get('subscription')
+    target = e.get('target', {})
+    # A delayed worker may have read an outbox just before permanent deletion.
+    # Retained deletion intent prevents recreating obsolete grants/inboxes.
+    from .permanent_delete import deletion_started, cleanup_if_deleted
+    if e.get('toolCheck') is not None:
+        cleanup_if_deleted('tool', e['toolCheck'])
+    if subscription and deletion_started('tool', subscription['tool']):
+        cleanup_if_deleted('tool', subscription['tool'])
+        return
+    if target.get('type') in {'tool', 'access', 'feedback'} and deletion_started('tool', target.get('id')):
+        cleanup_if_deleted('tool', target.get('id'))
+        return
+    if target.get('type') == 'idea' and deletion_started('idea', target.get('id')):
+        cleanup_if_deleted('idea', target.get('id'))
+        return
     if subscription:
         # Preserve an explicit unsubscribe even when delivery was delayed.
         db().subscriptions.update_one(subscription, {'$setOnInsert': {'enabled': True}}, upsert=True)
@@ -143,12 +161,21 @@ def _deliver_event(e):
             {'_id': e['id'] + ':' + uid},
             {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'],
                               'kind': e['kind'], 'created': e['created'], 'read': False}}, upsert=True)
+    from .permanent_delete import cleanup_if_deleted
+    if subscription:
+        cleanup_if_deleted('tool', subscription['tool'])
+    if target.get('type') in {'tool', 'access', 'feedback'}:
+        cleanup_if_deleted('tool', target.get('id'))
+    elif target.get('type') == 'idea':
+        cleanup_if_deleted('idea', target.get('id'))
+    if e.get('toolCheck') is not None:
+        cleanup_if_deleted('tool', e['toolCheck'])
 
 
 def deliver_notifications(collection_name=None, document_id=None):
     """Deliver bounded, idempotent outbox work; leave failed events durable."""
     from .post_commit import DeliveryResult, deliver_job, log_deferred
-    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users')
+    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users', 'workspace_files', 'deletion_jobs', 'subscriptions')
     collections = supported if collection_name is None else (collection_name,)
     if any(name not in supported for name in collections):
         raise ValueError('Unsupported outbox collection')

@@ -398,19 +398,19 @@ async function afterWorkspaceSave(callback,form){
 const originalRender=render, originalModal=openModal, originalDetail=detail, originalManage=manage;
 const originalCloseModal=closeModal,originalNavigate=navigate;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
-const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
+const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('ax-workspace','AX Workspace','','data-route="ax"')}${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
 $('.sq-header-actions').insertAdjacentHTML('afterbegin',`<button class="sq-quiet ws-bell" data-action="inbox" aria-label="내 알림" title="내 알림">${icon('bell')}<span id="ws-unread" hidden></span></button>`);
 render=function(){
  const categories=server.categories||[];
  $('#sq-category').innerHTML=options(['모든 업무',...categories.filter(x=>x.enabled||x.name===state.category).map(x=>x.name)],state.category);
- originalRender();const special=['manage','admin','ideas'].includes(state.route);
+ originalRender();const special=['manage','admin','ideas','ax'].includes(state.route);
  workspace.hidden=!special;$('.sq-toolbar').hidden=special;$('#sq-search-form').hidden=special;
  $('#ws-admin-nav').hidden=server.user.role!=='admin';
  const unread=server.unread||0;$('#ws-unread').hidden=!unread;$('#ws-unread').textContent=unread>99?'99+':unread;
  $('.ws-bell').setAttribute('aria-label',`내 알림, 읽지 않은 알림 ${unread}개`);
  if(special){
-  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.']};
+  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.'],ax:['AX Workspace.','업무를 연결하는 시작.']};
   setPageHeading(...labels[state.route],true);renderWorkspace();
  }
  enhanceSelects();
@@ -475,14 +475,25 @@ $('#sq-dialog').addEventListener('close',()=>closePicker());
 
 manage=function(tab='tools'){work.tab=tab;const adminTab=['storage','activity','taxonomy','orgs','admins'].includes(tab);work.scope=adminTab?'all':'mine';if($('#sq-dialog').open)closeModal();navigate(adminTab?'admin':'manage');};
 function managementItems(){return items.filter(x=>work.scope==='all'||x.ownerId===server.user.id);}
+async function loadDeletionJobs(){work.deletionJobs=(await requestAPI('/api/deletions')).jobs;}
+function deletionJobsPanel(){
+ const jobs=(work.deletionJobs||[]).filter(j=>j.kind==='idea'||!items.some(x=>x.id===j.entityId&&x.purgePending));
+ return jobs.length?`<div class="ws-panel-head"><div><h2>마무리가 필요한 삭제</h2><p>파일이나 데이터 정리를 완료하지 못한 항목입니다. 다시 시도하면 남은 부분부터 처리합니다.</p></div></div><div class="ws-list">${jobs.map(j=>`<div class="ws-row"><span class="ws-avatar">${icon('refresh-cw')}</span><div class="ws-row-main"><strong>${j.kind==='idea'?'기능 요청':'등록 기능'} #${j.entityId}</strong><p>${dated(j.created)} · 삭제 처리 중</p></div>${button('retry-deletion','삭제 다시 시도','sq-secondary ws-danger',`data-job="${esc(j.id)}"`)}</div>`).join('')}</div>`:'';
+}
 function renderWorkspace(){
  if(state.route==='ideas'){renderIdeas();return;}
+ if(state.route==='ax'){renderAxWorkspace();return;}
  const isAdmin=state.route==='admin';work.scope=isAdmin?'all':'mine';
- const tabs=isAdmin?[['tools','전체 기능'],['requests','권한 관리'],['taxonomy','조직·업무'],['admins','관리자 설정'],['storage','저장 공간'],['activity','사용 이력']]:[['tools','내 등록 기능'],['requests','권한 관리'],['feedback','피드백']];
+ const tabs=isAdmin?[['tools','전체 기능'],['trash','휴지통'],['requests','권한 관리'],['taxonomy','조직·업무'],['admins','관리자 설정'],['storage','저장 공간'],['activity','사용 이력']]:[['tools','내 등록 기능'],['trash','휴지통'],['requests','권한 관리'],['feedback','피드백']];
  if(!tabs.some(t=>t[0]===work.tab))work.tab='tools';
  const list=managementItems();const pending=requests.filter(r=>r.status==='대기'&&(isAdmin||r.ownerId===server.user.id)).length;
  let html=`<div class="ws-summary"><div><span>공유한 기능</span><strong>${list.filter(x=>!x.deleted).length}<small>개</small></strong></div><div><span>승인 대기</span><strong>${pending}<small>건</small></strong></div><div><span>새로운 피드백</span><strong>${list.reduce((n,x)=>n+x.comments.filter(c=>c.status==='접수').length,0)}<small>건</small></strong></div><div class="ws-summary-action">${button('register',icon('plus')+' 기능 등록','sq-primary')}</div></div><div class="ws-surface"><div class="sq-tabs ws-tabs">${tabs.map(([id,label])=>button('workspace-tab',label,'',`data-tab="${id}" aria-pressed="${work.tab===id}"`)).join('')}</div>`;
- if(work.tab==='tools')html+=`<div class="ws-panel-head"><div><h2>${isAdmin?'전체 등록 기능':'내가 공유한 기능'}</h2><p>등록 정보와 배포 버전, 조회 권한을 관리하세요.</p></div></div><div class="ws-list">${list.map(x=>`<article class="ws-row"><span class="sq-tool-icon" data-type="${esc(x.type)}">${icon(x.icon)}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${esc(x.org)} · ${esc(x.type)} · v${x.active}${isAdmin?' · '+esc(x.owner):''}</p></div>${badge(x.deleted?'휴지통':x.approval?'승인 후 조회':'전체 공개')}<div class="sq-row-actions">${x.deleted?button('restore-tool','복원','sq-link',`data-id="${x.id}"`):`${button('edit-tool','수정','sq-link',`data-id="${x.id}"`)}${button('manage-versions','버전','sq-link',`data-id="${x.id}"`)}${button('grant-users','권한','sq-link',`data-id="${x.id}"`)}${button('delete-tool',icon('trash-2'),'sq-icon ws-danger',`data-id="${x.id}" aria-label="${esc(x.name)} 삭제"`)}`}</div></article>`).join('')||blank('package-open','아직 등록한 기능이 없습니다.','잘 만든 도구를 동료들과 공유해 보세요.')}</div>`;
+ if(work.tab==='tools'||work.tab==='trash'){
+  const trash=work.tab==='trash',rows=list.filter(x=>!!x.deleted===trash);
+  html+=`<div class="ws-panel-head"><div><h2>${trash?'휴지통':isAdmin?'전체 등록 기능':'내가 공유한 기능'}</h2><p>${trash?'복원하면 다시 사용할 수 있습니다. 영구 삭제는 관리자만 가능하며 배포 파일과 관련 기록이 제거됩니다.':'등록 정보와 배포 버전, 조회 권한을 관리하세요.'}</p></div>${trash?badge(rows.length+'개'):''}</div><div class="ws-list">${rows.map(x=>`<article class="ws-row"><span class="sq-tool-icon" data-type="${esc(x.type)}">${icon(trash?'trash-2':x.icon)}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${esc(x.org)} · ${esc(x.type)} · v${x.active}${isAdmin?' · '+esc(x.owner):''}</p>${x.purgePending?'<p class="ws-message">영구 삭제 처리 중입니다. 완료되지 않았다면 다시 시도해 주세요.</p>':''}</div>${badge(x.purgePending?'삭제 처리 중':trash?'휴지통':x.approval?'승인 후 조회':'전체 공개')}<div class="sq-row-actions">${trash?`${x.purgePending?'':button('restore-tool','복원','sq-link',`data-id="${x.id}"`)}${isAdmin?button('purge-tool',x.purgePending?'삭제 다시 시도':'영구 삭제','sq-secondary ws-danger',`data-id="${x.id}"`):''}`:`${button('edit-tool','수정','sq-link',`data-id="${x.id}"`)}${button('manage-versions','버전','sq-link',`data-id="${x.id}"`)}${button('grant-users','권한','sq-link',`data-id="${x.id}"`)}${button('delete-tool',icon('trash-2'),'sq-icon ws-danger',`data-id="${x.id}" aria-label="${esc(x.name)} 삭제"`)}`}</div></article>`).join('')||blank(trash?'trash-2':'package-open',trash?'휴지통이 비어 있습니다.':'아직 등록한 기능이 없습니다.',trash?'휴지통으로 이동한 기능을 여기서 복원하거나 정리할 수 있습니다.':'잘 만든 도구를 동료들과 공유해 보세요.')}</div>`;
+ }
+
+ if(work.tab==='trash'&&isAdmin)html+=deletionJobsPanel();
  if(work.tab==='requests'){
   const all=requests.filter(r=>isAdmin||r.ownerId===server.user.id);const filtered=all.filter(r=>work.requestFilter==='대기'?r.status==='대기':work.requestFilter==='승인됨'?r.granted:!r.granted&&r.status!=='대기');
   html+=`<div class="ws-panel-head"><div><h2>조회 권한 관리</h2><p>신청자와 실제 권한 보유자를 구분해서 관리합니다.</p></div><div class="ws-segment">${['대기','승인됨','처리 이력'].map(s=>button('access-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.requestFilter}"`)).join('')}</div></div><div class="ws-list">${filtered.map(r=>`<article class="ws-row"><span class="ws-avatar">${esc(r.who.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(r.who)} <small>${esc(r.user)}</small></strong><p>${esc(r.name)} · ${esc(r.source)}</p><p class="ws-message">${esc(r.reason||'직접 권한을 부여한 사용자입니다.')}</p>${r.decision?`<p>${esc(r.decision)}</p>`:''}</div>${badge(r.granted?'승인됨':r.status==='승인'?'권한 회수':r.status)}<div class="sq-row-actions">${r.status==='대기'?button('access-decision','승인','sq-primary',`data-request="${r.id}" data-status="승인"`)+button('access-decision','반려','sq-secondary',`data-request="${r.id}" data-status="반려"`):r.granted?button('access-decision','권한 회수','sq-secondary',`data-request="${r.id}" data-status="회수"`):''}${button('access-history','이력','sq-link',`data-request="${r.id}"`)}</div></article>`).join('')||blank('shield-check','처리할 항목이 없습니다.','권한 신청과 승인 결과가 여기에 표시됩니다.')}</div>`;
@@ -522,9 +533,14 @@ function renderIdeas(){
  workspace.innerHTML=`<div class="ws-board-head"><div class="ws-segment">${['전체','접수 대기','개발 중','구현 완료'].map(s=>button('idea-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.ideaFilter}"`)).join('')}</div>${button('idea',icon('plus')+' 새 기능 요청','sq-primary')}</div><div class="ws-idea-grid">${rows.map(i=>`<button class="ws-idea-card" data-action="idea-open" data-id="${i.id}"><div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)}</span></div><h2>${esc(i.name)}</h2><p>${esc(i.body)}</p><div class="ws-idea-foot"><span>${i.assigneeName?'담당 '+esc(i.assigneeName):'함께 만들 동료를 기다려요'}</span>${icon('arrow-up-right')}</div></button>`).join('')||blank('lightbulb','작은 불편함에서 좋은 도구가 시작됩니다.','필요한 기능을 요청하고 동료들과 함께 만들어 보세요.')}</div>`;mountIcons();
 }
 async function loadIdeas(){work.ideas=(await requestAPI('/api/ideas')).ideas;}
-async function ideaDetail(id){await loadIdeas();const i=work.ideas.find(x=>x.id===+id);if(!i)throw Error('요청을 찾을 수 없습니다.');work.idea=i;
+async function ideaDetail(id){
+ const token=invalidateDetailLoad();
+ try{await loadIdeas();}catch(error){if(token!==runtime.detailLoadToken)return false;throw error;}
+ if(token!==runtime.detailLoadToken)return false;
+ const i=work.ideas.find(x=>x.id===+id);if(!i)throw Error('요청을 찾을 수 없습니다.');work.idea=i;
+ if(i.deletionPending){openModal(i.name,'기능 요청 · 삭제 처리 중',`<div class="sq-callout"><strong>삭제 작업을 마무리하고 있습니다.</strong><p>이 요청은 수정할 수 없습니다. 삭제를 다시 시도하면 남은 파일과 데이터 정리를 이어갑니다.</p></div><div class="sq-actions">${server.user.role==='admin'?button('idea-delete','삭제 다시 시도','sq-secondary ws-danger',`data-id="${i.id}"`):''}</div>`);return;}
  const owner=server.user.role==='admin'||i.assignee===server.user.id;
- openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div><form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options([i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
+ openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.deletionPending?'삭제 처리 중':i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('arrow-up-right')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div>${server.user.role==='admin'?`<div class="ws-idea-admin">${button('idea-delete',icon('trash-2')+(i.deletionPending?'삭제 다시 시도':'요청 삭제'),'sq-link ws-danger',`data-id="${i.id}"`)}<span>요청 내용·답변·첨부파일을 삭제합니다.</span></div>`:''}<form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options(server.user.role==='admin'?['접수 대기','담당자 지정','개발 중','구현 완료','보류']:[i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
 }
 
 async function inbox(loadMore=false){
@@ -536,7 +552,7 @@ async function inbox(loadMore=false){
 Object.assign(actions,{
  'manage':()=>manage(),
  'admin-home':async()=>{work.tab='tools';closeModal();navigate('admin');},
- 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;if(work.tab==='activity'){const r=await requestAPI('/api/activity');server.activityEvents=r.events;server.activityCursor=r.nextCursor;}renderWorkspace();},
+ 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='trash'&&server.user.role==='admin')await loadDeletionJobs();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;if(work.tab==='activity'){const r=await requestAPI('/api/activity');server.activityEvents=r.events;server.activityCursor=r.nextCursor;}renderWorkspace();},
  'admin-tab':b=>{work.tab=b.dataset.tab==='orgs'?'taxonomy':b.dataset.tab;closeModal();navigate(work.scope==='all'?'admin':'manage');},
  'storage-dialog':()=>originalManage('storage'),
  'access-filter':b=>{work.requestFilter=b.dataset.filter;renderWorkspace();},
@@ -550,6 +566,9 @@ Object.assign(actions,{
  'subscribe':async b=>{const x=getItem(b.dataset.id);await requestAPI(`/api/tools/${x.id}/subscription`,'PUT',{enabled:!x.subscribed});await afterWorkspaceSave(()=>detail(x.id,runtime.detailTab));},
  'delete-tool':b=>{const x=getItem(b.dataset.id);ask('이 기능을 휴지통으로 이동할까요?',x.name+' · 목록과 다운로드가 중단됩니다. 등록자·관리자가 복원할 수 있습니다.',async()=>{await requestAPI(`/api/tools/${x.id}`,'DELETE',{expectedRevision:x.revision});await afterWorkspaceSave(()=>refresh());},'휴지통으로 이동');},
  'restore-tool':async b=>{const x=getItem(b.dataset.id);await requestAPI(`/api/tools/${x.id}/restore`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(()=>refresh());},
+ 'retry-deletion':b=>{const job=(work.deletionJobs||[]).find(j=>j.id===b.dataset.job);if(server.user.role!=='admin'||!job)return;ask('남은 삭제 작업을 마무리할까요?','이미 시작한 영구 삭제를 이어서 처리합니다. 복원할 수 없습니다.',async()=>{const result=await requestAPI(job.kind==='idea'?`/api/ideas/${job.entityId}`:`/api/tools/${job.entityId}/purge`,job.kind==='idea'?'DELETE':'POST',{expectedRevision:job.revision});await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'아직 정리하지 못한 항목이 있습니다. 잠시 후 다시 시도해 주세요.':'삭제를 완료했습니다.');},'삭제 마무리');},
+ 'purge-tool':b=>{const x=getItem(b.dataset.id);if(server.user.role!=='admin'||!x?.deleted)return;ask('이 기능을 영구 삭제할까요?',x.name+' · 모든 배포 버전과 파일, 좋아요·다운로드 이력, 권한·피드백이 삭제됩니다. 삭제 후 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/tools/${x.id}/purge`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능을 영구 삭제했습니다.');},'영구 삭제');},
+ 'idea-delete':b=>{const i=work.idea;if(server.user.role!=='admin'||!i)return;ask('이 기능 요청을 삭제할까요?',i.name+' · 요청 내용, 답변, 첨부파일이 삭제되며 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/ideas/${i.id}`,'DELETE',{expectedRevision:i.revision});closeModal();await afterWorkspaceSave(async()=>{await loadIdeas();navigate('ideas');});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 요청 상세 또는 관리자 → 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능 요청을 삭제했습니다.');},'요청 삭제');},
  'taxonomy-edit':b=>{const kind=b.dataset.kind,x=[...organizations,...server.categories].find(x=>x.id===b.dataset.id);work.taxonomy={kind,id:x?.id};openModal(x?'분류 수정':'분류 추가',kind==='organization'?'조직 설정':'업무 설정',`<form data-work-form="taxonomy"><div class="sq-form-grid"><label class="sq-field wide"><span>이름</span><input name="name" value="${esc(x?.name||'')}" required maxlength="80"></label><label class="sq-field"><span>표시 순서</span><input name="order" type="number" min="0" max="999" value="${x?.order??10}" required></label><label class="sq-field"><span>사용 여부</span><select name="enabled"><option value="true" ${x?.enabled!==false?'selected':''}>사용</option><option value="false" ${x?.enabled===false?'selected':''}>사용 중지</option></select></label><label class="sq-field wide"><span>안내 담당자 (선택)</span><input name="owner" maxlength="100" value="${esc(x?.owner||'')}"></label></div><div class="sq-callout">이름을 바꿔도 기존 기능과의 연결은 유지됩니다. 사용 중지한 항목은 새로 선택할 수 없습니다.</div><div class="sq-actions"><button class="sq-primary">저장</button></div></form>`);},
  'access-decision':b=>{work.access={id:b.dataset.request,status:b.dataset.status};openModal('조회 권한 '+b.dataset.status,'신청 처리',`<form data-work-form="access"><label class="sq-field"><span>처리 사유 ${b.dataset.status==='승인'?'(선택)':''}</span><textarea name="reason" maxlength="2000" ${b.dataset.status==='승인'?'':'required'} placeholder="신청자에게 안내할 내용을 적어주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">${b.dataset.status}</button></div></form>`);},
  'access-history':b=>{const r=requests.find(r=>r.id===b.dataset.request);openModal('권한 처리 이력',r.name,`<div class="ws-timeline">${r.history.map(h=>`<article><strong>${esc(h.status)}</strong><small>${esc(h.actor)} · ${dated(h.at)}</small><p>${esc(h.reason||'')}</p></article>`).join('')}</div>`);},
@@ -571,14 +590,35 @@ root.addEventListener('submit',event=>{
  form.dataset.busy='true';const data=Object.fromEntries(new FormData(form));form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   switch(form.dataset.workForm){
-   case 'idea':{const body=new FormData();delete data.attachments;body.append('metadata',JSON.stringify(data));for(const file of work.ideaFiles||[])body.append('attachments',file);const r=await requestAPI('/api/ideas','POST',body);await afterWorkspaceSave(async()=>{await loadIdeas();navigate('ideas');await ideaDetail(r.id);},form);break;}
+   case 'idea':{
+    const files=work.ideaFiles,token=runtime.detailLoadToken,previousNotice=work.ideaSaveNotice,body=new FormData();delete data.attachments;body.append('metadata',JSON.stringify(data));for(const file of files||[])body.append('attachments',file);
+    await requestAPI('/api/ideas','POST',body);
+    await afterWorkspaceSave(async()=>{
+     // Creation is complete. Replying/claiming is a separate action on a list item.
+     if(work.ideaFiles===files)work.ideaFiles=[];
+     if(token!==runtime.detailLoadToken)return;
+     work.ideaFilter='전체';delete work.idea;closeModal();navigate('ideas');
+     const listToken=runtime.detailLoadToken;
+     try{await loadIdeas();}catch(error){if(listToken!==runtime.detailLoadToken)return;throw error;}
+     if(listToken!==runtime.detailLoadToken||state.route!=='ideas')return;
+     // Clear only the previous request's unchanged page notice, not a newer error.
+     if(previousNotice&&work.ideaSaveNotice===previousNotice){
+      if(previousNotice.node.isConnected&&previousNotice.node.textContent===previousNotice.message){previousNotice.node.textContent='';previousNotice.node.hidden=true;}
+      delete work.ideaSaveNotice;
+     }
+     renderIdeas();announce('기능 요청을 등록했습니다.');
+    },form);break;
+   }
    case 'idea-reply':{const i=work.idea;await requestAPI(`/api/ideas/${i.id}`,'PATCH',{...data,tool:data.tool?+data.tool:null,expectedRevision:i.revision});await afterWorkspaceSave(async()=>{await ideaDetail(i.id);await loadIdeas();if(state.route==='ideas')renderIdeas();},form);break;}
    case 'feedback':{const c=work.feedback;await requestAPI(`/api/feedback/${c.id}/reply`,'POST',data);await afterWorkspaceSave(async()=>{await refresh();await detail(c.tool,'comments');},form);break;}
    case 'taxonomy':await requestAPI('/api/taxonomy','POST',{...data,...work.taxonomy,order:+data.order,enabled:data.enabled==='true'});closeModal();await afterWorkspaceSave(()=>refresh(),form);break;
    case 'access':await requestAPI(`/api/requests/${encodeURIComponent(work.access.id)}/decision`,'POST',{status:work.access.status,reason:data.reason});closeModal();await afterWorkspaceSave(()=>refresh(),form);break;
    case 'user-search':await actions['user-search']();break;
   }
- })().catch(showError).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=!!form.dataset.saved);});
+ })().catch(error=>{
+  showError(error);
+  if(form.dataset.workForm==='idea'&&error.saved){const node=$('#sq-server-error');if(node&&!node.hidden&&node.textContent===error.message)work.ideaSaveNotice={node,message:error.message};}
+ }).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=!!form.dataset.saved);});
 },true);
 // showError keeps one accessible error in the active form/dialog or page banner.
 setInterval(()=>{if(document.hidden||runtime.requestBusy)return;requestAPI('/api/notifications?unread=true').then(r=>{server.unread=r.unread;$('#ws-unread').hidden=!r.unread;$('#ws-unread').textContent=r.unread>99?'99+':r.unread;}).catch(()=>{});},30000);
@@ -751,6 +791,7 @@ root.addEventListener('submit',e=>{
  .catch(error=>{showError(error,$('#ws-capacity-message'));})
  .finally(()=>{delete form.dataset.busy;button.disabled=false;});
 },true);
+
 // People, connection entry and declared workflows share the existing page shell.
 let peopleRanks=null,peopleRanksError='',peopleRanksLoading=false,peopleLoadSerial=0,profileSignature='';
 const baseRankItems=rankItems,baseRankRow=rankRowHTML,baseRenderRanks=renderRanks;
@@ -845,6 +886,58 @@ detail=async function(id,tab='intro'){
  const diagram=workflowDiagram(x.workflow);
  if(diagram){const anchor=$('#sq-dialog-body .sq-detail-hero');anchor?.insertAdjacentHTML('afterend',diagram);mountIcons();}
 };
+
+// Administrator-published downloads are kept separate from community tool rankings.
+const axCategories={workspace:'AX Workspace',plugin:'플러그인',integration:'연동 도구',other:'기타'};
+let axFiles=[],axFilter='all',axFile=null,axLoadToken=0,axUploadBusy=false,axMaxFileBytes=128*1048576-65536;
+async function loadAxWorkspace(){
+ const token=++axLoadToken,result=await requestAPI('/api/ax-workspace');
+ if(token!==axLoadToken)return false;
+ axFiles=result.files;if(Number.isSafeInteger(result.maxFileBytes)&&result.maxFileBytes>=0)axMaxFileBytes=result.maxFileBytes;return true;
+}
+function renderAxWorkspace(){
+ const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||x.category===axFilter);
+ workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>AX Workspace 설치 파일과 업무에 필요한 플러그인·연동 도구를 내려받으세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
+ mountIcons();
+}
+function axUploadArea(){
+ return `<section class="ws-upload-area" data-ax-drop><div class="ws-drop-zone"><span class="ws-upload-icon">${icon('cloud-upload')}</span><h3>배포할 파일을 여기에 놓으세요</h3><p>ZIP · EXE · MSI · PS1 · MD · 최대 ${fileSize(axMaxFileBytes)}</p><button type="button" class="sq-secondary" data-action="ax-pick">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" id="sq-ax-file" aria-label="AX Workspace 배포 파일 선택" accept=".zip,.exe,.msi,.ps1,.md"></div><div class="ws-selected-files" aria-live="polite">${axFile?`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(axFile.name)}</strong><small>${fileSize(axFile.size)}</small></span>${button('ax-remove',icon('x'),'sq-icon','type="button" aria-label="선택한 파일 취소"')}</div>`:''}</div></section>`;
+}
+function chooseAxFile(files){
+ if(!files.length)return;
+ if(files.length!==1||!files[0].size||files[0].size>axMaxFileBytes||!(/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)))throw Error(`ZIP·EXE·MSI·PS1·MD 파일을 하나 선택하세요. 빈 파일은 등록할 수 없고 최대 ${fileSize(axMaxFileBytes)}입니다.`);
+ axFile=files[0];refreshAxFile();
+}
+function refreshAxFile(){const area=$('[data-ax-drop]');if(area){area.outerHTML=axUploadArea();mountIcons();}}
+Object.assign(actions,{
+ 'ax-workspace':async()=>{closeModal();navigate('ax');const token=runtime.detailLoadToken;try{await loadAxWorkspace();if(token===runtime.detailLoadToken&&state.route==='ax')renderAxWorkspace();}catch(error){if(token===runtime.detailLoadToken&&state.route==='ax')throw error;}},
+ 'ax-filter':b=>{axFilter=b.dataset.category;renderAxWorkspace();},
+ 'ax-register':()=>{
+  if(server.user.role!=='admin')return;axFile=null;
+  openModal('배포 파일 등록','AX Workspace · 관리자',`<form id="sq-ax-form"><div class="sq-form-grid"><label class="sq-field wide"><span>이름 *</span><input name="name" maxlength="100" required placeholder="예: AX Workspace Windows 설치 파일"></label><label class="sq-field wide"><span>설명 *</span><textarea name="description" maxlength="2000" required placeholder="어떤 파일인지, 설치 전에 알아둘 내용을 적어주세요."></textarea></label><label class="sq-field"><span>분류</span><select name="category">${Object.entries(axCategories).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label><label class="sq-field"><span>배포 버전 *</span><input name="version" required maxlength="40" placeholder="예: 1.0.0"></label></div>${axUploadArea()}<p class="sq-note">등록하면 사내 사용자가 바로 내려받을 수 있습니다. 선택한 파일 형식 그대로 배포됩니다.</p><div class="sq-actions"><button class="sq-primary">파일 등록</button></div></form>`);
+ },
+ 'ax-pick':()=>$('#sq-ax-file')?.click(),
+ 'ax-remove':()=>{if(!axUploadBusy){axFile=null;refreshAxFile();}}
+});
+root.addEventListener('change',e=>{if(e.target.id!=='sq-ax-file')return;try{chooseAxFile([...e.target.files]);}catch(error){e.target.value='';showError(error);}});
+for(const type of ['dragenter','dragover','dragleave','drop'])root.addEventListener(type,e=>{
+ const area=e.target.closest('[data-ax-drop]');if(!area)return;e.preventDefault();if(axUploadBusy)return;
+ area.classList.toggle('is-dragging',type==='dragenter'||type==='dragover');
+ if(type==='drop')try{chooseAxFile([...e.dataTransfer.files]);}catch(error){showError(error);}
+});
+root.addEventListener('submit',e=>{
+ const form=e.target;if(form.id!=='sq-ax-form')return;e.preventDefault();e.stopImmediatePropagation();
+ if(axUploadBusy||form.dataset.saved)return;
+ if(!axFile){showError(Error('등록할 파일을 선택해 주세요.'));return;}
+ const token=runtime.detailLoadToken,body=new FormData();let errorToken=token;body.append('metadata',JSON.stringify(Object.fromEntries(new FormData(form))));body.append('file',axFile);
+ axUploadBusy=true;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=true);
+ (async()=>{
+  await requestAPI('/api/ax-workspace','POST',body);form.dataset.saved='true';
+  if(token!==runtime.detailLoadToken)return;
+  axFile=null;axFilter='all';closeModal();navigate('ax');const listToken=runtime.detailLoadToken;errorToken=listToken;
+  await afterWorkspaceSave(async()=>{await loadAxWorkspace();if(listToken===runtime.detailLoadToken&&state.route==='ax'){renderAxWorkspace();announce('배포 파일을 등록했습니다.');}},form);
+ })().catch(error=>{if(errorToken===runtime.detailLoadToken)showError(error);}).finally(()=>{axUploadBusy=false;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=!!form.dataset.saved);});
+},true);
 
 // END WORKSPACE EXTENSION
 refresh().catch(showError);setInterval(()=>{if(!document.hidden&&!$('#sq-dialog').open&&!runtime.requestBusy)refresh().catch(showError);},300000);

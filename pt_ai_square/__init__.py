@@ -50,11 +50,23 @@ def init_app(app, overrides=None):
         install_auth(app);app.register_blueprint(api)
         from .backend.local_access import local_access
         app.register_blueprint(local_access)
+        from .backend.publish_drafts import publish_drafts
+        app.register_blueprint(publish_drafts)
         from .backend.people import people
         app.register_blueprint(people)
+        from .backend.ax_workspace import ax_workspace
+        app.register_blueprint(ax_workspace)
     @app.get('/')
     def index():
         return render_template('index.html', **{key: session.get(key) for key in IDENTITY_FIELDS})
+    @app.get('/publish-review/<draft_id>')
+    def publish_review(draft_id):
+        # Authentication and POST CSRF protection stay in the normal SSO/session
+        # boundary. Personal KEY callers cannot access this browser-only page.
+        response=make_response(render_template('publish_review.html', draft_id=draft_id,
+                                              csrf=session.get('csrf','')))
+        response.headers['Cache-Control']='no-store'
+        return response
     @app.get('/health')
     def health():
         if app.config['DATA_MODE']=='mongodb': db().command('ping')

@@ -25,6 +25,42 @@ finally:
     sys.path.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def no_real_browser(monkeypatch):
+    # Library paths still exercise review URL generation without opening a
+    # real browser. The subprocess CLI below uses the same explicit stub.
+    monkeypatch.setattr(publisher.webbrowser, 'open', lambda url: False)
+
+
+CLI_BOOTSTRAP = (
+    "import runpy,sys,webbrowser; from pathlib import Path; "
+    "webbrowser.open=lambda url:False; "
+    "script=sys.argv.pop(1); sys.path.insert(0,str(Path(script).parent)); "
+    "sys.argv[0]=script; runpy.run_path(script,run_name='__main__')"
+)
+
+
+def approve_pending(owner, headers, pending, approval):
+    assert pending['status'] == 'approval_required'
+    assert pending['browserOpened'] is False
+    draft_id = pending['draftId']
+    current = owner.get('/api/publish-drafts/' + draft_id)
+    assert current.status_code == 200 and current.json['status'] == 'pending'
+    response = owner.post('/api/publish-drafts/' + draft_id + '/approve', headers=headers,
+                          json={'approval': approval, 'reviewDigest': current.json['reviewDigest']})
+    assert response.status_code == 200, response.json
+    assert response.json['status'] == 'approved'
+    return draft_id
+
+
+def reviewed_publish(client, plan, visibility, owner, headers):
+    pending = publisher.publish(client, plan, visibility)
+    draft_id = approve_pending(owner, headers, pending, visibility == 'approval')
+    result = publisher.publish(client, plan, visibility)
+    assert owner.get('/api/publish-drafts/' + draft_id).json['status'] == 'committed'
+    return result
+
+
 def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     owner, h = ready(app)
     token, _ = issue(owner, h)
@@ -41,7 +77,7 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
         assert r.returncode==0,r.stderr
     package()
     plan=tmp_path/'publish-plan.json'
-    prefix=[sys.executable,str(SCRIPTS/'publish_client.py'),'--config',str(config)]
+    prefix=[sys.executable,'-X','utf8','-c',CLI_BOOTSTRAP,str(SCRIPTS/'publish_client.py'),'--config',str(config)]
     def cli(*args):
         r=subprocess.run(prefix+list(args),env=env,capture_output=True,encoding='utf-8',timeout=30)
         assert r.returncode==0,r.stderr
@@ -54,8 +90,16 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     assert 'approval' not in prepared['metadata']
     bad=subprocess.run(prefix+['publish','--plan',str(plan)],env=env,capture_output=True,encoding='utf-8')
     assert bad.returncode==2
+    pending=cli('publish','--plan',str(plan),'--visibility','approval')
+    assert pending['status']=='approval_required'
+    assert cli('publish','--plan',str(plan),'--visibility','approval')['draftId']==pending['draftId']
+    with app.app_context():
+        assert db().tools.count_documents({})==0
+        assert db().publish_drafts.count_documents({})==1
+    draft_id=approve_pending(owner,h,pending,True)
     r=cli('publish','--plan',str(plan),'--visibility','approval')
     assert r['version']==1 and r['approval']
+    assert owner.get('/api/publish-drafts/'+draft_id).json['status']=='committed'
     assert owner.get('/api/tools/1').json['approval']
     assert cli('publish','--plan',str(plan),'--visibility','approval')['version']==1
     member,_=ready(app,'member')
@@ -70,7 +114,11 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     prepared=cli('prepare','--artifact',str(changed),'--plan',str(plan))
     assert prepared['action']=='new_version' and prepared['toolId']==1 and prepared['currentApproval']
     assert prepared['metadata']['workflow'] is None
+    pending=cli('publish','--plan',str(plan),'--visibility','public')
+    assert owner.get('/api/tools/1').json['active']==1
+    draft_id=approve_pending(owner,h,pending,False)
     assert cli('publish','--plan',str(plan),'--visibility','public')['version']==2
+    assert owner.get('/api/publish-drafts/'+draft_id).json['status']=='committed'
     assert cli('publish','--plan',str(plan),'--visibility','public')['version']==2
     assert member.get('/download/1/2').status_code==200
     assert owner.get('/api/tools/1/manifest').json['workflow'] is None
@@ -98,14 +146,15 @@ def test_md_preserved_and_package_candidate_lookup(app, server, tmp_path):
     publisher.prepare(client,md,fields,plan)
     with pytest.raises(publisher.ClientError):
         publisher.publish(client,plan,None)
-    r=publisher.publish(client,plan,'approval')
+    r=reviewed_publish(client,plan,'approval',owner,h)
+    assert r['version']==1 and r['approval']
     assert owner.get('/download/1/1').data==md.read_bytes()
     assert owner.get('/api/tools/1/manifest').json['filename']=='SKILL.md'
     md.write_text('# 새 내용',encoding='utf-8')
     with pytest.raises(publisher.ClientError,match='변경'):
         publisher.publish(client,plan,'approval')
     publisher.prepare(client,md,{},plan)
-    assert publisher.publish(client,plan,'approval')['version']==2
+    assert reviewed_publish(client,plan,'approval',owner,h)['version']==2
     # A different MD in the same directory must not silently replace this tool.
     other=tmp_path/'OTHER.md'; other.write_text('# another',encoding='utf-8')
     assert publisher.prepare(client,other,fields,plan)['action']=='new_tool'
@@ -125,11 +174,11 @@ def test_manual_release_workflow_preserved_replaced_or_removed(app, server, tmp_
                   workflow=flow())
     plan = tmp_path/'plan.json'
     publisher.prepare(client, md, fields, plan)
-    assert publisher.publish(client, plan, 'public')['version'] == 1
+    assert reviewed_publish(client, plan, 'public', owner, h)['version'] == 1
     md.write_text('# 회의록 정리\n업데이트', encoding='utf-8')
     prepared = publisher.prepare(client, md, change, plan)
     assert prepared['action'] == 'new_version' and prepared['metadata']['workflow'] == expected
-    assert publisher.publish(client, plan, 'public')['version'] == 2
+    assert reviewed_publish(client, plan, 'public', owner, h)['version'] == 2
     current = owner.get('/api/tools/1').json
     assert current['workflow'] == expected
     assert current['versions'][0]['workflow'] == expected
@@ -154,7 +203,7 @@ def test_key_missing_opens_safe_auth_page(app, server, tmp_path, monkeypatch, ca
     assert 'authUrl' in capsys.readouterr().err
 
 
-def test_mock_publish_without_key_uses_own_csrf_session(app, server, tmp_path):
+def test_mock_cli_requires_publish_key_and_explicit_web_review(app, server, tmp_path):
     app.config.update(AUTH_MODE='mock', MOCK_USER='owner')
     client=publisher.Client(server)
     md=tmp_path/'SKILL.md'; md.write_text('# local',encoding='utf-8')
@@ -162,7 +211,23 @@ def test_mock_publish_without_key_uses_own_csrf_session(app, server, tmp_path):
                 orgId='organization-0',categoryId='category-0')
     plan=tmp_path/'plan.json'
     publisher.prepare(client,md,fields,plan)
-    assert publisher.publish(client,plan,'public')['version']==1
+    with pytest.raises(publisher.ClientError):
+        publisher.publish(client,plan,'public')
+    owner,h=ready(app)
+    read_key,_=issue(owner,h,scope='read')
+    reader=publisher.Client(server,read_key['token'])
+    with pytest.raises(publisher.ClientError):
+        publisher.publish(reader,plan,'public')
+    with app.app_context():
+        assert db().publish_drafts.count_documents({})==0
+        assert db().tools.count_documents({})==0
+    publish_key,_=issue(owner,h)
+    writer=publisher.Client(server,publish_key['token'])
+    pending=publisher.publish(writer,plan,'public')
+    with app.app_context():
+        assert db().tools.count_documents({})==0
+    approve_pending(owner,h,pending,False)
+    assert publisher.publish(writer,plan,'public')['version']==1
 
 
 def test_update_http_never_counts_first_download(app):

@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import uuid
+import webbrowser
 from urllib.parse import urlencode, urlsplit
 from square_client import Client, ClientError, AuthenticationRequired, DEFAULT_CONFIG, open_auth_page
 
@@ -138,14 +139,45 @@ def publish(client, plan_path, visibility):
     target = plan.get('toolId')
     if target:
         metadata['expectedRevision'] = plan['expectedRevision']
-    # Server revalidates taxonomy, permissions and revision. Same plan retries
-    # reuse clientRequestId; a changed plan must be prepared afresh.
-    result = multipart(client, f'/api/tools/{target}/versions' if target else '/api/tools',
-                       plan.get('artifact'), metadata)
+    # The server, not this editable client, requires a signed-in web review.
+    if target:
+        metadata['toolId'] = target
+    binding = hashlib.sha256(json.dumps(dict(metadata=metadata, artifactSha256=plan.get('artifactSha256')),
+                                       sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if plan.get('draftId') and plan.get('draftBinding') == binding:
+        draft = client.get('/api/publish-drafts/' + plan['draftId'])
+    else:
+        # A changed review needs a different request ID. Same bytes/metadata
+        # retain the ID so an uncertain create response can be retried safely.
+        if plan.get('draftBinding') and plan['draftBinding'] != binding:
+            plan['clientRequestId'] = str(uuid.uuid4())
+            metadata['clientRequestId'] = plan['clientRequestId']
+            binding = hashlib.sha256(json.dumps(dict(metadata=metadata, artifactSha256=plan.get('artifactSha256')),
+                                               sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        plan['draftBinding'] = binding
+        save(plan_path, plan)
+        draft = multipart(client, '/api/publish-drafts', plan.get('artifact'), metadata)
+        plan['draftId'] = draft['id']
+        save(plan_path, plan)
+    if draft['status'] == 'pending':
+        review_url = client.url + '/publish-review/' + draft['id']
+        try:
+            opened = bool(webbrowser.open(review_url))
+        except Exception:
+            opened = False
+        return dict(status='approval_required', draftId=draft['id'], reviewUrl=review_url,
+                    browserOpened=opened, notice='웹에서 파일·내용·공개 범위를 확인하고 승인한 뒤 같은 publish 명령을 다시 실행하세요. 아직 게시되지 않았습니다.')
+    if draft['status'] not in {'approved', 'committing', 'committed'}:
+        raise ClientError('등록 초안이 만료되었거나 사용할 수 없습니다. prepare부터 다시 진행하세요.')
+    headers = {'Content-Type': 'application/json'}
+    if not client.token:
+        headers['X-CSRF-Token'] = client.get('/api/bootstrap')['csrf']
+    with client.open('/api/publish-drafts/' + draft['id'] + '/commit', b'{}', headers) as response:
+        result = json.loads(response.read(4 * 1024 * 1024))
     save(plan['statePath'], dict(baseUrl=client.url, employeeId=identity['id'],
                                toolId=result['id'], release=result['version'], packageId=plan.get('packageId'),
                                sourceKey=plan['sourceKey']))
-    return dict(result, approval=metadata['approval'], notice='게시 완료. 설치·자동 실행은 하지 않았습니다.')
+    return dict(result, approval=draft['metadata']['approval'], notice='게시 완료. 설치·자동 실행은 하지 않았습니다.')
 
 
 def main(argv=None):
@@ -168,16 +200,18 @@ def main(argv=None):
     args = p.parse_args(argv)
     url = None
     try:
-        url = read_json(args.config)['baseUrl']
-        client = Client(url, os.environ.get('PTAI_API_TOKEN', os.environ.get('PTAI_READ_TOKEN','')).strip(), timeout=120)
+        config = read_json(args.config)
+        url = config['baseUrl']
+        allowed = config.get('allowHttpOrigin')
+        client = Client(url, os.environ.get('PTAI_API_TOKEN', os.environ.get('PTAI_READ_TOKEN','')).strip(), timeout=120, allow_http_origin=allowed)
         if args.command == 'auth':
-            print(json.dumps(open_auth_page(url), ensure_ascii=False))
+            print(json.dumps(open_auth_page(url, allowed), ensure_ascii=False))
             return 0
         if args.authenticate or (not client.token and urlsplit(client.url).hostname not in {'localhost','127.0.0.1','::1'}):
-            info = open_auth_page(client.url) if not client.token else {'authUrl':client.url+'/local-access'}
+            info = open_auth_page(client.url, allowed) if not client.token else {'authUrl':client.url+'/local-access'}
             if not sys.stdin.isatty():
                 raise ClientError('인증키 발급 화면: '+info['authUrl']+' · 업로드 포함 키를 사용자 터미널 또는 PTAI_API_TOKEN으로 입력하세요.')
-            client = Client(url, getpass.getpass('업로드 포함 인증키: ').strip(), timeout=120)
+            client = Client(url, getpass.getpass('업로드 포함 인증키: ').strip(), timeout=120, allow_http_origin=allowed)
         if args.command == 'prepare':
             fields = read_json(args.metadata) if args.metadata else {}
             if args.org_id: fields['orgId'] = args.org_id
@@ -188,7 +222,7 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except AuthenticationRequired as error:
-        print(json.dumps(dict(error=str(error), **open_auth_page(url)), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(dict(error=str(error), **open_auth_page(url, allowed)), ensure_ascii=False), file=sys.stderr)
     except (ClientError, OSError, ValueError, KeyError, HTTPException) as error:
         message = str(error) if isinstance(error, ClientError) else '설정·파일·응답을 확인하세요. 실패 시 같은 준비안으로 재시도할 수 있습니다.'
         print(json.dumps(dict(error=message), ensure_ascii=False), file=sys.stderr)

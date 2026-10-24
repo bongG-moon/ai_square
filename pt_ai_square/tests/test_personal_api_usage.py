@@ -10,17 +10,24 @@ def issue(c, h, scope='publish'):
 
 
 def test_publish_token_scope_employee_and_counts(app):
+    from .test_publish_drafts import create_draft, approve, commit
     owner, h = ready(app)
     token, auth = issue(owner, h)
     api = app.test_client()
     options = api.get('/api/catalog/options', headers=auth).json
     assert options['employee']['id'] == 'owner' and options['organizations']
-    r = publish(api, auth, owner='admin')
+    def reviewed_publish(**values):
+        created=create_draft(api,auth,**values)
+        if created.status_code!=201:return created
+        approved=approve(owner,h,created.json)
+        if approved.status_code!=200:return approved
+        return commit(api,auth,created.json)
+    r = reviewed_publish(owner='admin')
     assert r.status_code == 201
     assert api.get('/api/tools/1', headers=auth).json['ownerId'] == 'owner'
-    assert publish(api, auth, tid=1, revision=1).status_code == 201
-    assert publish(api, auth, tid=1, revision=1).status_code == 409
-    assert api.post('/api/tools', headers=auth).status_code == 400
+    assert reviewed_publish(toolId=1, expectedRevision=1).status_code == 201
+    assert reviewed_publish(toolId=1, expectedRevision=1).status_code == 409
+    assert api.post('/api/tools', headers=auth).status_code == 409
     for method, path in [('delete','/api/tools/1'), ('patch','/api/tools/1'), ('post','/api/local-tokens'), ('get','/api/local-tokens')]:
         assert getattr(api, method)(path, headers=auth).status_code == 403
     data = owner.get('/api/local-tokens').json
@@ -32,7 +39,7 @@ def test_publish_token_scope_employee_and_counts(app):
         assert db().local_tokens.find_one({'id':token['id']})['user'] == 'owner'
     member, mh = ready(app, 'member')
     _, mauth = issue(member, mh)
-    assert publish(api, mauth, tid=1, revision=2).status_code == 403
+    assert create_draft(api, mauth, toolId=1, expectedRevision=2).status_code == 403
     assert member.get('/api/local-tokens').json['usage'] == {'uploads':0,'downloads':0}
     assert member.get('/api/local-tokens').json['history'] == []
 

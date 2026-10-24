@@ -94,6 +94,18 @@
 #square-app .ws-reply{background:#f5f5f8;border-radius:12px;padding:15px 18px;margin:12px 0}
 #square-app .ws-compose{margin-top:26px;padding-top:20px;border-top:1px solid #e5e5ec}
 #square-app .ws-compose .sq-field{margin-bottom:14px}
+#square-app .ws-idea-admin{display:flex;align-items:center;gap:14px;margin:22px 0 0;flex-wrap:wrap}
+#square-app .ws-idea-admin>span{font-size:12px;color:var(--sq-muted)}
+/* Reply and status are separate form groups, with the same rhythm as registration. */
+#square-app form[data-work-form="idea-reply"],
+#square-app form[data-work-form="feedback"]{display:grid;gap:24px;margin-top:24px;padding-top:24px;border-top:1px solid #e5e5ec}
+#square-app form[data-work-form="idea-reply"] .sq-field,
+#square-app form[data-work-form="feedback"] .sq-field{min-width:0;margin:0}
+#square-app form[data-work-form="idea-reply"] textarea,
+#square-app form[data-work-form="feedback"] textarea{min-height:116px}
+#square-app form[data-work-form="idea-reply"] .sq-form-grid{gap:20px}
+#square-app form[data-work-form="idea-reply"] .sq-actions,
+#square-app form[data-work-form="feedback"] .sq-actions{margin:0;padding-top:4px}
 #square-app .ws-lock{text-align:center;padding:25px 10px 40px}
 #square-app .ws-lock-icon{display:inline-flex;padding:20px;border-radius:23px;background:#f0f1f5;color:#8994a6;margin-bottom:25px}
 #square-app .ws-lock-icon svg{width:35px;height:35px;stroke-width:1.3}
@@ -173,6 +185,17 @@
 }
 @media(max-width:700px){#square-app .sq-wizard-steps{gap:12px}#square-app .sq-wizard-steps span{font-size:11px}#square-app .ws-access-card{padding:15px;gap:10px}}
 
+/* One empty message must not determine the intrinsic height of five rank rows. */
+#square-app #sq-rank-list:has(>.sq-empty){display:grid;grid-template-rows:minmax(0,1fr);height:100%}
+#square-app #sq-rank-list>.sq-empty{display:grid;place-content:center;min-height:0;padding:24px 18px}
+/* Match the existing compact home cards instead of the catalog's roomy empty state. */
+#square-app .sq-home-shelves .sq-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:186px;padding:24px 20px}
+#square-app .sq-home-shelves .sq-empty h3{font-size:16px;line-height:1.5}
+#square-app .sq-home-shelves .sq-empty p{font-size:12px;line-height:1.6}
+#square-app .sq-home-shelves .sq-empty button{margin-top:14px}
+@media(max-width:850px){#square-app .sq-home-shelves .sq-empty{min-height:178px;padding:20px 16px}}
+@media(max-width:700px){#square-app .sq-home-shelves .sq-empty{min-height:184px}#square-app form[data-work-form="idea-reply"],#square-app form[data-work-form="feedback"]{gap:20px;padding-top:20px}}
+
 /* Distribution declaration: quiet glass surfaces, consistent with registration. */
 .ws-package-import{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;margin:0 0 22px;background:#f5f5f780;border:1px solid #e6e6eb;border-radius:20px}
 .ws-package-import svg{width:20px;height:20px;vertical-align:middle;margin-right:8px;color:#6e6e73}
@@ -223,3 +246,30 @@
 #square-app .ws-capacity-foot{font-size:12px;line-height:1.7;color:var(--sq-muted);padding-top:22px;margin-top:24px;border-top:1px solid #e5e6eb}
 #square-app .ws-capacity-foot p+p{margin-top:7px}
 @media(max-width:700px){#square-app .ws-capacity-cards{grid-template-columns:1fr;gap:10px}#square-app .ws-capacity-cards article{padding:18px}#square-app .ws-capacity-cards strong{font-size:25px}#square-app .ws-capacity-choices{grid-template-columns:1fr}#square-app .ws-capacity-meter>div:first-child{flex-direction:column}}
+
+/* AX Workspace uses the same neutral glass and primary actions as the catalog. */
+#square-app .ws-ax-intro{display:flex;align-items:center;gap:22px;padding:26px 28px;margin-bottom:26px;border:1px solid #ffffff;border-radius:24px;background:#ffffffbb;backdrop-filter:blur(18px);box-shadow:0 10px 28px #22223a06}
+#square-app .ws-ax-intro>div{flex:1;min-width:0}
+#square-app .ws-ax-intro h2{font-size:22px;font-weight:600;letter-spacing:-.6px;margin:0 0 8px}
+#square-app .ws-ax-intro p{font-size:14px;line-height:1.7;color:var(--sq-muted);margin:0}
+#square-app .ws-ax-symbol{display:inline-flex;align-items:center;justify-content:center;width:54px;height:54px;flex-shrink:0;border-radius:17px;background:#edf2ff;color:var(--sq-blue,#4873e2)}
+#square-app .ws-ax-symbol svg{width:25px;height:25px}
+#square-app .ws-ax-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}
+#square-app .ws-ax-grid>.ws-empty{grid-column:1/-1}
+#square-app .ws-ax-card{display:flex;flex-direction:column;min-width:0;padding:26px;background:#ffffffce;border:1px solid #fff;border-radius:24px;box-shadow:0 8px 24px #22223a08;backdrop-filter:blur(18px);transition:transform .25s,box-shadow .25s}
+#square-app .ws-ax-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+#square-app .ws-ax-card h2{font-size:21px;line-height:1.4;font-weight:600;margin:0 0 12px;overflow-wrap:anywhere}
+#square-app .ws-ax-card>p{font-size:13px;line-height:1.8;color:var(--sq-muted);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 22px}
+#square-app .ws-ax-file{margin-top:auto;padding:15px 0;border-top:1px solid #e9e9ef}
+#square-app .ws-ax-file strong{display:block;overflow-wrap:anywhere;font-weight:500;font-size:12px}
+#square-app .ws-ax-file span,#square-app .ws-ax-count{display:block;font-size:12px;color:var(--sq-muted);margin-top:6px}
+#square-app .ws-ax-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px}
+#square-app .ws-ax-card-footer small{font-size:11px;color:var(--sq-muted)}
+#square-app .ws-ax-card-footer a{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;font-size:13px}
+#square-app #sq-ax-form>.ws-upload-area{margin-top:24px}
+#square-app #sq-ax-form>.sq-note{margin-top:18px}
+#square-app .ws-ax-filters{max-width:100%;overflow-x:auto;flex-shrink:1}
+#square-app .ws-ax-filters button{white-space:nowrap;flex-shrink:0}
+@media(hover:hover) and (prefers-reduced-motion:no-preference){#square-app .ws-ax-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px #22223a12}}
+@media(max-width:1100px){#square-app .ws-ax-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){#square-app .ws-ax-grid{grid-template-columns:1fr}#square-app .ws-ax-intro{flex-wrap:wrap;padding:22px;gap:16px}#square-app .ws-ax-intro h2{font-size:18px}#square-app .ws-ax-intro p{font-size:12px}#square-app .ws-ax-intro>.sq-primary{margin-left:auto}#square-app .ws-ax-card{padding:22px}#square-app .ws-ax-count{display:none}}

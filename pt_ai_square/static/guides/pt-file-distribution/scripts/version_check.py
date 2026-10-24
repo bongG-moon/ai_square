@@ -17,7 +17,7 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def check_version(base_url, tool_id, installed_release, *, token='', opener=None, timeout=2.0):
+def check_version(base_url, tool_id, installed_release, *, token='', opener=None, timeout=2.0, allow_http_origin=None):
     """Return a notice for the host UI; never write to stdout or persist a key.
 
     A key uses the built-in non-redirecting transport. A custom opener is supported
@@ -26,8 +26,10 @@ def check_version(base_url, tool_id, installed_release, *, token='', opener=None
     parsed=urlsplit(base_url)
     if (parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password
             or parsed.query or parsed.fragment
-            or (parsed.scheme=='http' and parsed.hostname not in {'localhost','127.0.0.1','::1'})):
-        raise ValueError('Use HTTPS (HTTP is allowed only on loopback), without credentials/query/fragment.')
+            or '\\' in base_url or any(ord(c)<=32 for c in base_url)
+            or (parsed.scheme=='http' and parsed.hostname not in {'localhost','127.0.0.1','::1'}
+                and allow_http_origin != 'http://' + parsed.netloc.lower())):
+        raise ValueError('Use HTTPS or an explicitly acknowledged exact HTTP origin, without credentials/query/fragment.')
     if any(type(n) is not int or not 0<n<1000000000 for n in [tool_id,installed_release]):
         raise ValueError('tool_id and installed_release must be positive release identifiers.')
     if not 0<timeout<=10:raise ValueError('Use a bounded timeout of 0–10 seconds.')

@@ -55,6 +55,13 @@ def install_dummy(app):
 
     @app.get('/api/<path:path>')
     def dummy_reads(path):
+        if path == 'ax-workspace':
+            rows=json.loads((Path(__file__).resolve().parents[1]/'dummy'/'ax_workspace.json').read_text(encoding='utf-8'))
+            return jsonify(files=[dict(row,created=now-i*86400) for i,row in enumerate(rows)],canManage=admin)
+        if path == 'deletions':
+            return jsonify(jobs=[])
+        if path.startswith('ax-workspace/') and path.endswith('/download'):
+            return jsonify(error=MESSAGE,dummy=True),409
         responses={'ideas':dict(ideas=fixture['ideas']), 'notifications':dict(notifications=[],nextCursor=None,unread=0), 'admins':dict(admins=[dict(id=user['id'],name=user['name'],base=True)] if admin else []), 'activity':dict(events=[],nextCursor=None,backend='dummy'), 'storage/candidates':dict(candidates=[]), 'storage/limits':dict(storage=bootstrap['storage'])}
         if path=='users':
             q=request.args.get('q','').casefold()

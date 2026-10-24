@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pt-square-mcp"
+version = "1.0.0"
+description = "Local stdio MCP for P&T AI SQUARE; no database credentials or listening port"
+requires-python = ">=3.11"
+dependencies = ["mcp==1.30.0"]
+
+[project.scripts]
+pt-square-mcp = "pt_square_mcp.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pt_square_mcp*"]

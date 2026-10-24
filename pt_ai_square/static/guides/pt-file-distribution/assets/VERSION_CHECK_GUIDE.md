@@ -26,13 +26,16 @@ from scripts.version_check import check_version
 # 예시 값입니다. 설치된 파일의 배포 번호를 로컬 설정에서 읽으세요.
 key = os.environ.get("PTAI_API_TOKEN", os.environ.get("PTAI_READ_TOKEN", "")).strip()
 result = check_version("https://회사-플랫폼-주소", 17, 2, token=key)
+# 사내 HTTP를 최초 연결 시 사용자에게 알리고 허용한 경우에만:
+# result = check_version("http://회사-플랫폼-주소", 17, 2, token=key,
+#                        allow_http_origin="http://회사-플랫폼-주소")
 # 로컬 mock 시험: check_version("http://127.0.0.1:5080", 17, 2)
 # result['status']가 current이면 그대로 실행합니다.
 # 그 외에는 기존 UI에 result['message']를 표시한 후 실행을 이어갑니다.
 # MCP라면 print()로 stdout에 쓰지 마세요. 프로토콜을 깨뜨립니다.
 ```
 
-KEY를 채팅·소스 코드·설정 예시·배포 ZIP·로그에 넣지 않습니다. 위 예시는 프로세스 환경변수에서 읽으며 `.env` 파일을 자동으로 읽지 않습니다. 앱에 보안 입력 기능이 있다면 입력받은 값을 `token`으로 직접 전달할 수도 있습니다. 이미 별도의 승인된 HTTP 인증 클라이언트가 있으면 `opener=`로 연결하되 `token`과 함께 전달하지 않습니다. 기본 KEY 방식은 다른 주소로의 리다이렉트를 따라가지 않으므로 실제 플랫폼의 HTTPS 주소를 설정합니다.
+KEY를 채팅·소스 코드·설정 예시·배포 ZIP·로그에 넣지 않습니다. 위 예시는 프로세스 환경변수에서 읽으며 `.env` 파일을 자동으로 읽지 않습니다. 앱에 보안 입력 기능이 있다면 입력받은 값을 `token`으로 직접 전달할 수도 있습니다. 이미 별도의 승인된 HTTP 인증 클라이언트가 있으면 `opener=`로 연결하되 `token`과 함께 전달하지 않습니다. 기본 KEY 방식은 다른 주소로의 리다이렉트를 따라가지 않습니다. 실제 사내 HTTP 주소는 최초 연결 때 KEY 전송이 암호화되지 않음을 확인한 경우에만 같은 origin(프로토콜·호스트·포트)을 `allow_http_origin`으로 지정합니다. 다른 서버 주소로 바꾸면 다시 확인해야 합니다.
 
 새로 발급한 KEY는 유효기간 없이 사용하지만, 사번당 활성 KEY는 하나입니다. **KEY 재발급** 또는 취소 시 기존 KEY는 즉시 사용할 수 없으며 기존 연결 프로그램도 갱신해야 합니다. 과거에 만료일을 지정한 KEY는 그 만료일을 유지합니다. 원문은 발급 직후에만 볼 수 있습니다.
 

@@ -84,9 +84,9 @@ test('successful grant still refreshes once and announces completion without cha
  assert.deepEqual(h.announcements,['권한을 부여했습니다.']);assert.equal(h.writes.length,1);assert.equal(h.errors.length,0);
 });
 
-test('a successful idea registration follows its normal list/detail path without replaying its POST',async()=>{
+test('a successful idea registration returns to the list without opening its receipt or replaying its POST',async()=>{
  const h=setup(),form=h.form('idea');form.submit();h.writes[0].resolve({ok:true,id:9});await tick();
  assert.equal(h.reads[0].label,'loadIdeas');h.reads[0].resolve({});await tick();
- assert.equal(h.reads[1].label,'ideaDetail');h.reads[1].resolve({});await tick();
- assert.equal(h.context.state.route,'ideas');assert.equal(h.writes.length,1);assert.equal(h.errors.length,0);
+ assert.equal(h.reads.length,1);assert.equal(h.context.state.route,'ideas');assert.equal(h.writes.length,1);assert.equal(h.errors.length,0);
+ assert.equal(h.context.workState.ideaFilter,'전체');assert.deepEqual(h.announcements,['기능 요청을 등록했습니다.']);
 });

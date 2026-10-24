@@ -16,21 +16,29 @@
 <label>허용 작업<select id="token-scope"><option value="read">조회·다운로드</option><option value="publish">업로드 포함</option></select></label>
 <div class="local-form-actions"><button id="key-issue" class="sq-primary" type="submit" disabled>연결 KEY 발급</button><button id="key-revoke" class="sq-secondary" type="button" hidden>KEY 사용 취소</button></div></form>
 <p class="local-key-lifetime">새로 발급하는 KEY는 유효기간 제한 없이 사용합니다. 재발급하거나 사용을 취소하면 기존 KEY는 해제됩니다.</p>
-<p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 업로드 포함 권한도 도구 삭제·권한 변경은 허용하지 않습니다.</p>
+<p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 관리자 KEY도 본인 도구만 게시할 수 있으며 도구 삭제·권한 변경은 허용하지 않습니다.</p>
 <div id="issued" class="local-issued" hidden><strong>새 연결 KEY가 준비되었습니다.</strong><p>원문은 지금 한 번만 표시됩니다. 연결할 프로그램의 인증키 입력란에 넣어주세요.</p>
 <div class="local-secret-row"><input id="secret" type="password" readonly aria-label="발급된 개인 API 인증키" autocomplete="off"><button id="copy-token" class="sq-secondary" type="button">KEY 복사</button></div><small>KEY 원문은 서버에 저장하지 않습니다. 잃어버리면 재발급해 주세요.</small></div>
 <p id="status" role="status" aria-live="polite"></p>
 </section>
 <section class="local-card"><div class="local-card-head"><div><span class="local-eyebrow">CONNECT YOUR WORK</span><h2>내 PC에서 시작하기</h2></div></div>
+<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-mcp.zip') }}" download><strong>로컬 MCP 받기 <span aria-hidden="true">↗</span></strong><span>검색·추천 · 파일 받기 · 설치 준비 · 내 도구 게시</span></a></div>
+<p>MCP는 내 PC에서 실행됩니다. 별도 MCP 서버는 필요하지 않으며 기존 P&T AI SQUARE 웹에 연결합니다. 설치할 때 프로젝트 또는 현재 사용자 범위를 선택합니다.</p>
+<details class="local-details"><summary>로컬 MCP 연결 순서 보기</summary><p>ZIP을 풀고 그 폴더의 터미널에서 실행하세요. Python 3.11 이상과 사내에서 접근 가능한 Python 패키지 저장소가 필요합니다. KEY는 setup의 숨김 입력에 넣습니다.</p>
+<pre>python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe run_mcp.py setup --url {{ request.url_root.rstrip('/') }} --workspace "C:\내작업폴더"</pre>
+<p>HTTP 주소는 KEY 전송이 암호화되지 않는다는 안내를 확인하고 해당 주소를 승인합니다. Windows에서는 KEY를 사용자 계정으로 암호화해 로컬에 보관합니다.</p>
+<p>AI 프로그램의 MCP 설정에 ZIP 안 README의 실행 명령을 등록하세요. KEY가 없으면 이 화면으로 안내합니다. 조회·다운로드 KEY로 시작할 수 있고, 게시에는 업로드 포함 KEY가 필요합니다. KEY 재발급 후에는 setup을 다시 실행하세요.</p></details>
 <p>Python 3.11 이상이 필요합니다. 필요한 Skill을 받아 압축을 풀고 사용하는 AI에 등록하세요.</p>
 <div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download><strong>다운로드용 Skill 받기 <span aria-hidden="true">↗</span></strong><span>도구 검색 · 파일 받기 · 최신 버전 확인</span></a><a class="local-connect-item" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download><strong>배포·자동 등록 Skill 받기 <span aria-hidden="true">↗</span></strong><span>파일 준비 · 신규 등록 · 새 버전 게시</span></a></div>
-<p>배포 Skill은 공개·조회 승인 여부를 확인한 뒤 게시합니다. EXE 자동 변환이나 자동 설치는 하지 않습니다.</p>
+<p>배포 Skill은 웹에서 파일·내용·공개 범위를 승인한 뒤 AI 대화에서 게시를 이어갑니다. EXE 자동 변환은 하지 않습니다. MCP의 자동 설치는 지원하는 설치 정보가 있는 항목에 한합니다.</p>
 <details class="local-details"><summary>연결 명령어 보기</summary><p>압축을 푼 Skill 폴더에서 아래 명령을 실행하세요. 마지막 명령의 1은 검색 결과의 도구 ID로 바꿉니다.</p>
-<pre>python scripts/square_client.py configure --url {{ request.url_root.rstrip('/') }}
+<pre>python scripts/square_client.py configure --url {{ request.url_root.rstrip('/') }}{% if request.scheme == 'http' %} --allow-http{% endif %}
 python scripts/square_client.py --authenticate search "회의록"
 python scripts/square_client.py --authenticate download 1 --output ./downloads</pre>
 <p>KEY가 없으면 발급 화면으로 안내합니다. 재발급 후에는 연결한 프로그램들의 KEY도 새 값으로 바꿔주세요. 로컬 mock 시험은 인증키 없이도 같은 PC에서 사용할 수 있습니다.</p></details>
-<p class="local-future">CUBE 메신저 · MCP · 앱 연결에도 사용할 사번 기반 연결 정보입니다. 각 서비스의 실제 연결 기능은 해당 연동이 추가된 뒤 사용할 수 있습니다.</p>
+<p class="local-future">로컬 MCP와 Skill은 위에서 연결할 수 있습니다. CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤 이용할 수 있습니다.</p>
 </section>
 <section class="local-card"><div class="local-card-head"><div><span class="local-eyebrow">MY ACTIVITY</span><h2>연결 이용 이력</h2></div><button id="refresh-usage" class="sq-secondary" type="button">새로고침</button></div>
 <div class="local-usage"><strong id="usage">이용 건수를 확인하고 있습니다.</strong></div>

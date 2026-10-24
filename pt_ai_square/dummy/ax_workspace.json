@@ -1,0 +1,5 @@
+[
+  {"id":"sample-workspace","name":"AX Workspace 설치 파일","description":"업무에 필요한 AI 도구를 한곳에서 사용하는 데스크톱 작업 공간입니다. 화면 확인용 예시이며 설치 파일은 포함하지 않습니다.","category":"workspace","version":"1.0.0","fileName":"AX_Workspace_Setup.exe","size":67108864,"sha256":"","author":"플랫폼 운영자","downloadUrl":"/api/ax-workspace/sample-workspace/download"},
+  {"id":"sample-cube","name":"CUBE 연동 플러그인","description":"CUBE와 작업 공간을 연결하는 플러그인의 예시입니다. 실제 제공 여부와 별개인 화면 확인용 자료입니다.","category":"integration","version":"0.1.0","fileName":"cube-integration.zip","size":2097152,"sha256":"","author":"플랫폼 운영자","downloadUrl":"/api/ax-workspace/sample-cube/download"},
+  {"id":"sample-square","name":"AI SQUARE 연결 플러그인","description":"공유된 기능을 작업 공간에서 찾아 이용하는 플러그인의 예시입니다. 화면 확인용이며 실제 파일은 포함하지 않습니다.","category":"plugin","version":"0.1.0","fileName":"ai-square-plugin.zip","size":1048576,"sha256":"","author":"플랫폼 운영자","downloadUrl":"/api/ax-workspace/sample-square/download"}
+]

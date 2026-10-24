@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf }}"><title>게시 내용 확인 · P&T AI SQUARE</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='local_access.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='publish_review.css') }}">
+<script defer src="{{ url_for('static', filename='publish_review.js') }}"></script></head>
+<body><main class="local-shell review-shell" data-draft-id="{{ draft_id }}">
+<a class="local-back" href="{{ url_for('index') }}">← P&T AI SQUARE</a>
+<header class="local-heading"><span class="local-eyebrow">REVIEW BEFORE PUBLISHING</span><h1>공유하기 전,<br><span>한 번 더 확인해 주세요.</span></h1><p>내 PC에서 준비한 게시 내용입니다. 파일과 공개 범위를 확인한 뒤,<br>AI 대화로 돌아가 게시를 이어가세요.</p></header>
+<p id="review-status" class="review-message" role="status" aria-live="polite">게시 초안을 불러오고 있습니다.</p>
+<section id="review-content" hidden>
+<section class="local-card"><div class="local-card-head"><div><span id="review-action" class="local-eyebrow"></span><h2 id="review-name"></h2></div><span id="review-state" class="local-key-state"></span></div>
+<p id="review-description"></p><dl id="review-fields" class="review-fields"></dl>
+<div class="review-file"><strong id="review-file-name"></strong><p id="review-file-size"></p><code id="review-file-hash"></code><p id="review-file-warning" hidden></p></div>
+<details class="local-details"><summary>설치 안내와 동작 흐름 확인</summary><div id="review-guide" class="review-pre"></div><ol id="review-flow"></ol><pre id="review-install" hidden></pre></details>
+</section>
+<form id="review-form" class="local-card"><h2>누구에게 공개할까요?</h2><p>목록에는 도구 이름과 요약이 보입니다. 조회 승인 필요를 선택하면 상세 내용과 다운로드는 승인된 사람만 이용할 수 있습니다.</p>
+<fieldset class="review-choices"><legend class="sr-only">공개 범위 선택</legend>
+<label><input type="radio" name="visibility" value="public" required><span><strong>전체 공개</strong><small>로그인한 구성원 누구나 상세 조회·다운로드</small></span></label>
+<label><input type="radio" name="visibility" value="approval" required><span><strong>조회 승인 필요</strong><small>등록자·관리자와 승인된 사용자만 이용</small></span></label></fieldset>
+<p id="review-suggested" class="review-hint"></p>
+<label class="review-confirm"><input id="review-confirm" type="checkbox" required><span>파일, 설명, 신규 등록 또는 버전 업데이트 대상과 공개 범위를 확인했습니다.</span></label>
+<div class="local-form-actions"><button id="review-approve" type="submit" class="sq-primary">이 내용으로 게시 승인</button></div>
+<p class="review-hint">승인 후에도 AI 대화에서 게시를 이어가야 등록됩니다. 초안은 24시간 동안 유효하며, 내용이 달라지면 다시 확인합니다.</p></form>
+</section></main></body></html>

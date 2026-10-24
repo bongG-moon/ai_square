@@ -31,6 +31,12 @@ def flush(tool_id=None, user_id=None, limit=0):
             if limit and index >= limit:
                 pending = True
                 break
+            from .permanent_delete import deletion_started, cleanup_if_deleted
+            if deletion_started('tool', row['tool']):
+                # No notification-poll retry may resurrect a purged tool's
+                # history/subscription from a stale activity-state snapshot.
+                cleanup_if_deleted('tool', row['tool'])
+                continue
             events = row['outbox']
             pending = len(events) > 50 or pending
             for e in events[:50]:
@@ -42,6 +48,8 @@ def flush(tool_id=None, user_id=None, limit=0):
                         db().subscriptions.update_one(
                             {'tool': e['tool'], 'user': e['user']},
                             {'$setOnInsert': {'enabled': True}}, upsert=True)
+                    from .permanent_delete import cleanup_if_deleted
+                    cleanup_if_deleted('tool', row['tool'])
                     db().activity_state.update_one(
                         {'_id': row['_id']}, {'$pull': {'outbox': {'_id': e['_id']}}})
                     count += 1

@@ -139,7 +139,8 @@ def test_key_page_explains_rotation_without_promising_future_integrations(app):
     text = response.get_data(as_text=True)
     assert response.status_code == 200
     assert '연결 KEY 발급' in text and '한 개의 KEY' in text
-    assert '각 서비스의 실제 연결 기능은 해당 연동이 추가된 뒤' in text
+    assert '로컬 MCP 받기' in text
+    assert 'CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤' in text
     assert 'autocomplete="off"' in text
 
 

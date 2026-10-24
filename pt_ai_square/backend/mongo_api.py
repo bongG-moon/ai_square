@@ -15,6 +15,8 @@ from .request_files import stage_attachments, attachment_path, public_attachment
 from .package_contract import registration_fields, normalize_workflow
 from .storage_capacity import snapshot as storage_snapshot
 from . import post_commit
+from . import permanent_delete
+from .install_profiles import normalize_install_profile
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -27,6 +29,7 @@ def manager(t): return g.user['role'] == 'admin' or t['owner'] == g.user['id']
 def tool(tid, manage=False, trash=False):
     t = db().tools.find_one({'_id': tid})
     if not t or (t.get('deleted') and not (trash and manager(t))): raise NotFound('기능을 찾을 수 없습니다.')
+    if t.get('purge'): raise Conflict('영구 삭제 처리 중인 도구입니다. 삭제를 마무리해 주세요.')
     if manage and not manager(t): raise Forbidden('등록자 또는 관리자만 변경할 수 있습니다.')
     return t
 
@@ -74,6 +77,7 @@ def metadata(raw, existing=None):
     if len(data['workTags']) > 8 or any(len(x) > 30 for x in data['workTags']): raise BadRequest('관련 업무는 최대 8개, 각 30자입니다.')
     try: data['workflow']=normalize_workflow(raw.get('workflow'))
     except ValueError as error: raise BadRequest(str(error)) from None
+    data['installProfile']=normalize_install_profile(raw.get('installProfile'))
     return data
 
 def resolved(t):
@@ -104,7 +108,7 @@ def cas(t, update, audit_message=None):
     if audit_message:
         add_outbox(update, audit_event(audit_message))
     update.setdefault('$inc', {})['revision'] = 1
-    if not db().tools.update_one({'_id': t['_id'], 'revision': t['revision']}, update).modified_count:
+    if not db().tools.update_one({'_id': t['_id'], 'revision': t['revision'], 'purge': {'$exists': False}}, update).modified_count:
         raise Conflict('다른 변경이 반영되었습니다. 새로고침 후 다시 시도해 주세요.')
     return deliver_pending('tools', t['_id'])
 
@@ -112,7 +116,11 @@ def check_revision(t, raw):
     if raw.get('expectedRevision') != t['revision']: raise Conflict('변경된 버전이 있습니다. 새로고침해 주세요.')
 
 def subscribe(tid, uid, enabled=True):
-    db().subscriptions.update_one({'tool':tid,'user':uid}, {'$set': {'enabled': enabled}}, upsert=True)
+    probe=event([], '', {'type':'tool','id':tid}, 'subscription')
+    return db().subscriptions.find_one_and_update({'tool':tid,'user':uid}, {'$set': {'enabled': enabled},'$push':{'outbox':probe}}, upsert=True,return_document=ReturnDocument.AFTER)
+
+def cleanup_late_tool_write(tid):
+    return post_commit.followup_pending('deleted-tool-write',permanent_delete.cleanup_if_deleted,'tool',tid)
 
 def followers(t):
     return [x['user'] for x in db().subscriptions.find({'tool': t['_id'], 'enabled': True}) if allowed(t, x['user'])]
@@ -131,10 +139,10 @@ def serialize(t, stats, now):
     versions = []
     if can_read:
         for v in reversed(t.get('versions', [])):
-            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
+            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),installProfile=v.get('data',{}).get('installProfile') if not v.get('deleted') and not v.get('withdrawn') else None,workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
     subscription = db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
-    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
+    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),purgePending=bool(t.get('purge')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
 
 def access_rows():
     result=[]
@@ -165,16 +173,22 @@ def publish_followup_pending(tid):
 @api.post('/api/tools')
 @api.post('/api/tools/<int:tid>/versions')
 def publish(tid=None):
+    if getattr(g, 'api_token_id', None):
+        return jsonify(error='API KEY 게시에는 웹에서 승인한 등록 초안이 필요합니다.', code='publish_draft_required', draftUrl='/api/publish-drafts'),409
+    if tid is not None: tool(tid,True)
+    raw=publication_request()
+    artifact=publication_artifact(raw)
+    return publish_prepared(raw,artifact,tid)
+
+
+def publication_request():
     try: raw=json.loads(request.form.get('metadata',''))
     except (ValueError,TypeError): raise BadRequest('등록 정보를 확인해 주세요.')
     if not isinstance(raw,dict): raise BadRequest('등록 정보를 확인해 주세요.')
-    t=tool(tid,True) if tid else None
-    request_id=raw.get('clientRequestId')
-    request_key=None
-    if request_id is not None:
-        try: request_id=str(uuid.UUID(request_id))
-        except (ValueError,TypeError,AttributeError): raise BadRequest('clientRequestId는 UUID여야 합니다.')
-        request_key=hashlib.sha256((g.user['id']+':'+request_id).encode()).hexdigest()
+    return raw
+
+
+def publication_artifact(raw):
     if raw.get('mode')=='url':
         url=text(raw,'url',2048);parts=urlsplit(url)
         if parts.scheme!='https' or not parts.hostname or parts.username or parts.password: raise BadRequest('인증정보 없는 HTTPS 주소를 입력해 주세요.')
@@ -185,21 +199,41 @@ def publish(tid=None):
         artifact=dict(path=None,name='',size=0,sha='',url='',commands=commands)
     elif raw.get('mode') in {'file',None}: artifact=stage_upload(request.files.get('artifact'))
     else: raise BadRequest('파일·URL·명령어 중 등록 방식을 선택해 주세요.')
+    return artifact
+
+
+def publication_data(raw, artifact, t=None):
+    raw=copy.deepcopy(raw)
+    package=artifact.get('package')
+    if package:
+        raw={**registration_fields(package),**raw}
+        raw['workflow']=package.get('workflow')
+        if any(raw.get(k)!=package[k] for k in ['platform','type']):
+            raise BadRequest('프로그램·유형이 ZIP 배포 정보와 다릅니다. ai-square.json 또는 입력값을 맞춰 주세요.')
+        previous=next((v.get('package') for v in reversed(t['versions']) if v.get('package')),None) if t else None
+        if previous and previous['packageId']!=package['packageId']:
+            raise BadRequest('새 버전의 packageId가 기존 도구와 다릅니다. 다른 도구는 새로 등록하세요.')
+    return metadata(raw,t['data'] if t else None)
+
+
+def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_id=None, new_tool_id=None):
+    # Internal entrypoint accepts already staged bytes; no nested HTTP request or
+    # client-controlled confirmation header can reach this path.
     committed=False
     try:
+        t=tool(tid,True) if tid else None
+        if (getattr(g,'api_token_id',None) or draft_id) and t and t['owner']!=g.user['id']:
+            raise Forbidden('연결 KEY로는 본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
+        if getattr(g,'api_token_id',None) and not draft_id:
+            raise Forbidden('승인된 게시 초안이 필요합니다.')
+        request_id=raw.get('clientRequestId')
+        request_key=None
+        if request_id is not None:
+            try: request_id=str(uuid.UUID(request_id))
+            except (ValueError,TypeError,AttributeError): raise BadRequest('clientRequestId는 UUID여야 합니다.')
+            request_key=hashlib.sha256((g.user['id']+':'+request_id).encode()).hexdigest()
         package=artifact.get('package')
-        if package:
-            # Preview is advisory. Re-read and validate the actual upload at publish time.
-            raw={**registration_fields(package),**raw}
-            # The inspected package describes this release. Do not carry a prior
-            # draft's flow into a new ZIP that changed or omitted its workflow.
-            raw['workflow']=package.get('workflow')
-            if any(raw.get(k)!=package[k] for k in ['platform','type']):
-                raise BadRequest('프로그램·유형이 ZIP 배포 정보와 다릅니다. ai-square.json 또는 입력값을 맞춰 주세요.')
-            previous=next((v.get('package') for v in reversed(t['versions']) if v.get('package')),None) if t else None
-            if previous and previous['packageId']!=package['packageId']:
-                raise BadRequest('새 버전의 packageId가 기존 도구와 다릅니다. 다른 도구는 새로 등록하세요.')
-        data=metadata(raw,t['data'] if t else None)
+        data=publication_data(raw,artifact,t)
         fingerprint=hashlib.sha256(json.dumps(dict(target=tid,data=data,sha=artifact['sha'],url=artifact['url'],commands=artifact.get('commands',{})),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         def replay():
             existing=db().tools.find_one({'versions.publishRequest.key':request_key})
@@ -214,12 +248,12 @@ def publish(tid=None):
             if previous_response: return previous_response
         if t: check_revision(t,raw)
         n=max([v['n'] for v in t['versions']],default=0)+1 if t else 1
-        version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type','workflow']})
+        version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type','workflow','installProfile']})
         if getattr(g, 'api_token_id', None):
             version['apiUsage'] = dict(user=g.user['id'], tokenId=g.api_token_id)
         if request_key:
             version['publishRequest']=dict(key=request_key,fingerprint=fingerprint)
-        if not t: tid=next_id('tools')
+        if not t: tid=new_tool_id if new_tool_id is not None else next_id('tools')
         job=audit_event(f'{data["name"]} v{n} 게시', subscription={'tool':tid,'user':g.user['id']})
         if t:
             future=dict(t,data=data)
@@ -236,7 +270,7 @@ def publish(tid=None):
         if not t: pending=publish_followup_pending(tid)
         return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
     finally:
-        if not committed and artifact['path']:
+        if cleanup_on_failure and not committed and artifact['path']:
             # A network timeout may follow a committed write. Never remove a potentially referenced file.
             try: referenced=db().tools.find_one({'versions.path':artifact['path']},{'_id':1})
             except Exception: referenced=True
@@ -264,6 +298,8 @@ def edit(tid):
     data=metadata(merged,t['data'])
     if data['workflow']!=t['data'].get('workflow'):
         raise BadRequest('동작 흐름은 배포 버전에 연결됩니다. 변경한 흐름을 새 버전으로 등록하세요.')
+    if data['installProfile']!=t['data'].get('installProfile'):
+        raise BadRequest('설치 정보는 새 버전으로 등록하세요.')
     current_package=next((v.get('package') for v in t['versions'] if v['n']==t['active']),None)
     if current_package and any(data[k]!=current_package[k] for k in ['platform','type']):
         raise BadRequest('프로그램·유형은 현재 배포 정보와 일치해야 합니다. 변경한 패키지를 새 버전으로 등록하세요.')
@@ -282,12 +318,26 @@ def restore(tid):
     pending=cas(t,{'$set':{'deleted':False}},f'{t["data"]["name"]} 복원')
     return jsonify(ok=True,pending=pending)
 
+@api.post('/api/tools/<int:tid>/purge')
+def purge_tool(tid):
+    admin()
+    result=permanent_delete.remove('tool',tid,payload().get('expectedRevision'))
+    return jsonify(result),202 if result['pending'] else 200
+
+@api.get('/api/deletions')
+def pending_deletions():
+    admin()
+    rows=db().deletion_jobs.find({'state':{'$ne':'complete'}}).sort('created',1).limit(100)
+    return jsonify(jobs=[dict(id=r['_id'],kind=r['kind'],entityId=r['entityId'],
+                              revision=r['revision'],created=r['created']) for r in rows])
+
 @api.put('/api/tools/<int:tid>/like')
 def like(tid):
     t=tool(tid);usable(t);value=payload().get('liked')
     if not isinstance(value,bool): raise BadRequest('좋아요 상태를 확인해 주세요.')
     count=activity.set_like(tid,g.user['id'],value)
-    pending=post_commit.followup_pending('like-activity',activity.flush,tid,g.user['id'],50)
+    pending=cleanup_late_tool_write(tid)
+    pending=post_commit.followup_pending('like-activity',activity.flush,tid,g.user['id'],50) or pending
     return jsonify(liked=value,count=count,pending=pending or count is None,
                    historyPending=pending,countsPending=count is None)
 
@@ -295,7 +345,8 @@ def like(tid):
 def subscription(tid):
     t=tool(tid);usable(t);value=payload().get('enabled')
     if not isinstance(value,bool): raise BadRequest('알림 설정을 확인해 주세요.')
-    subscribe(tid,g.user['id'],value);return jsonify(ok=True)
+    row=subscribe(tid,g.user['id'],value)
+    return jsonify(ok=True,pending=deliver_pending('subscriptions',row['_id']))
 
 @api.post('/api/tools/<int:tid>/requests')
 def access_request(tid):
@@ -311,7 +362,8 @@ def access_request(tid):
     else:
         try: db().access.insert_one(dict(values,_id=key,outbox=[e],history=[{'status':'대기','actor':uid,'at':time.time(),'reason':reason}]))
         except DuplicateKeyError: raise Conflict('이미 신청했습니다.')
-    return jsonify(ok=True,pending=deliver_pending('access',key))
+    pending=cleanup_late_tool_write(tid)
+    return jsonify(ok=True,pending=deliver_pending('access',key) or pending)
 
 @api.post('/api/requests/<rid>/decision')
 def decide(rid):
@@ -327,7 +379,8 @@ def decide(rid):
     if 'subscription' in job: e['subscription']=job['subscription']
     result=db().access.update_one({'_id':rid,'updated':r['updated']},{'$set':{'status':r['status'] if status=='회수' else status,'granted':status=='승인','decision':reason,'updated':time.time(),'decidedBy':g.user['id']},'$push':{'outbox':e,'history':{'status':status,'actor':g.user['id'],'at':time.time(),'reason':reason}}})
     if not result.modified_count: raise Conflict('이미 처리된 신청입니다.')
-    return jsonify(ok=True,pending=deliver_pending('access',rid))
+    pending=cleanup_late_tool_write(t['_id'])
+    return jsonify(ok=True,pending=deliver_pending('access',rid) or pending)
 
 @api.post('/api/tools/<int:tid>/grants')
 def grant(tid):
@@ -336,7 +389,8 @@ def grant(tid):
     e=event([uid],f'{t["data"]["name"]} 조회 권한이 부여되었습니다.',{'type':'tool','id':tid},'approval')
     e.update(audit=audit_event(f'도구 {tid} 사용자 {uid} 직접 승인')['audit'],subscription={'tool':tid,'user':uid})
     saved=db().access.find_one_and_update({'tool':tid,'user':uid},{'$setOnInsert':{'_id':f'{tid}:{uid}','reason':''},'$set':{'status':'승인','granted':True,'source':'직접 추가','decision':'','decidedBy':g.user['id'],'updated':time.time()},'$push':{'outbox':e,'history':{'status':'직접 승인','actor':g.user['id'],'at':time.time()}}},upsert=True,return_document=ReturnDocument.AFTER)
-    return jsonify(ok=True,pending=deliver_pending('access',saved['_id']))
+    pending=cleanup_late_tool_write(tid)
+    return jsonify(ok=True,pending=deliver_pending('access',saved['_id']) or pending)
 
 @api.post('/api/tools/<int:tid>/comments')
 def comment(tid):
@@ -345,7 +399,8 @@ def comment(tid):
     cid=next_id('feedback');e=event([t['owner'],*all_admin_ids()],f'{g.user["name"]}님이 {t["data"]["name"]}에 피드백을 남겼습니다.',{'type':'feedback','id':tid,'feedbackId':cid},'feedback')
     e['subscription']={'tool':tid,'user':g.user['id']}
     db().feedback.insert_one({'_id':cid,'tool':tid,'user':g.user['id'],'kind':kind,'body':text(raw,'text',4000),'created':time.time(),'status':'접수','revision':0,'replies':[],'outbox':[e]})
-    return jsonify(ok=True,id=cid,pending=deliver_pending('feedback',cid)),201
+    pending=cleanup_late_tool_write(tid)
+    return jsonify(ok=True,id=cid,pending=deliver_pending('feedback',cid) or pending),201
 
 @api.post('/api/feedback/<int:fid>/reply')
 def feedback_reply(fid):
@@ -360,14 +415,16 @@ def feedback_reply(fid):
     e=event([c['user'],t['owner'],*all_admin_ids()],f'{t["data"]["name"]} 피드백에 답변·상태 변경이 있습니다.',{'type':'feedback','id':t['_id'],'feedbackId':fid},'feedback')
     result=db().feedback.update_one({'_id':fid,'revision':c['revision']},{'$set':{'status':status},'$inc':{'revision':1},'$push':{'outbox':e,'replies':{'user':g.user['id'],'text':body,'status':status,'created':time.time()}}})
     if not result.modified_count: raise Conflict('다른 답변이 반영되었습니다. 새로고침해 주세요.')
-    return jsonify(ok=True,pending=deliver_pending('feedback',fid))
+    pending=cleanup_late_tool_write(t['_id'])
+    return jsonify(ok=True,pending=deliver_pending('feedback',fid) or pending)
 
 @api.get('/api/ideas')
 def ideas():
     result=[]
-    for i in db().ideas.find().sort('created',-1):
+    query={} if g.user['role']=='admin' else {'purge':{'$exists':False}}
+    for i in db().ideas.find(query).sort('created',-1):
         i['attachments']=public_attachments(i)
-        i=dict(i);i['id']=i.pop('_id');i.pop('outbox',None);i['author']=name_of(i['user']);i['assigneeName']=name_of(i['assignee']) if i.get('assignee') else ''
+        i=dict(i);i['id']=i.pop('_id');i.pop('outbox',None);i['deletionPending']=bool(i.pop('purge',None));i['author']=name_of(i['user']);i['assigneeName']=name_of(i['assignee']) if i.get('assignee') else ''
         i['replies']=[dict(r,author=name_of(r['user'])) for r in i.get('replies',[])]
         linked=db().tools.find_one({'_id':i.get('tool'),'deleted':{'$ne':True}})
         i['toolName']=linked['data']['name'] if linked else '';result.append(i)
@@ -391,7 +448,7 @@ def idea():
 
 @api.get('/api/ideas/<int:iid>/attachments/<aid>')
 def idea_attachment(iid,aid):
-    i=db().ideas.find_one({'_id':iid})
+    i=db().ideas.find_one({'_id':iid,'purge':{'$exists':False}})
     a=next((a for a in (i or {}).get('attachments',[]) if a['id']==aid),None)
     if not a: raise NotFound('첨부파일을 찾을 수 없습니다.')
     path=attachment_path(a['path'])
@@ -402,7 +459,11 @@ def idea_attachment(iid,aid):
 def update_idea(iid):
     i=db().ideas.find_one({'_id':iid})
     if not i: raise NotFound()
+    if i.get('purge'): raise Conflict('삭제 처리 중인 요청입니다. 삭제를 마무리해 주세요.')
     raw=payload();status=raw.get('status',i['status']);claim=raw.get('claim',False)
+    statuses={'접수 대기','담당자 지정','개발 중','보류','구현 완료'}
+    if not isinstance(status,str) or status not in statuses: raise BadRequest('진행 상태를 확인해 주세요.')
+    if not isinstance(claim,bool): raise BadRequest('담당자 지정 여부를 확인해 주세요.')
     if raw.get('expectedRevision')!=i['revision']: raise Conflict('다른 사용자가 변경했습니다. 새로고침해 주세요.')
     owner=g.user['role']=='admin' or i.get('assignee')==g.user['id']
     updates={};reply=text(raw,'text',4000,False)
@@ -412,27 +473,38 @@ def update_idea(iid):
     elif status!=i['status']:
         if not owner: raise Forbidden('개발 담당자 또는 관리자만 상태를 변경할 수 있습니다.')
         transitions={'접수 대기':{'보류'},'담당자 지정':{'개발 중','보류','접수 대기'},'개발 중':{'구현 완료','보류','접수 대기'},'보류':{'접수 대기','개발 중'},'구현 완료':{'개발 중'}}
-        if status not in transitions.get(i['status'],set()): raise BadRequest('다음 진행 상태를 확인해 주세요.')
+        if g.user['role']!='admin' and status not in transitions.get(i['status'],set()): raise BadRequest('다음 진행 상태를 확인해 주세요.')
         if status=='구현 완료':
             tid=raw.get('tool')
-            if not isinstance(tid,int): raise BadRequest('구현한 기능을 선택해 주세요.')
+            if isinstance(tid,bool) or not isinstance(tid,int): raise BadRequest('구현한 기능을 선택해 주세요.')
             t=tool(tid);usable(t);updates['tool']=tid
         if status=='접수 대기': updates['assignee']=None
-        if status=='개발 중' and not i.get('assignee'): updates['assignee']=g.user['id']
+        if status in {'담당자 지정','개발 중'} and not i.get('assignee'): updates['assignee']=g.user['id']
+        if status!='구현 완료': updates['tool']=None
         updates['status']=status
     if not updates and not reply: raise BadRequest('답변 또는 변경할 내용을 입력해 주세요.')
     recipients={i['user'],i.get('assignee'),*all_admin_ids(),*(r['user'] for r in i.get('replies',[]))}-{None}
     e=event(recipients,f'{i["name"]} · {updates.get("status", "새 답변")}',{'type':'idea','id':iid},'idea')
+    if updates.get('tool'): e['toolCheck']=updates['tool']
+    if updates: e['audit']=audit_event(f'기능 요청 {iid} {updates.get("status", i["status"])} 상태 변경')['audit']
     op={'$inc':{'revision':1},'$push':{'outbox':e}}
     if updates: op['$set']=updates
     if reply: op['$push']['replies']={'user':g.user['id'],'text':reply,'created':time.time()}
-    if not db().ideas.update_one({'_id':iid,'revision':i['revision']},op).modified_count: raise Conflict('다른 사용자가 먼저 처리했습니다.')
-    return jsonify(ok=True,pending=deliver_pending('ideas',iid))
+    if not db().ideas.update_one({'_id':iid,'revision':i['revision'],'purge':{'$exists':False}},op).modified_count: raise Conflict('다른 사용자가 먼저 처리했습니다.')
+    pending=cleanup_late_tool_write(updates['tool']) if updates.get('tool') else False
+    return jsonify(ok=True,pending=deliver_pending('ideas',iid) or pending)
+
+@api.delete('/api/ideas/<int:iid>')
+def delete_idea(iid):
+    admin()
+    result=permanent_delete.remove('idea',iid,payload().get('expectedRevision'))
+    return jsonify(result),202 if result['pending'] else 200
 
 @api.get('/api/notifications')
 def notifications():
+    deletion_pending=post_commit.followup_pending('deletion-reconciliation',permanent_delete.reconcile_completed)
     pending=post_commit.followup_pending('activity-maintenance',activity.flush,None,None,50)
-    pending=post_commit.followup_pending('notification-maintenance',deliver_notifications) or pending
+    pending=post_commit.followup_pending('notification-maintenance',deliver_notifications) or pending or deletion_pending
     query={'user':g.user['id']}
     if request.args.get('unread')=='true': query['read']=False
     before=request.args.get('before')
@@ -503,7 +575,7 @@ def rollback(tid):
     if v['path'] and not artifact_path(v['path']).is_file(): raise Conflict('복구 파일이 없습니다.')
     for x in vs:
         if x['n']==t['active']: x['withdrawn']=True
-    data={**t['data'],**v['data'],'workflow':v['data'].get('workflow')};e=event(followers(t),f'{data["name"]} v{n}으로 복구되었습니다.',{'type':'tool','id':tid},'release')
+    data={**t['data'],**v['data'],'workflow':v['data'].get('workflow'),'installProfile':v['data'].get('installProfile')};e=event(followers(t),f'{data["name"]} v{n}으로 복구되었습니다.',{'type':'tool','id':tid},'release')
     pending=cas(t,{'$set':{'data':data,'versions':vs,'active':n,'fallback':n,'paused':True},'$push':{'outbox':e}},f'도구 {tid} v{n} 복구')
     return jsonify(ok=True,pending=pending)
 
@@ -605,6 +677,7 @@ def download(tid,n):
     response=send_file(path,as_attachment=True,download_name=v['name'],mimetype='application/octet-stream',conditional=False)
     if request.method!='HEAD':
         activity.record_download(tid,g.user['id'],n,token_id=getattr(g,'api_token_id',None),update=purpose=='update')
+        cleanup_late_tool_write(tid)
         post_commit.followup_pending('download-history',activity.flush,tid,g.user['id'],50)
     response.headers['Cache-Control']='no-store';return response
 
@@ -613,7 +686,7 @@ def manifest(tid):
     t=tool(tid);usable(t);v=next(v for v in t['versions'] if v['n']==t['active'])
     if v.get('deleted') or v.get('withdrawn'):
         raise NotFound('현재 배포 가능한 버전이 없습니다.')
-    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow'),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
+    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow'),installProfile=v.get('data',{}).get('installProfile'),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
 
 @api.get('/api/tools/<int:tid>/releases/<int:n>/deployment')
 def deployment_info(tid,n):
@@ -625,7 +698,7 @@ def deployment_info(tid,n):
         package=v['package'],filename=v['name'],sha256=v['sha'],bytes=v['size'],
         downloadUrl=f'/download/{tid}/{n}',versionCheckUrl=f'/api/tools/{tid}/version-check?release={n}',
         authenticationRequired=True,managedInstall=False,
-        installationGuide=v['data']['guide'],environment=v['data']['environment'],workflow=v['data'].get('workflow'),
+        installationGuide=v['data']['guide'],environment=v['data']['environment'],workflow=v['data'].get('workflow'),installProfile=v['data'].get('installProfile'),
         notice='상대 주소는 이 웹 서비스 주소 기준입니다. 실제 설치 후 이 배포 번호를 기록하세요. SSO 인증 연결과 실행 시 확인 코드는 도구 제작자가 연결해야 합니다.')
     response.headers['Content-Disposition']=f'attachment; filename="ai-square-{tid}-v{n}.json"'
     return response

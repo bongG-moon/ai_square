@@ -25,8 +25,8 @@ class AuthenticationRequired(ClientError):
     pass
 
 
-def open_auth_page(url):
-    link = base_url(url) + '/local-access'
+def open_auth_page(url, allow_http_origin=None):
+    link = base_url(url, allow_http_origin) + '/local-access'
     try:
         opened = webbrowser.open(link)
     except Exception:
@@ -40,7 +40,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def base_url(value):
+def base_url(value, allow_http_origin=None):
     if not isinstance(value, str) or any(ord(c) <= 32 for c in value) or '\\' in value:
         raise ClientError('서버 주소 형식을 확인하세요.')
     try:
@@ -51,13 +51,17 @@ def base_url(value):
     if not p.hostname or p.username or p.password or p.query or p.fragment or p.scheme not in {'https', 'http'}:
         raise ClientError('인증정보·쿼리 없는 http(s) 서버 주소를 입력하세요.')
     if p.scheme == 'http' and p.hostname not in {'127.0.0.1', 'localhost', '::1'}:
-        raise ClientError('사내 서버는 HTTPS 주소를 사용하세요. HTTP는 로컬 시험에서만 허용됩니다.')
+        # Exact configured origin only, never a global "allow HTTP" switch.
+        origin = p.scheme + '://' + p.netloc.lower()
+        if allow_http_origin != origin:
+            raise ClientError('HTTP에서는 KEY가 암호화되지 않습니다. 사내 주소를 확인하고 configure --url 주소 --allow-http로 해당 주소만 허용하세요.')
     return value.rstrip('/')
 
 
 class Client:
-    def __init__(self, url, token='', timeout=30, opener=None):
-        self.url = base_url(url)
+    def __init__(self, url, token='', timeout=30, opener=None, allow_http_origin=None):
+        self.url = base_url(url, allow_http_origin)
+        self.allow_http_origin = allow_http_origin
         if token and not re.fullmatch(r'ptsq_[A-Za-z0-9_-]{43}', token):
             raise ClientError('인증키 형식을 확인하세요.')
         self.token = token
@@ -181,6 +185,7 @@ def main(argv=None):
     sub.add_parser('auth', help='인증키 발급·관리 화면 열기')
     configure = sub.add_parser('configure', help='서버 주소 설정 (인증키 저장 안 함)')
     configure.add_argument('--url', required=True)
+    configure.add_argument('--allow-http', action='store_true', help='이 사내 HTTP 주소에 KEY가 암호화 없이 전송됨을 확인하고 허용')
     search = sub.add_parser('search', help='도구 검색')
     search.add_argument('query', nargs='?', default='')
     search.add_argument('--type', default='', choices=['', 'MCP/Tool', 'Skill', '플러그인/하네스'])
@@ -198,27 +203,30 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.command == 'configure':
-            value = base_url(args.url)
+            parsed = urlsplit(args.url)
+            allowed = 'http://' + parsed.netloc.lower() if args.allow_http and parsed.scheme == 'http' else None
+            value = base_url(args.url, allowed)
             args.config.parent.mkdir(parents=True, exist_ok=True)
-            args.config.write_text(json.dumps(dict(baseUrl=value), ensure_ascii=False, indent=2), encoding='utf-8')
-            result = dict(config=str(args.config.resolve()), baseUrl=value)
+            args.config.write_text(json.dumps(dict(baseUrl=value, allowHttpOrigin=allowed), ensure_ascii=False, indent=2), encoding='utf-8')
+            result = dict(config=str(args.config.resolve()), baseUrl=value, httpWarning='KEY가 암호화 없이 이 주소로 전송됩니다.' if allowed else None)
         else:
             if not args.config.exists():
                 raise ClientError('먼저 configure --url 서버주소 명령으로 주소를 설정하세요.')
             config = json.loads(args.config.read_text(encoding='utf-8-sig'))
             if not isinstance(config, dict) or not isinstance(config.get('baseUrl'), str):
                 raise ClientError('설정 파일의 baseUrl을 확인하세요.')
-            url = base_url(config['baseUrl'])
+            allowed = config.get('allowHttpOrigin')
+            url = base_url(config['baseUrl'], allowed)
             if args.command == 'auth':
-                print(json.dumps(open_auth_page(url), ensure_ascii=False))
+                print(json.dumps(open_auth_page(url, allowed), ensure_ascii=False))
                 return 0
             token = os.environ.get('PTAI_API_TOKEN', os.environ.get('PTAI_READ_TOKEN', '')).strip()
             if args.authenticate or (not token and urlsplit(url).hostname not in {'127.0.0.1', 'localhost', '::1'}):
-                auth_info = open_auth_page(url) if not token else {}
+                auth_info = open_auth_page(url, allowed) if not token else {}
                 if not sys.stdin.isatty():
                     raise ClientError('인증키 발급 화면: '+auth_info.get('authUrl', url+'/local-access')+' · 사용자 터미널에서 입력하거나 PTAI_API_TOKEN을 설정하세요. 대화창에 보내지 마세요.')
                 token = getpass.getpass('다운로드 인증키 (화면에 표시되지 않음): ').strip()
-            client = Client(url, token)
+            client = Client(url, token, allow_http_origin=allowed)
             if args.command == 'search':
                 result = client.search(args.query, args.type, args.offset, args.limit, args.org_id)
             elif args.command == 'show':
@@ -230,7 +238,7 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except AuthenticationRequired as error:
-        print(json.dumps(dict(error=str(error), **open_auth_page(url)), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(dict(error=str(error), **open_auth_page(url, allowed)), ensure_ascii=False), file=sys.stderr)
         return 1
     except (ClientError, OSError, ValueError, EOFError, HTTPException):
         # Do not dump URLs with credentials, response bodies, environment, or tracebacks.

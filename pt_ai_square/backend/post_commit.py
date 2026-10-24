@@ -39,11 +39,15 @@ def audit_job(job_id, user, action, *, subscription=None):
 def deliver_job(collection, document_id, job):
     """Deliver one legacy job; the caller owns error isolation and its budget."""
     subscription = job.get('subscription')
-    if subscription:
+    from .permanent_delete import deletion_started
+    if subscription and not deletion_started('tool', subscription['tool']):
         db().subscriptions.update_one(
             subscription, {'$setOnInsert': {'enabled': True}}, upsert=True)
     entry = job['audit']
     db().audit.update_one({'_id': entry['_id']}, {'$setOnInsert': entry}, upsert=True)
+    if subscription:
+        from .permanent_delete import cleanup_if_deleted
+        cleanup_if_deleted('tool', subscription['tool'])
     collection.update_one({'_id': document_id},
                           {'$pull': {'postCommit': {'_id': job['_id']}}})
 

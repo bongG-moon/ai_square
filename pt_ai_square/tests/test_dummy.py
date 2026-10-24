@@ -65,3 +65,13 @@ def test_dummy_setting_default_and_environment_precedence(monkeypatch,tmp_path):
     assert config.settings()['DATA_MODE']=='dummy'
     monkeypatch.setenv('PTAI_DATA_MODE','mongodb')
     assert config.settings()['DATA_MODE']=='mongodb'
+
+
+def test_ax_workspace_dummy_is_read_only_and_separate(dummy):
+    response=dummy.get('/api/ax-workspace')
+    assert response.status_code == 200
+    assert response.json['canManage'] is False
+    assert {x['category'] for x in response.json['files']} == {'workspace','plugin','integration'}
+    assert dummy.get(response.json['files'][0]['downloadUrl']).status_code == 409
+    assert dummy.post('/api/ax-workspace').status_code == 409
+    assert dummy.get('/api/deletions').json == {'jobs':[]}
