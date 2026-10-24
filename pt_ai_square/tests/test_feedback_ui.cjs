@@ -273,7 +273,8 @@ function publishSetup(){
  const context={runtime:{draft,step:3,releaseId:null},actions:{},packageBlockingError:()=>'',Core:{validate:()=>''},
   crypto:require('node:crypto').webcrypto,Uint8Array,
   FormData:class{constructor(){this.values={};}append(key,value){this.values[key]=value;}},
-  requestAPI:(url,method,form)=>{const request=deferred();requests.push({...request,url,method,metadata:JSON.parse(form.values.metadata),artifact:form.values.artifact});return request.promise;},
+  setTimeout:callback=>{queueMicrotask(callback);return 1;},
+  requestAPI:(url,method='GET',form,options)=>{const request=deferred();requests.push({...request,url,method,metadata:form?JSON.parse(form.values.metadata):undefined,artifact:form?.values.artifact,options});return request.promise;},
   refresh:async()=>{},openModal:(title,kicker,html)=>opened.push({title,kicker,html}),getItem:()=>undefined,esc:String,button:()=>'',icon:()=>'',
  };
  vm.createContext(context);vm.runInContext(publishSource,context,{filename:'static/app.js publish'});
@@ -282,6 +283,111 @@ function publishSetup(){
  async function failed(){const pending=context.publish(),request=requests.at(-1);request.reject(Error('Response unavailable'));await assert.rejects(pending,/Response unavailable/);return request;}
  return {context,draft,requests,opened,failed};
 }
+
+test('transport errors use a readable uncertain result without silently retrying a mutation',async()=>{
+ const h=setup(),pending=h.context.requestAPI('/api/tools','POST',{name:'Example'});
+ h.requests[0].reject(new TypeError('Failed to fetch'));
+ await assert.rejects(pending,error=>error.code==='NETWORK_ERROR'&&error.uncertain===true&&/서버 응답/.test(error.message)&&!/Failed to fetch/.test(error.message));
+ assert.equal(h.requests.length,1);assert.equal(h.context.runtime.requestBusy,0);
+});
+
+for(const status of [200,502,503,504,413])test(`non-JSON HTTP ${status} preserves its status and distinguishes uncertain saves`,async()=>{
+ const h=setup(),pending=h.context.requestAPI('/api/tools','POST',{});
+ h.requests[0].resolve({ok:status===200,status,json:async()=>{throw new SyntaxError('HTML or truncated body');}});
+ await assert.rejects(pending,error=>error.status===status&&error.uncertain===(status!==413)&&!/HTML/.test(error.message));
+ assert.equal(h.context.runtime.requestBusy,0);
+});
+
+test('a normal validation error is not mistaken for a lost save response',async()=>{
+ const h=setup(),pending=h.context.requestAPI('/api/tools','POST',{});
+ h.requests[0].resolve({ok:false,status:400,json:async()=>({error:'Check the ZIP'})});
+ await assert.rejects(pending,error=>error.status===400&&!error.uncertain&&error.message==='Check the ZIP');
+});
+
+test('receipt checks time out cleanly and never redirect away from an unsaved form',async()=>{
+ const h=setup();h.context.AbortController=AbortController;h.context.setTimeout=setTimeout;h.context.clearTimeout=clearTimeout;
+ const pending=h.context.requestAPI('/api/publish-requests/id','GET',undefined,{timeoutMs:5,redirectOnAuth:false});
+ h.requests[0].options.signal.addEventListener('abort',()=>h.requests[0].reject(Object.assign(Error('Abort'),{name:'AbortError'})));
+ await assert.rejects(pending,error=>error.uncertain&&error.code==='NETWORK_ERROR');
+ const denied=h.context.requestAPI('/api/publish-requests/id','GET',undefined,{redirectOnAuth:false});
+ h.requests[1].resolve({ok:false,status:401,json:async()=>({error:'로그인이 필요합니다.',login:'/login'})});
+ await assert.rejects(denied,error=>error.status===401);assert.equal(h.context.runtime.requestBusy,0);
+});
+
+test('a lost ZIP publish response recovers a confirmed receipt without a second upload',async()=>{
+ const h=publishSetup(),pending=h.context.publish(),requestId=h.requests[0].metadata.clientRequestId;
+ h.requests[0].reject(Object.assign(Error('Network unavailable'),{uncertain:true}));await tick();
+ assert.equal(h.requests.length,2);assert.equal(h.requests[1].method,'GET');
+ assert.equal(h.requests[1].url,`/api/publish-requests/${requestId}`);
+ assert.equal(h.requests[1].options.redirectOnAuth,false);assert.equal(h.requests[1].options.timeoutMs,4000);
+ await h.context.publish();assert.equal(h.requests.length,2);
+ h.requests[1].resolve({status:'confirmed',id:19,version:1,pending:true});await pending;
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,1);
+ assert.equal(h.context.runtime.draft,null);assert.equal(h.context.runtime.publishBusy,false);
+ assert.equal(h.opened[0].kicker,'게시 완료');assert.match(h.opened[0].html,/v1을 서버에 저장했습니다/);
+});
+
+test('a delayed first publish is polled read-only until its receipt is visible',async()=>{
+ const h=publishSetup(),pending=h.context.publish();
+ h.requests[0].reject(Object.assign(Error('Gateway timeout'),{status:504,uncertain:true}));await tick();
+ for(let i=1;i<3;i++){h.requests[i].resolve({status:'unconfirmed'});await tick();}
+ h.requests[3].resolve({status:'confirmed',id:19,version:1});await pending;
+ assert.equal(h.requests.length,4);assert.equal(h.requests.filter(r=>r.method==='POST').length,1);
+ assert.equal(h.opened.length,1);
+});
+
+test('an unconfirmed publish preserves its file and UUID; explicit retry checks before uploading',async()=>{
+ const h=publishSetup(),pending=h.context.publish(),requestId=h.requests[0].metadata.clientRequestId;
+ const rejected=assert.rejects(pending,error=>error.uncertain&&/완료 여부/.test(error.message)&&error.message.includes(requestId));
+ h.requests[0].reject(Object.assign(Error('Lost response'),{uncertain:true}));await tick();
+ for(let i=1;i<=3;i++){h.requests[i].resolve({status:'unconfirmed'});await tick();}
+ await rejected;assert.equal(h.opened.length,0);assert.equal(h.context.runtime.draft,h.draft);
+ assert.equal(h.context.runtime.publishAttempt.id,requestId);assert.equal(h.context.runtime.publishBusy,false);
+ const retry=h.context.publish();assert.equal(h.requests[4].method,'GET');
+ h.requests[4].resolve({status:'confirmed',id:19,version:1});await retry;
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,1);assert.equal(h.opened.length,1);
+});
+
+test('an explicit retry reuses the same publish UUID if the receipt is still absent',async()=>{
+ const h=publishSetup(),first=h.context.publish(),requestId=h.requests[0].metadata.clientRequestId;
+ const rejected=assert.rejects(first,/완료 여부/);
+ h.requests[0].reject(Object.assign(Error('Lost response'),{uncertain:true}));await tick();
+ h.requests[1].reject(Object.assign(Error('Endpoint unavailable'),{status:404}));await rejected;
+ const retry=h.context.publish();
+ for(let i=2;i<=4;i++){h.requests[i].resolve({status:'unconfirmed'});await tick();}
+ assert.equal(h.requests[5].method,'POST');assert.equal(h.requests[5].metadata.clientRequestId,requestId);
+ h.requests[5].resolve({id:19,version:1});await retry;
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,2);
+});
+
+test('receipt authentication failure retains the upload and asks for login without another POST',async()=>{
+ const h=publishSetup(),pending=h.context.publish();const rejected=assert.rejects(pending,/로그인이 만료/);
+ h.requests[0].reject(Object.assign(Error('Lost response'),{uncertain:true}));await tick();
+ h.requests[1].reject(Object.assign(Error('Login required'),{status:401}));await rejected;
+ assert.equal(h.context.runtime.draft,h.draft);assert.equal(h.context.runtime.publishBusy,false);assert.equal(h.opened.length,0);
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,1);
+});
+
+test('a new-version recovery returns the originally saved version without publishing v3',async()=>{
+ const h=publishSetup();h.context.runtime.releaseId=7;
+ const pending=h.context.publish();h.requests[0].reject(Object.assign(Error('Lost response'),{uncertain:true}));await tick();
+ h.requests[1].resolve({status:'confirmed',id:7,version:2});await pending;
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,1);assert.equal(h.context.runtime.newId,7);
+ assert.match(h.opened[0].html,/v2을 서버에 저장했습니다/);
+});
+
+test('a transient failure while checking a saved publication retries only the receipt GET',async()=>{
+ const h=publishSetup(),pending=h.context.publish();h.requests[0].reject(Object.assign(Error('Lost response'),{uncertain:true}));await tick();
+ h.requests[1].reject(Object.assign(Error('Server restarting'),{uncertain:true}));await tick();
+ h.requests[2].resolve({status:'confirmed',id:19,version:1});await pending;
+ assert.equal(h.requests.filter(r=>r.method==='POST').length,1);assert.equal(h.opened.length,1);
+});
+
+test('a malformed success response requires a real receipt before displaying success',async()=>{
+ const h=publishSetup(),pending=h.context.publish();h.requests[0].resolve({});await tick();
+ assert.equal(h.opened.length,0);assert.equal(h.requests[1].method,'GET');
+ h.requests[1].resolve({status:'confirmed',id:19,version:1});await pending;assert.equal(h.opened.length,1);
+});
 
 test('concurrent programmatic publish calls send one POST and release the busy guard on failure and success',async()=>{
  const h=publishSetup(),first=h.context.publish();assert.equal(h.context.runtime.publishBusy,true);
@@ -310,6 +416,7 @@ test('changing publish content, immutable file, release target, URL or commands 
  for(const change of [
   ()=>{h.draft.desc='Changed';},()=>{h.draft.file={name:'tool.zip'};},()=>{h.context.runtime.releaseId=7;},
   ()=>{h.draft.workflow={steps:[{title:'New workflow'}]};},
+  ()=>{h.draft.installProfile={schemaVersion:1,kind:'skill',host:'claude',slug:'example',scopes:['project'],entrypoint:'SKILL.md'};},
   ()=>{h.draft.mode='url';h.draft.url='https://example.test/tool';},()=>{h.draft.url='https://example.test/new-tool';},
   ()=>{h.draft.mode='command';h.draft.commandProject='install first';},()=>{h.draft.commandUser='install user';},
  ]){change();const request=await h.failed();assert.notEqual(request.metadata.clientRequestId,previous);previous=request.metadata.clientRequestId;}

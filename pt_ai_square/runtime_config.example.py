@@ -32,6 +32,13 @@ PTAI_COOKIE_SECURE = False
 # 같은 주소에서 앱을 여러 개 실행하면 앱마다 다른 이름을 사용해 로그인 충돌을 피하세요.
 PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'
 
+# 선택 설정: 사용자가 브라우저에서 접속하는 AI SQUARE의 공용 주소입니다.
+# 비워두면 MCP를 받는 현재 사이트 주소를 ZIP에 자동 포함합니다. 일반 환경은 입력할 필요가 없습니다.
+# 프록시 뒤에서 내부 주소/프로토콜로 보이는 경우에만 실제 외부 주소를 지정하세요.
+# 예: 'http://ai-square.company.example' 또는 'https://ai-square.company.example'
+# 경로(/local-access 등), 계정, KEY, 쿼리는 넣지 않습니다. 웹 실행 방식이나 포트를 바꾸지 않습니다.
+PTAI_PUBLIC_URL = ''
+
 # 한 HTTP 업로드 요청 전체의 최대 용량(MB)입니다. 128이면 약 128MB입니다.
 # 여러 파일과 입력 정보가 함께 계산됩니다. 요청 첨부에는 별도로 파일당 20MB·최대 5개 제한이 있습니다.
 PTAI_MAX_UPLOAD_MB = 128

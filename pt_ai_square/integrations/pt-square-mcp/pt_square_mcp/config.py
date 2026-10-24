@@ -11,6 +11,12 @@ from urllib.parse import urlsplit
 
 DEFAULT_CONFIG = Path.home() / '.pt-ai-square' / 'mcp' / 'config.json'
 TOKEN_RE = re.compile(r'ptsq_[A-Za-z0-9_-]{43}')
+CREDENTIAL_FILE_RE = re.compile(r'credential(?:\.[a-f0-9]{32})?\.dpapi\.json')
+
+
+def default_download_directory():
+    """User-owned data survives replacing or moving the MCP program folder."""
+    return no_links(Path.home() / 'AI_SQUARE' / 'downloads')
 
 
 class SquareError(ValueError):
@@ -49,7 +55,7 @@ def no_links(path):
 def scoped_path(value, roots, *, existing=False):
     path = no_links(value)
     if not any(path == root or root in path.parents for root in roots):
-        raise SquareError('처음 연결할 때 선택한 작업 폴더 안의 경로만 사용할 수 있습니다.')
+        raise SquareError('허용된 작업 폴더 안의 경로만 사용할 수 있습니다. 다른 원본·프로젝트 폴더는 select_workspace에서 직접 선택하세요.')
     if existing and not path.exists():
         raise SquareError('선택한 파일 또는 폴더가 없습니다.')
     return path
@@ -132,7 +138,8 @@ def protect(data, decrypt=False):
         kernel.LocalFree(ctypes.cast(out.data, ctypes.c_void_p))
 
 
-def save_config(path, url, roots, token=None, allow_http=False):
+def save_config(path, url, roots, token=None, allow_http=False, *, download_directory=None,
+                credential_name='credential.dpapi.json'):
     url = normalize_url(url)
     if url.startswith('http:') and not allow_http:
         raise SquareError('HTTP의 KEY·파일 전송이 암호화되지 않음을 확인하고 정확한 주소를 승인해야 합니다.')
@@ -142,13 +149,20 @@ def save_config(path, url, roots, token=None, allow_http=False):
     path = no_links(path)
     data = dict(schemaVersion=1, baseUrl=url, acceptedHttpOrigin=url if allow_http and url.startswith('http:') else None,
                 trustedRoots=[str(p) for p in paths], credentialRef='environment:PTAI_API_TOKEN')
+    if download_directory is not None:
+        directory = scoped_path(download_directory, paths, existing=True)
+        if not directory.is_dir():
+            raise SquareError('다운로드 폴더를 확인하세요.')
+        data['downloadDirectory'] = str(directory)
     if token:
         if not TOKEN_RE.fullmatch(token):
             raise SquareError('연결 KEY 형식을 확인하세요.')
+        if not CREDENTIAL_FILE_RE.fullmatch(credential_name):
+            raise SquareError('KEY 보관 파일 이름을 확인하세요.')
         # Binding inside the encrypted payload prevents accidental credential reuse after editing the URL.
         secret = protect(json.dumps(dict(origin=url, token=token)).encode())
-        atomic_json(path.parent / 'credential.dpapi.json', {'encrypted': base64.b64encode(secret).decode()})
-        data['credentialRef'] = 'windows-dpapi:credential.dpapi.json'
+        atomic_json(path.parent / credential_name, {'encrypted': base64.b64encode(secret).decode()})
+        data['credentialRef'] = 'windows-dpapi:' + credential_name
     atomic_json(path, data)
     return data
 
@@ -163,15 +177,17 @@ class Settings:
         self.roots = [no_links(p) for p in self.data.get('trustedRoots', [])]
         if not self.roots or any(not p.is_dir() or p == Path(p.anchor) for p in self.roots):
             raise SquareError('허용된 작업 폴더 설정을 확인하세요.')
+        self.downloads = (scoped_path(self.data['downloadDirectory'], self.roots)
+                          if 'downloadDirectory' in self.data else default_download_directory())
         self.state = no_links(self.path.parent / 'state')
 
     def token(self):
         ref = self.data.get('credentialRef')
         if ref == 'environment:PTAI_API_TOKEN':
             token = os.environ.get('PTAI_API_TOKEN', '')
-        elif ref == 'windows-dpapi:credential.dpapi.json':
+        elif isinstance(ref, str) and ref.startswith('windows-dpapi:') and CREDENTIAL_FILE_RE.fullmatch(ref.split(':', 1)[1]):
             try:
-                raw = read_json(self.path.parent / 'credential.dpapi.json')['encrypted']
+                raw = read_json(self.path.parent / ref.split(':', 1)[1])['encrypted']
                 secret = json.loads(protect(base64.b64decode(raw, validate=True), decrypt=True))
                 if secret.get('origin') != self.url:
                     raise SquareError('KEY가 연결된 서버와 설정 주소가 다릅니다. setup을 다시 실행하세요.')

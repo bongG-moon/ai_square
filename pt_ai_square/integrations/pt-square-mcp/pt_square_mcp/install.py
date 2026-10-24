@@ -11,6 +11,7 @@ import uuid
 from .config import SquareError, atomic_json, read_json, no_links, scoped_path
 from .files import extract, sha256
 from .profiles import validate_profile
+from .client import automatic_download_directory
 
 
 def digest(value):
@@ -136,7 +137,7 @@ class Installer:
         config_file = no_links(plan['configFile']) if plan['configFile'] else None
         if config_file and (sha256(config_file) if config_file.exists() else None)!=plan['configHash']:
             raise SquareError('MCP 설정이 변경되었습니다. 다른 작업을 보존하기 위해 중단했습니다.')
-        artifact = self.client.download(current,self.settings.state/'downloads'/plan_id,update=bool(previous))
+        artifact = self.client.download(current,automatic_download_directory(self.settings,current),update=bool(previous))
         staging = no_links(self.settings.state/'staging'/plan_id)
         staging.parent.mkdir(parents=True,exist_ok=True)
         if artifact.suffix=='.zip':

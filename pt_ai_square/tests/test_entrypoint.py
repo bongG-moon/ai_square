@@ -123,7 +123,8 @@ def test_company_index_uses_base_run_arguments_without_port_override(deployment,
           "assert len(calls)==1\n"
           "assert calls[0][0] is app\n"
           "assert calls[0][1]==()\n"
-          "assert calls[0][2]=={'debug':True,'host':'0.0.0.0'},calls[0][2]\n")
+          "from backend.dev_reload import upload_reload_excludes\n"
+          "assert calls[0][2]=={'debug':True,'host':'0.0.0.0','exclude_patterns':upload_reload_excludes(app.config['DATA_DIR'])},calls[0][2]\n")
     result=subprocess.run([sys.executable,'-c',code],cwd=package,env=env,capture_output=True,text=True,encoding='utf-8',timeout=10)
     assert result.returncode==0,result.stderr
 

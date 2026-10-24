@@ -4,7 +4,7 @@ import threading
 import uuid
 from urllib.parse import urlencode
 
-from .client import Client, positive
+from .client import Client, positive, automatic_download_directory
 from .config import SquareError, Settings, atomic_json, scoped_path, no_links
 from .files import inspect, package, sha256
 from .install import Installer
@@ -25,6 +25,7 @@ class Runtime:
             return {'connected':False,'baseUrl':self.settings.url,'authUrl':self.settings.url+'/local-access',
                     'message':str(error),'databaseAccess':False,'notice':'KEY가 없거나 바뀌었다면 웹에서 확인한 뒤 setup을 다시 실행하세요. KEY를 대화창에 넣지 마세요.'}
         return dict(response,connected=True,baseUrl=self.settings.url,trustedRoots=[str(p) for p in self.settings.roots],
+                    downloadDirectory=str(self.settings.downloads),
                     transport='local-stdio',databaseAccess=False,credentialStored=self.settings.data['credentialRef'].split(':')[0],
                     encryptedTransport=self.settings.url.startswith('https:'))
 
@@ -38,9 +39,9 @@ class Runtime:
     def get_item(self,tool_id):
         return self.client.json(f'/api/tools/{positive(tool_id)}')
 
-    def download_item(self,tool_id,output_directory,update=False):
-        output=scoped_path(output_directory,self.settings.roots)
+    def download_item(self,tool_id,output_directory='',update=False):
         manifest=self.client.manifest(tool_id)
+        output=scoped_path(output_directory,self.settings.roots) if output_directory else automatic_download_directory(self.settings,manifest)
         artifact=self.client.download(manifest,output,update=update)
         return {'downloaded':True,'installed':False,'file':str(artifact),'toolId':tool_id,'release':manifest['release'],
                 'sha256':manifest['sha256'],'notice':'웹과 동일한 다운로드 API를 사용합니다. 업데이트 수신은 추가 집계하지 않습니다.'}

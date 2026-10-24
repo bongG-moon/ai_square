@@ -170,6 +170,42 @@ def details(tid):
 def publish_followup_pending(tid):
     return deliver_pending('tools',tid)
 
+
+def publication_request_key(request_id):
+    """The browser's opaque request ID is always scoped to its signed-in employee."""
+    try: request_id=str(uuid.UUID(request_id))
+    except (ValueError,TypeError,AttributeError): raise BadRequest('clientRequestId는 UUID여야 합니다.')
+    return hashlib.sha256((g.user['id']+':'+request_id).encode()).hexdigest()
+
+
+@api.get('/api/publish-requests/<request_id>')
+def publication_receipt(request_id):
+    """Recover a lost publish response without uploading or performing follow-up writes.
+
+    Absence is deliberately unconfirmed: the original request can still be running.
+    The connection-KEY allowlist excludes this browser-only recovery endpoint too.
+    """
+    if getattr(g, 'api_token_id', None):
+        raise Forbidden('게시 결과 확인은 로그인한 웹 화면에서만 사용할 수 있습니다.')
+    request_key=publication_request_key(request_id)
+    stored=db().tools.find_one(
+        {'versions.publishRequest.key':request_key},
+        {'owner':1,'deleted':1,'purge':1,
+         'versions':{'$elemMatch':{'publishRequest.key':request_key}},
+         'outbox':{'$slice':1},'postCommit':{'$slice':1}})
+    if not stored or stored.get('deleted') or stored.get('purge') or not manager(stored):
+        return jsonify(status='unconfirmed')
+    version=next((v for v in stored.get('versions',[])
+                  if v.get('publishRequest',{}).get('key')==request_key),None)
+    if version is None:
+        return jsonify(status='unconfirmed')
+    recognized=bool(version.get('package'))
+    return jsonify(status='confirmed',id=stored['_id'],version=version['n'],
+                   pending=bool(stored.get('outbox') or stored.get('postCommit')),
+                   packageRecognized=recognized,packageWarning=version.get('packageWarning',''),
+                   deploymentUrl=f'/api/tools/{stored["_id"]}/releases/{version["n"]}/deployment' if recognized else None)
+
+
 @api.post('/api/tools')
 @api.post('/api/tools/<int:tid>/versions')
 def publish(tid=None):
@@ -227,11 +263,7 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
         if getattr(g,'api_token_id',None) and not draft_id:
             raise Forbidden('승인된 게시 초안이 필요합니다.')
         request_id=raw.get('clientRequestId')
-        request_key=None
-        if request_id is not None:
-            try: request_id=str(uuid.UUID(request_id))
-            except (ValueError,TypeError,AttributeError): raise BadRequest('clientRequestId는 UUID여야 합니다.')
-            request_key=hashlib.sha256((g.user['id']+':'+request_id).encode()).hexdigest()
+        request_key=publication_request_key(request_id) if request_id is not None else None
         package=artifact.get('package')
         data=publication_data(raw,artifact,t)
         fingerprint=hashlib.sha256(json.dumps(dict(target=tid,data=data,sha=artifact['sha'],url=artifact['url'],commands=artifact.get('commands',{})),sort_keys=True,ensure_ascii=False).encode()).hexdigest()

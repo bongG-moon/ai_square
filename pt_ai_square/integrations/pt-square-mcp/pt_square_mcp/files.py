@@ -7,7 +7,7 @@ import shutil
 import stat
 import zipfile
 
-from .config import SquareError, no_links, scoped_path
+from .config import CREDENTIAL_FILE_RE, SquareError, no_links, scoped_path
 from .profiles import relative
 from ._vendor.package_contract import read_package
 
@@ -19,7 +19,9 @@ SECRET_PATTERN = re.compile(rb'ptsq_[A-Za-z0-9_-]{43}|-----BEGIN (?:RSA |EC |OPE
 
 
 def blocked_name(name):
-    return any(p.casefold() in BLOCKED or p.casefold().startswith('.env') or p.lower().endswith(('.pem','.key','.pfx')) for p in name.split('/'))
+    return any(p.casefold() in BLOCKED or CREDENTIAL_FILE_RE.fullmatch(p.casefold().removesuffix('.new'))
+               or p.casefold().startswith('.env') or p.lower().endswith(('.pem','.key','.pfx'))
+               for p in name.split('/'))
 
 
 def validate_publish_archive(archive):

@@ -81,6 +81,15 @@ def page():
     return render_template('local_access.html')
 
 
+@local_access.get('/static/guides/pt-square-mcp.zip')
+@local_access.get('/local-access/mcp.zip')
+def mcp_download():
+    # This exact legacy static URL must also pass the normal browser auth guard.
+    # Personal KEY callers are not added to the API allowlist above.
+    from .mcp_package import download_package
+    return download_package()
+
+
 @local_access.get('/api/local-tokens')
 def tokens():
     from . import activity

@@ -6,7 +6,7 @@ import hashlib
 ROOT=Path(__file__).resolve().parents[1]
 source=ROOT/'integrations/pt-square-mcp'
 target=ROOT/'static/guides/pt-square-mcp.zip'
-allowed={'README.md','requirements.txt','pyproject.toml','run_mcp.py'}
+allowed={'README.md','requirements.txt','pyproject.toml','run_mcp.py','Connect.cmd'}
 paths=sorted(p for p in source.rglob('*') if p.is_file()
              and (p.relative_to(source).as_posix() in allowed or p.relative_to(source).parts[0]=='pt_square_mcp')
              and '__pycache__' not in p.parts and p.suffix not in {'.pyc','.pyo'})

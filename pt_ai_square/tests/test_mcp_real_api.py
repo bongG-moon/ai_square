@@ -23,6 +23,8 @@ def fields():
 
 @pytest.mark.parametrize('as_folder',[False,True])
 def test_real_mcp_new_update_install_counts_and_rollback(app,server,tmp_path,monkeypatch,as_folder):
+    home=tmp_path/'fake-home';home.mkdir()
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     owner,h=ready(app); key,_=issue(owner,h)
     monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
     workspace=tmp_path/'workspace';workspace.mkdir()
@@ -71,6 +73,8 @@ def test_real_mcp_new_update_install_counts_and_rollback(app,server,tmp_path,mon
 
 
 def test_real_mcp_url_without_package_id_and_admin_key_owner_guard(app,server,tmp_path,monkeypatch):
+    home=tmp_path/'fake-home';home.mkdir()
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     owner,h=ready(app); key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
     workspace=tmp_path/'workspace';workspace.mkdir();config=tmp_path/'config.json'
     save_config(config,server,[workspace],allow_http=True);runtime=Runtime(Settings(config),home=tmp_path/'fake-home')

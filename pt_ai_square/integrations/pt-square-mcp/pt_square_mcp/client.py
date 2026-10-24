@@ -26,6 +26,14 @@ def positive(value):
     return value
 
 
+def automatic_download_directory(settings, manifest):
+    """Separate the same tool/version IDs on different company/test servers."""
+    server = hashlib.sha256(settings.url.encode('utf-8')).hexdigest()[:12]
+    return no_links(settings.downloads / ('server-' + server)
+                    / f'tool-{positive(manifest.get("toolId"))}'
+                    / f'v{positive(manifest.get("release"))}')
+
+
 class Client:
     def __init__(self, settings, opener=None):
         self.settings = settings

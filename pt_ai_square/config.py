@@ -27,6 +27,7 @@ def settings():
         raise ValueError('PTAI_'+name+'는 True 또는 False로 설정하세요.')
     backend='mongodb'
     return dict(HOST=str(get('HOST','127.0.0.1')),PORT=int(get('PORT',5080)),ACTIVITY_BACKEND=backend,
+                PUBLIC_URL=str(get('PUBLIC_URL','')).strip(),
                 DATA_MODE=str(get('DATA_MODE','mongodb')).strip().lower(),
                 MONGODB_URI=str(named('MONGODB_URI','')).strip(),
                 MONGODB_DATABASE=str(named('MONGODB_DATABASE','pt_ai_square')),

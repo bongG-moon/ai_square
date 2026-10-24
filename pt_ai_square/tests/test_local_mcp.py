@@ -33,6 +33,8 @@ def test_vendored_distribution_contract_matches_current_platform():
 
 @pytest.fixture
 def settings(tmp_path,monkeypatch):
+    home=tmp_path/'managed-home';home.mkdir()
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     workspace=tmp_path/'workspace';workspace.mkdir()
     path=tmp_path/'private'/'config.json'
     save_config(path,'http://localhost:5000',[workspace],allow_http=True)
@@ -400,7 +402,7 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
     from mcp.client.stdio import stdio_client
     url,_,_=api_server;save_config(settings.path,url,settings.roots,allow_http=True)
     async def scenario():
-        params=StdioServerParameters(command=sys.executable,args=['-X','utf8','-B',str(PACKAGE/'run_mcp.py'),'--config',str(settings.path),'serve'],env=dict(os.environ,PTAI_API_TOKEN=KEY))
+        params=StdioServerParameters(command=sys.executable,args=['-X','utf8','-B',str(PACKAGE/'run_mcp.py'),'--config',str(settings.path),'serve'],env=dict(os.environ,PTAI_API_TOKEN=KEY,USERPROFILE=str(Path.home())))
         async with stdio_client(params) as (read,write):
             async with ClientSession(read,write) as session:
                 initialized=await session.initialize();assert initialized.serverInfo.name=='P&T AI SQUARE'
@@ -408,8 +410,17 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
                 assert {'connection_status','search_items','download_item','prepare_install','install_item','prepare_publish','publish_item','get_publish_status','rollback_install'}<=names
                 for tool in listing.tools:
                     assert 'token' not in tool.inputSchema.get('properties',{}) and 'key' not in tool.inputSchema.get('properties',{})
+                download=next(t for t in listing.tools if t.name=='download_item')
+                assert download.inputSchema['required']==['tool_id']
+                picker=next(t for t in listing.tools if t.name=='select_workspace')
+                assert set(picker.inputSchema['properties'])=={'purpose'}
                 result=await session.call_tool('connection_status',{})
                 assert not result.isError and 'E1' in result.content[0].text and KEY not in result.content[0].text
                 result=await session.call_tool('search_items',{'query':'메일'})
                 assert not result.isError and '메일 조회' in result.content[0].text
+                # An already-running host notices a folder selected after setup.
+                extra=settings.path.parent/'selected-project';extra.mkdir()
+                save_config(settings.path,url,[*settings.roots,extra],allow_http=True)
+                result=await session.call_tool('connection_status',{})
+                assert not result.isError and 'selected-project' in result.content[0].text
     asyncio.run(scenario())

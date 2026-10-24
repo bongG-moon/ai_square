@@ -9,12 +9,21 @@ function showError(error,target){
  target.hidden=false;target.setAttribute('role','alert');target.setAttribute('aria-live','assertive');target.textContent=message;
  if(body)target.scrollIntoView?.({block:'nearest'});
 }
-async function requestAPI(url,method='GET',body){
+async function requestAPI(url,method='GET',body,options={}){
  runtime.requestBusy=(runtime.requestBusy||0)+1;
+ const controller=options.timeoutMs?new AbortController():null;
+ const timer=controller?setTimeout(()=>controller.abort(),options.timeoutMs):null;
  try{const headers={'X-CSRF-Token':server.csrf};if(body&&!(body instanceof FormData))headers['Content-Type']='application/json';
- const response=await fetch(url,{method,credentials:'same-origin',headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
- const result=await response.json();if(!response.ok){if(response.status===401)location.assign(result.login||'/login');const error=Error(result.error||'요청을 처리하지 못했습니다.');error.status=response.status;throw error;}return result;
- }finally{runtime.requestBusy--;}
+ let response;
+ try{response=await fetch(url,{method,credentials:'same-origin',headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined,...(controller?{signal:controller.signal}:{})});}
+ catch(cause){if(!['TypeError','AbortError'].includes(cause?.name))throw cause;const error=Error('서버 응답을 받지 못했습니다. 연결 상태를 확인해 주세요.');error.code='NETWORK_ERROR';error.uncertain=true;throw error;}
+ let result;
+ try{result=await response.json();}
+ catch{const error=Error(response.status===413?'파일 크기가 서버의 업로드 한도를 초과했습니다.':'서버 응답을 확인하지 못했습니다. 저장 결과를 확인해 주세요.');error.status=response.status;error.code='INVALID_RESPONSE';error.uncertain=response.ok||response.status>=500;throw error;}
+ if(!response.ok){if(response.status===401&&options.redirectOnAuth!==false)location.assign(result?.login||'/login');const error=Error(result?.error||'요청을 처리하지 못했습니다.');error.status=response.status;error.uncertain=response.status>=500;throw error;}
+ if(!result||typeof result!=='object'||Array.isArray(result)){const error=Error('서버 응답 형식을 확인하지 못했습니다.');error.code='INVALID_RESPONSE';error.uncertain=true;throw error;}
+ return result;
+ }finally{if(timer!==null)clearTimeout(timer);runtime.requestBusy--;}
 }
 async function refresh(){
  const token=runtime.refreshToken=(runtime.refreshToken||0)+1;let data;

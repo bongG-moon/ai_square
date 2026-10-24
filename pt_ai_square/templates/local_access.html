@@ -22,14 +22,15 @@
 <p id="status" role="status" aria-live="polite"></p>
 </section>
 <section class="local-card"><div class="local-card-head"><div><span class="local-eyebrow">CONNECT YOUR WORK</span><h2>내 PC에서 시작하기</h2></div></div>
-<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-mcp.zip') }}" download><strong>로컬 MCP 받기 <span aria-hidden="true">↗</span></strong><span>검색·추천 · 파일 받기 · 설치 준비 · 내 도구 게시</span></a></div>
-<p>MCP는 내 PC에서 실행됩니다. 별도 MCP 서버는 필요하지 않으며 기존 P&T AI SQUARE 웹에 연결합니다. 설치할 때 프로젝트 또는 현재 사용자 범위를 선택합니다.</p>
-<details class="local-details"><summary>로컬 MCP 연결 순서 보기</summary><p>ZIP을 풀고 그 폴더의 터미널에서 실행하세요. Python 3.11 이상과 사내에서 접근 가능한 Python 패키지 저장소가 필요합니다. KEY는 setup의 숨김 입력에 넣습니다.</p>
+<div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('local_access.mcp_download') }}" download><strong>로컬 MCP 받기 <span aria-hidden="true">↗</span></strong><span>사이트 주소 자동 설정 · 다운로드 폴더 자동 생성 · 개인 KEY로 연결</span></a></div>
+<p>ZIP을 풀고 <strong>Connect.cmd</strong>를 실행하세요. 서버 주소와 다운로드 위치가 자동으로 표시됩니다. 개인 KEY를 입력하고 <strong>연결하기</strong>를 누르면 본인 이름·부서가 표시됩니다. HTTP 사이트는 연결 안내를 한 번 확인합니다.</p>
+<p>파일은 내 사용자 폴더의 <strong>AI_SQUARE\downloads</strong> 아래 서버·도구·버전별로 저장됩니다. 실제 설치 시에는 프로젝트 또는 내 계정 범위를 선택합니다. 다른 폴더의 자료를 등록할 때는 AI에 원본 폴더 선택 창을 열어 달라고 요청하세요.</p>
+<details class="local-details"><summary>처음 MCP를 설치하는 경우</summary><p>Python 3.11 이상이 필요합니다. 연결 창에는 KEY만 입력합니다. Claude Code 등에 MCP를 처음 등록하는 경우 아래 명령으로 실행 환경을 준비한 뒤 ZIP 안 README의 MCP 등록 순서를 따르세요. 이미 MCP를 등록했다면 실행 경로는 유지할 수 있습니다.</p>
 <pre>python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe run_mcp.py setup --url {{ request.url_root.rstrip('/') }} --workspace "C:\내작업폴더"</pre>
-<p>HTTP 주소는 KEY 전송이 암호화되지 않는다는 안내를 확인하고 해당 주소를 승인합니다. Windows에서는 KEY를 사용자 계정으로 암호화해 로컬에 보관합니다.</p>
-<p>AI 프로그램의 MCP 설정에 ZIP 안 README의 실행 명령을 등록하세요. KEY가 없으면 이 화면으로 안내합니다. 조회·다운로드 KEY로 시작할 수 있고, 게시에는 업로드 포함 KEY가 필요합니다. KEY 재발급 후에는 setup을 다시 실행하세요.</p></details>
+.venv\Scripts\python.exe run_mcp.py connect</pre>
+<p>연결 창을 사용할 수 없는 환경에서는 <code>python run_mcp.py setup</code>을 실행하세요. 이 사이트에서 받은 ZIP은 주소를 포함하므로 서버 주소·작업 폴더를 입력하지 않습니다. KEY는 숨김 입력으로 받습니다.</p>
+<p>Windows에서는 KEY를 사용자 계정으로 암호화해 보관합니다. KEY는 채팅에 붙여넣지 마세요. Claude의 Connected 표시는 MCP 실행 상태이며 실제 계정 연결은 위 연결 창 또는 connection_status로 확인합니다. KEY 재발급 후에는 Connect.cmd에서 새 KEY로 다시 연결하세요.</p></details>
 <p>Python 3.11 이상이 필요합니다. 필요한 Skill을 받아 압축을 풀고 사용하는 AI에 등록하세요.</p>
 <div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download><strong>다운로드용 Skill 받기 <span aria-hidden="true">↗</span></strong><span>도구 검색 · 파일 받기 · 최신 버전 확인</span></a><a class="local-connect-item" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download><strong>배포·자동 등록 Skill 받기 <span aria-hidden="true">↗</span></strong><span>파일 준비 · 신규 등록 · 새 버전 게시</span></a></div>
 <p>배포 Skill은 웹에서 파일·내용·공개 범위를 승인한 뒤 AI 대화에서 게시를 이어갑니다. EXE 자동 변환은 하지 않습니다. MCP의 자동 설치는 지원하는 설치 정보가 있는 항목에 한합니다.</p>
