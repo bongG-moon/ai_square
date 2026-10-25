@@ -432,13 +432,20 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
             async with ClientSession(read,write) as session:
                 initialized=await session.initialize();assert initialized.serverInfo.name=='P&T AI SQUARE'
                 listing=await session.list_tools();names={t.name for t in listing.tools}
-                assert {'connection_status','search_items','download_item','prepare_install','install_item','prepare_publish','publish_item','get_publish_status','rollback_install'}<=names
+                assert {'connection_status','search_items','download_item','prepare_install','install_item','prepare_publish','publish_item','get_publish_status','rollback_install',
+                        'list_install_locations','get_workspace_selection','cancel_workspace_selection'}<=names
                 for tool in listing.tools:
                     assert 'token' not in tool.inputSchema.get('properties',{}) and 'key' not in tool.inputSchema.get('properties',{})
+                    assert not {'ctx','project_roots'} & set(tool.inputSchema.get('properties',{}))
                 download=next(t for t in listing.tools if t.name=='download_item')
                 assert download.inputSchema['required']==['tool_id']
                 picker=next(t for t in listing.tools if t.name=='select_workspace')
                 assert set(picker.inputSchema['properties'])=={'purpose'}
+                result=await session.call_tool('list_install_locations',{})
+                assert not result.isError
+                locations=json.loads(result.content[0].text)
+                assert [row['scope'] for row in locations['options']]==['user','project','other']
+                assert locations['rootsStatus']=='unsupported'
                 result=await session.call_tool('connection_status',{})
                 assert not result.isError and 'E1' in result.content[0].text and KEY not in result.content[0].text
                 result=await session.call_tool('search_items',{'query':'메일'})
@@ -449,3 +456,49 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
                 result=await session.call_tool('connection_status',{})
                 assert not result.isError and 'selected-project' in result.content[0].text
     asyncio.run(scenario())
+
+
+def test_stdio_host_root_prepares_without_folder_reselection_and_rechecks_on_install(settings,api_server,tmp_path):
+    pytest.importorskip('mcp')
+    from mcp import ClientSession,StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from mcp.types import ListRootsResult,Root
+    url,calls,payload=api_server
+    save_config(settings.path,url,settings.roots,allow_http=True)
+    host=tmp_path/'host-current-project';host.mkdir()
+    second=tmp_path/'second-project';second.mkdir()
+    arbitrary=tmp_path/'unapproved-project';arbitrary.mkdir()
+    roots=[host]
+    before=settings.path.read_bytes()
+    async def host_roots(_ctx):
+        return ListRootsResult(roots=[Root(uri=path.as_uri(),name=path.name) for path in roots])
+    async def scenario():
+        params=StdioServerParameters(command=sys.executable,args=['-X','utf8','-B',str(PACKAGE/'run_mcp.py'),'--config',str(settings.path),'serve'],
+                                     env=dict(os.environ,PTAI_API_TOKEN=KEY,USERPROFILE=str(Path.home())))
+        async with stdio_client(params) as (read,write):
+            async with ClientSession(read,write,list_roots_callback=host_roots) as session:
+                await session.initialize()
+                result=await session.call_tool('list_install_locations',{})
+                locations=json.loads(result.content[0].text)
+                assert locations['currentProject']['path']==str(host)
+                result=await session.call_tool('prepare_install',{'tool_id':1,'scope':'project','project_path':str(arbitrary)})
+                assert result.isError and not (arbitrary/'.claude').exists()
+                roots.append(second)
+                result=await session.call_tool('prepare_install',{'tool_id':1,'scope':'project'})
+                assert result.isError and '여러 개' in result.content[0].text
+                roots.pop()
+                result=await session.call_tool('prepare_install',{'tool_id':1,'scope':'project'})
+                assert not result.isError,result.content
+                plan=json.loads(result.content[0].text)
+                assert plan['scopeDir']==str(host) and plan['requiresConfirmation']
+                assert settings.path.read_bytes()==before and not (host/'.claude').exists()
+                roots[:]=[second]
+                result=await session.call_tool('install_item',{'plan_id':plan['planId'],'approval_digest':plan['approvalDigest'],'confirmed':True})
+                assert result.isError and not any(path.startswith('/download/') for path,_ in calls)
+                roots[:]=[host]
+                result=await session.call_tool('install_item',{'plan_id':plan['planId'],'approval_digest':plan['approvalDigest'],'confirmed':True})
+                assert not result.isError,result.content
+                assert json.loads(result.content[0].text)['installed']
+    asyncio.run(scenario())
+    assert (host/'.claude'/'skills'/'memo-summary'/'SKILL.md').read_bytes()==payload
+    assert settings.path.read_bytes()==before

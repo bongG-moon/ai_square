@@ -130,6 +130,8 @@ class ConnectionWindow:
 
 def _show_connection(config_path, url):
     url = normalize_url(url)
+    from .workspace_ui import enable_dpi_awareness
+    enable_dpi_awareness()
     tk, _, _ = _tk()
     root = tk.Tk()
     try:
@@ -162,14 +164,11 @@ def choose_workspace(config_path=DEFAULT_CONFIG, purpose='publish', *, chooser=N
     if purpose not in labels:
         raise SquareError('폴더 선택 용도는 publish 또는 install이어야 합니다.')
     before = Settings(config_path)
+    selection = None
     if chooser is None:
-        tk, _, dialog = _tk()
-        root = tk.Tk()
-        root.withdraw()
-        try:
-            chosen = dialog.askdirectory(parent=root, title=labels[purpose], mustexist=True)
-        finally:
-            root.destroy()
+        from .workspace_ui import choose_location
+        selection = choose_location(purpose)
+        chosen = selection.get('path') if selection.get('selected') else None
     else:
         chosen = chooser()
     if not chosen:
@@ -177,6 +176,11 @@ def choose_workspace(config_path=DEFAULT_CONFIG, purpose='publish', *, chooser=N
     path = no_links(chosen)
     if not path.is_dir() or path == Path(path.anchor):
         raise SquareError('존재하는 작업 폴더만 선택할 수 있습니다. 드라이브 전체는 허용하지 않습니다.')
+    if selection and selection.get('scope') == 'user':
+        # Account-wide install scope is not permission to upload the whole home.
+        if Settings(config_path).url != before.url:
+            raise SquareError('폴더를 선택하는 동안 연결 사이트가 바뀌었습니다. 다시 선택해 주세요.')
+        return {**selection, 'purpose':purpose}
     with operation_lock(before.path.parent):
         current = Settings(config_path)
         if current.url != before.url:

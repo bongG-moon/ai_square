@@ -65,11 +65,14 @@ class Installer:
     def _identity(self, tool_id, host, scope, directory):
         return digest([self.settings.url,tool_id,host,scope,str(directory)])
 
-    def prepare(self, tool_id, scope, project_path=''):
+    def prepare(self, tool_id, scope, project_path='', *, project_roots=()):
         self._recover_before_write()
         if scope not in {'project','user'}:
             raise SquareError('설치 범위를 project(현재 작업 폴더) 또는 user(내 계정)로 명시하세요. 기본 범위는 없습니다.')
-        scope_dir = scoped_path(project_path, self.settings.roots, existing=True) if scope == 'project' and project_path else self.home if scope == 'user' else None
+        # Additional roots come only from the current MCP host session. They
+        # never become persistent source/upload permissions in trustedRoots.
+        roots = [*self.settings.roots, *(no_links(root) for root in project_roots)]
+        scope_dir = scoped_path(project_path, roots, existing=True) if scope == 'project' and project_path else self.home if scope == 'user' else None
         if scope_dir is None or not scope_dir.is_dir():
             raise SquareError('프로젝트 설치에는 허용된 프로젝트 폴더를 지정하세요.')
         scope_identity = directory_identity(scope_dir)
@@ -134,7 +137,7 @@ class Installer:
                     requiresConfirmation=True,notice='이 경로·범위·실행 인자를 사용자에게 보여주고 확인한 뒤 install_item을 호출하세요. 의존성은 자동 설치하지 않습니다.',
                     installerScopeNotice='설치기가 선언한 범위를 따르는지는 설치기 구현에 달려 있습니다. 관리자 승격이나 범위를 강제로 바꾸지 않습니다.' if kind=='installer' else None)
 
-    def install(self, plan_id, approval_digest, confirmed=False):
+    def install(self, plan_id, approval_digest, confirmed=False, *, project_roots=()):
         if not confirmed:
             raise SquareError('준비안의 설치 범위와 변경 내용을 사용자에게 확인받아야 합니다.')
         self._recover_before_write()
@@ -151,7 +154,8 @@ class Installer:
         if digest(current) != digest(plan['manifest']):
             raise SquareError('버전 또는 설치 정보가 변경되었습니다. 다시 준비하고 확인하세요.')
         profile = validate_profile(plan['profile'])
-        scope_dir = scoped_path(plan['scopeDir'],self.settings.roots,existing=True) if plan['scope']=='project' else self.home
+        roots = [*self.settings.roots, *(no_links(root) for root in project_roots)]
+        scope_dir = scoped_path(plan['scopeDir'],roots,existing=True) if plan['scope']=='project' else self.home
         if str(scope_dir)!=plan['scopeDir']:
             raise SquareError('설치 범위가 변경되었습니다.')
         check_directory_identity(scope_dir, plan.get('scopeIdentity'))
