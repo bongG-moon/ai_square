@@ -41,6 +41,14 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 
 서버 주소는 **배포자**가 `package_for_upload.py --server-url <서버 기본 주소>`로 지정합니다. 확장 코드·`extension.json`·`connection.json`·설치 안내를 한 ZIP으로 만들며 별도 설치 EXE는 포함하지 않습니다. 주소 파일은 `{"schemaVersion": 1, "baseUrl": "http://pntaisquare.company.example"}` 형식입니다. 서버 실행 주소 `0.0.0.0` 대신 사용자가 접속하는 주소를 사용하고 KEY·쿠키·MongoDB 접속 정보를 넣지 않습니다. 사내 주소가 포함된 ZIP은 사내 배포용으로 관리하고 공개 Git에 올리지 않습니다. ZIP 전체를 원본 그대로 등록하세요.
 
+Git 릴리즈에서 받은 **`PNT-AI-Square-0.1.0-Distribution.zip`**은 서버 주소가 없는 관리자용 준비 자료입니다. 전체를 풀고 아래 명령으로 실제 서버 주소를 지정한 **`Extension.zip`**을 만든 다음, 이 최종 ZIP을 웹에 등록합니다. Python 3.10 이상 표준 라이브러리만 사용하며 소스 저장소·vendor·추가 패키지·네이티브 빌드 도구는 필요하지 않습니다.
+
+```powershell
+python configure_server.py --server-url 'https://square.company.example' --output 'PNT-AI-Square-0.1.0-Extension.zip'
+```
+
+`Distribution.zip` 자체를 사용자 설치 파일로 올리지 않습니다. 도우미는 동봉 template의 전체 SHA256과 각 payload 파일·경로·빌드 해시를 검증하고, 실행 코드는 그대로 유지한 채 주소·등록 정보·안내만 새 ZIP에 넣습니다. 압축 해제·payload 실행·서버 접속·개인 프로필 변경을 하지 않고 기존 출력 파일을 덮어쓰지 않습니다. HTTP 전송 주의 안내를 최종 ZIP과 실행 결과에 표시합니다. 해시는 전자서명이 아니므로 Git 릴리즈의 출처와 공개 체크섬을 함께 확인하세요. 상세 절차는 [DISTRIBUTION_README.txt](DISTRIBUTION_README.txt)를 따릅니다.
+
 웹은 등록한 파일을 원본 그대로 제공합니다. EXE를 ZIP에 추가하거나 `connection.json`을 만들지 않으며 `PTAI_PUBLIC_URL`도 AX 자료실 파일에 적용하지 않습니다. `PTAI_PUBLIC_URL`에 따른 주소 포함 기능은 별도의 로컬 MCP 다운로드에만 유지됩니다.
 
 공통 앱은 ZIP 경로·크기·해시·대상 폴더를 검사한 뒤 사용자 확인을 받아 설치합니다. 주소 파일은 `extension-data/pt-ai-square.store/connection.json`에 저장합니다. 이미 인증된 연결이 있으면 기존 주소·KEY를 우선 사용하며 새 ZIP의 주소로 자동 전환하지 않습니다. 다른 서버로 바꾸려면 연결 화면의 **서버 주소 변경**에서 해당 서버의 KEY로 다시 연결합니다.
@@ -79,6 +87,7 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 - `worker.py`: 공통 호스트 stdio 계약과 기존 플랫폼 설치 엔진 연결.
 - `extension.template.json`: 범용 호스트용 ID/진입점/작업 목록.
 - `package_for_upload.py`: 수동 등록용 ZIP 생성. 서버 주소를 인자로 받고 설치 도우미를 만들거나 실행하지 않습니다.
+- `configure_server.py`: 공개 배포본에 함께 넣는 독립 서버 설정 도우미. stdlib만 사용하며 재빌드 없이 검증된 template에 서버 주소를 지정합니다. 직접 빌드와 공개 배포본이 같은 등록 선언·설치 안내를 사용합니다.
 - `build.py`: 공통 확장 소스 패키징 함수. `installer/`는 이전 EXE 방식의 참고 소스이며 새 ZIP 경로에서는 사용하지 않습니다.
 - `tests/`: 개인 프로필 대신 격리 경로와 합성 자료를 사용하는 시험.
 - `../pt_ai_square/integrations/pt-square-mcp/pt_square_mcp`: 설치 엔진 정본. 빌드 시 정확한 소스를 vendor로 포함합니다. 복사본을 직접 편집하지 않습니다.
@@ -97,10 +106,16 @@ python organization-store/package_for_upload.py --server-url 'https://square.com
 
 출력 중 `PNT-AI-Square-0.1.0-Extension.zip`을 등록하고 `SHA256SUMS.txt`·등록 안내·빌드 보고서는 관리자가 보관합니다. 일반 도구 등록에서도 `ai-square.json`을 읽을 수 있습니다. ZIP 생성은 웹 업로드·게시·개인 프로필 설치를 하지 않습니다.
 
+공개 Git 릴리즈용은 주소를 넣지 않고 별도로 생성합니다. 아래 출력의 `Distribution.zip`과 체크섬을 전달하면 관리자가 사내에서 위 `configure_server.py` 명령을 실행할 수 있습니다. 기존에 만든 서버 포함 ZIP을 공개 ZIP 안에 다시 넣지 않습니다.
+
+```powershell
+python organization-store/package_for_upload.py --distribution --output-directory outputs/square-public
+```
+
 다음 시험은 플랫폼 개발·테스트 의존성을 설치한 Python에서 실행합니다. 구형 네이티브 설치기 시험은 새 ZIP 배포 검증과 분리합니다.
 
 ```powershell
-python -m pytest organization-store/tests/test_upload_package.py organization-store/tests/test_worker.py organization-store/tests/test_onboarding.py -q
+python -m pytest organization-store/tests/test_upload_package.py organization-store/tests/test_distribution_package.py organization-store/tests/test_worker.py organization-store/tests/test_onboarding.py -q
 ```
 
 실제 AX 호스트와의 패키지 검증·브라우저 시험을 추가하려면 확장 연결부가 구현된 **별도 공통 앱 소스**를 지정합니다. 이 경로가 없으면 해당 호스트 통합 시험만 사유와 함께 건너뜁니다. NSIS EXE를 새로 생성하는 시험에는 NSIS도 필요합니다. 다른 worker·설치 보호 시험 전체를 건너뛰지는 않습니다. 이전 서버가 확장 ZIP을 조립하던 다운로드 시험은 현재 AX 자료실의 원본 전달 정책과 구분합니다.

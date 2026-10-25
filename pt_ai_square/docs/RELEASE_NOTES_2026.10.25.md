@@ -2,6 +2,16 @@
 
 2026-10-25 · 확장 버전 0.1.0
 
+## 공개 배포 ZIP과 운영자 준비 순서
+
+- **ai-square-2026.10.25-source.zip**: 플랫폼과 확장 개발 소스입니다. 기존 운영 설정·MongoDB·업로드 저장소를 유지한 채 웹 소스를 교체합니다.
+- **PNT-AI-Square-0.1.0-Distribution.zip**: 서버 주소가 없는 공개 배포 준비 묶음입니다. 확장 template과 독립 설정 도우미를 포함하며 설치 EXE가 없습니다. 운영자가 서버 주소를 지정해 만든 **PNT-AI-Square-0.1.0-Extension.zip**을 웹의 AX Workspace 탭에 직접 등록합니다. 사용자는 완성된 Extension ZIP을 받아 공통 앱에서 가져온 후 개인 KEY를 입력합니다.
+- **SHA256SUMS.txt**: 두 공개 배포 파일의 검증용 SHA-256입니다.
+
+Distribution ZIP의 README에 따라 서버 주소를 지정하세요. 웹은 업로드된 ZIP을 그대로 제공하며 주소를 자동 삽입하지 않습니다. 서버 주소를 포함한 Extension ZIP은 사내 공유 대상으로 보관하고 공개 GitHub에 올리지 않습니다. 기존 확장 설치 EXE 자산은 이번 릴리즈에서 ZIP 방식으로 대체합니다.
+
+공통 앱의 사내 GitLab 배포에는 [workspace-local-0.23.32-source.zip](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/workspace-local-0.23.32-source.zip)을 사용합니다. PC 설치에는 [AX Workspace 0.23.32 설치 파일](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/AX-Workspace-0.23.32-Setup.exe)을 사용합니다. 이전 동일 버전에는 확장 ZIP 가져오기 메뉴가 없을 수 있습니다.
+
 ## 최신 웹 배포 정책
 
 AX Workspace 탭은 관리자가 완성된 프로그램을 직접 등록하는 자료실입니다. 웹에 특정 확장 소개나 고정 설치 EXE를 내장하지 않습니다. 관리자는 **AX Workspace → 파일 등록**에서 완성된 파일과 설명·분류·배포 버전을 등록하고, 사용자는 해당 카드를 찾아 다운로드합니다. KEY 페이지의 기본 안내는 AX Workspace 탭으로 이동하는 방식이며, 기존 로컬 MCP와 다운로드용 Skill은 접힌 보조 안내에서 제공합니다.
