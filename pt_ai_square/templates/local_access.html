@@ -14,13 +14,19 @@
 <section class="local-card local-key-card" aria-labelledby="key-title">
 <div class="local-card-head"><div><span class="local-eyebrow">MY CONNECTION KEY</span><h2 id="key-title">내 연결 KEY</h2></div><span id="key-state" class="local-key-state">확인 중</span></div>
 <div class="local-employee"><span class="local-key-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="4.5"/><path d="m11.5 12.5 7 7H22v-3.5h-3v-3h-3.5"/></svg></span><div><strong id="employee">로그인 정보를 확인하고 있습니다.</strong><p id="current-key-detail">발급 상태를 확인하고 있습니다.</p></div></div>
-<form id="token-form"><label>KEY 이름<input id="token-name" value="내 연결 KEY" maxlength="60" required></label>
-<div class="local-key-permissions"><span>기본 허용 작업</span><p>조회·다운로드·좋아요<br>신규 등록·내 도구 업데이트</p></div>
+<form id="token-form">
+<div class="local-key-permissions" role="group" aria-labelledby="key-permissions-title"><h3 id="key-permissions-title">이 KEY로 할 수 있어요</h3>
+<ul>
+<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span>도구 조회·다운로드</span></li>
+<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg><span>좋아요</span></li>
+<li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8m-4-4h8"/></svg><span>신규 도구 등록</span></li>
+<li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></svg><span>내 도구 업데이트</span></li>
+</ul></div>
 <div class="local-form-actions"><button id="key-issue" class="sq-primary" type="submit" disabled>연결 KEY 발급</button><button id="key-revoke" class="sq-secondary" type="button" hidden>KEY 사용 취소</button></div></form>
 <div class="local-key-notes"><p class="local-key-lifetime"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></svg><span><strong>새 KEY는 유효기간 제한 없이 사용합니다.</strong></span></p>
 <p class="local-key-rule" id="key-rule">발급한 KEY는 본인 사번에 연결됩니다. 관리자 KEY도 본인 도구만 게시할 수 있으며 도구 삭제·권한 변경은 허용하지 않습니다.</p>
-<p class="local-key-rule">개인 KEY 하나로 신규 도구를 등록하고 내 도구의 새 버전을 올릴 수 있습니다. 다른 사람의 도구 수정·삭제·권한 관리는 허용하지 않습니다. 상세 조회수는 웹과 합쳐 같은 사번·도구당 30분에 한 번만 반영하며 순위 점수에는 포함하지 않습니다.</p></div>
-<div id="issued" class="local-issued" hidden><strong>새 연결 KEY가 준비되었습니다.</strong><p>원문은 지금 한 번만 표시됩니다. 연결할 프로그램의 인증키 입력란에 넣어주세요.</p>
+<p class="local-key-rule">업데이트는 본인 도구만 가능합니다. 도구 삭제·권한 변경은 웹에서 관리하세요.</p></div>
+<div id="issued" class="local-issued" hidden><strong>새 연결 KEY가 준비되었습니다.</strong><p>원문은 지금 한 번만 표시됩니다. 확장 프로그램은 KEY 입력란에, MCP는 연결을 요청한 AI 채팅에 입력하세요.</p>
 <div class="local-secret-row"><input id="secret" type="password" readonly aria-label="발급된 개인 API 인증키" autocomplete="off"><button id="copy-token" class="sq-secondary" type="button">KEY 복사</button></div><small>KEY 원문은 서버에 저장하지 않습니다. 잃어버리면 재발급해 주세요.</small></div>
 <p id="status" role="status" aria-live="polite"></p>
 </section>
@@ -59,11 +65,11 @@
 <li><div><strong>처음 한 번, AI에 MCP 등록하기</strong><p>아래 설치 안내서대로 Claude Code에 설치를 요청하거나 직접 등록하세요. 이미 등록했다면 건너뜁니다.</p></div></li>
 <li><div><strong>채팅에서 연결 요청하기</strong><p>AI에 ‘AI SQUARE 연결해줘’라고 요청하세요. AI가 연결할 사이트와 KEY 입력 안내를 보여줍니다.</p></div></li>
 <li><div><strong>같은 채팅에서 개인 KEY 입력하기</strong><p>이 페이지에서 발급한 KEY를 입력하면 연결합니다. 별도 KEY 창 없이 주소·다운로드 폴더가 자동 설정됩니다. HTTP 연결은 해당 사이트로 KEY가 암호화 없이 전송됨을 한 번 확인합니다.</p></div></li>
-<li><div><strong>연결을 확인하고 사용하기</strong><p>채팅에 본인 정보와 연결 완료가 나오면 도구 검색·다운로드·신규 등록을 요청하세요. 새 버전 등록은 본인 도구만 가능합니다.</p></div></li>
+<li><div><strong>연결을 확인하고 사용하기</strong><p>채팅에 본인 정보와 연결 완료가 나오면 도구 검색·다운로드·등록을 요청하세요. 등록 대상과 내용·공개 범위가 정해지면 별도 웹 승인 없이 게시합니다. 폴더도 채팅에서 확인하며 새 버전은 본인 도구에만 등록합니다.</p></div></li>
 </ol>
 </details>
 <a class="local-guide-link" href="{{ url_for('static', filename='guides/MCP_LOCAL_GUIDE.html') }}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-3-2-6-2-10-1v15c4-1 7-1 10 1m0-15c3-2 6-2 10-1v15c-4-1-7-1-10 1V5Z"/></svg><span><strong>MCP 설치 안내서</strong><small>Python 확인부터 AI 등록까지, 화면 순서대로 따라 하기</small></span></a>
-<p class="local-path-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span>도구 파일은 내 사용자 폴더의 <code>AI_SQUARE\downloads</code>에 자동 저장됩니다. 실제 설치 위치는 설치할 때 선택합니다.</span></p>
+<p class="local-path-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span>도구 파일은 내 사용자 폴더의 <code>AI_SQUARE\downloads</code>에 자동 저장됩니다. 설치 위치는 채팅에서 공통·현재 프로젝트·기타 경로 중 선택합니다.</span></p>
 <p class="local-connection-note">채팅에 입력한 KEY는 AI와 대화·도구 호출 기록에 전달될 수 있습니다. MCP는 KEY를 결과에 다시 표시하지 않으며 PC에는 암호화해 저장합니다. 재발급했다면 ‘AI SQUARE KEY 다시 연결해줘’라고 요청하세요.</p>
 </section>
 </section>

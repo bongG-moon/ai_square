@@ -19,6 +19,13 @@ def watchdog_loop(monkeypatch, patterns=()):
     return WatchdogReloaderLoop(exclude_patterns=patterns)
 
 
+def reload_requested(loop):
+    # Werkzeug versions expose this internal signal as bool or threading.Event.
+    # Verify the reload behavior without assuming one internal representation.
+    signal = loop.should_reload
+    return signal.is_set() if callable(getattr(signal, 'is_set', None)) else signal is True
+
+
 @pytest.mark.parametrize('folder', ['artifacts', 'request_attachments'])
 @pytest.mark.parametrize('event_name', ['FileCreatedEvent', 'FileModifiedEvent', 'FileDeletedEvent'])
 def test_uploaded_zip_no_longer_triggers_watchdog_restart(tmp_path, monkeypatch, folder, event_name):
@@ -30,10 +37,10 @@ def test_uploaded_zip_no_longer_triggers_watchdog_restart(tmp_path, monkeypatch,
     event = getattr(watchdog.events, event_name)(str(uploaded))
     original = watchdog_loop(monkeypatch)
     original.event_handler.dispatch(event)
-    assert original.should_reload.is_set(), 'The old default must reproduce the restart trigger'
+    assert reload_requested(original), 'The old default must reproduce the restart trigger'
     fixed = watchdog_loop(monkeypatch, upload_reload_excludes(data))
     fixed.event_handler.dispatch(event)
-    assert not fixed.should_reload.is_set()
+    assert not reload_requested(fixed)
 
 
 @pytest.mark.parametrize('filename', ['backend/routes.py', 'dependencies/library.zip'])
@@ -43,7 +50,7 @@ def test_source_edits_outside_uploads_still_reload(tmp_path, monkeypatch, filena
     # DATA_DIR can equal the application directory; do not ignore all code.
     fixed = watchdog_loop(monkeypatch, upload_reload_excludes(tmp_path))
     fixed.event_handler.dispatch(FileModifiedEvent(str(tmp_path / filename)))
-    assert fixed.should_reload.is_set()
+    assert reload_requested(fixed)
 
 
 def test_relative_store_is_resolved_at_launch_without_changing_directory(tmp_path, monkeypatch):

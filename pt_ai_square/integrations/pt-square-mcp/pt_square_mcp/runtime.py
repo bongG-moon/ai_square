@@ -1,4 +1,4 @@
-"""MCP tool orchestration; ownership and publishing approval remain server-side."""
+"""MCP orchestration; the server checks KEY ownership and confirmed draft integrity."""
 import re
 import threading
 import uuid
@@ -146,23 +146,45 @@ class Runtime:
         result.setdefault('packageId',platform_package_id or source_package_id)
         result.setdefault('sourcePackageId',source_package_id)
         result.setdefault('packageIdentityChanged',bool(result['packageId'] and result['sourcePackageId'] and result['packageId']!=result['sourcePackageId']))
-        notice='웹 확인 주소를 열어 내용·공개 범위를 승인하세요. MCP는 승인 API를 호출할 수 없습니다. 승인 후 publish_item으로 게시합니다.'
+        notice=('게시할 파일·내용·신규/업데이트 대상·공개 범위를 확인했습니다. '
+                '사용자가 이 내용으로 등록을 요청했다면 reviewDigest를 review_digest에 전달하고 '
+                'confirmed=true로 publish_item을 호출해 바로 게시하세요. 별도 웹 승인은 필요 없습니다. '
+                '등록 대상이나 공개 범위가 불명확할 때만 채팅에서 확인하세요.')
         if values.get('mode')=='url':
             notice+=' 등록 주소는 연결 링크와 안내로 저장됩니다. 원격 MCP 자동 연결이나 API 변환은 수행하지 않습니다.'
         if target=='update':
             notice+=' 선택한 기존 도구 ID의 새 버전으로 준비했습니다.'
             if isinstance(declaration,dict):
                 notice+=' 플랫폼 고정 packageId와 원본 ZIP의 sourcePackageId를 함께 확인하세요. 식별자가 달라도 원본 ZIP을 수정하지 않습니다.'
-        # Draft bytes are already on the web server, immutable and waiting for human web approval.
+        direct_supported=result.get('directCommitSupported') is True
+        if not direct_supported:
+            notice=('현재 웹 서버가 채팅에서 바로 게시하는 기능을 지원한다고 응답하지 않았습니다. '
+                    '웹 서버에 최신 버전을 반영한 뒤 get_publish_status로 이 초안을 다시 확인하세요. '
+                    '초안만 준비했으며 아직 게시하지 않았습니다.')
+        # Immutable draft bytes are on the server. The next explicit publish call
+        # confirms their digest; the website remains an optional review surface.
         return dict(result,localPreparationId=local_id,preparedFile=str(artifact) if artifact else None,
                     preparedSha256=sha256(artifact) if artifact else None,package=declaration,
+                    approvalMethod='chat' if direct_supported else 'server-update-required',
+                    serverReviewRequired=not direct_supported,serverUpdateRequired=not direct_supported,
+                    requiresConfirmation=True,nextTool='publish_item' if direct_supported else 'get_publish_status',
                     notice=notice)
 
     def get_publish_status(self,draft_id):
         return self.client.json('/api/publish-drafts/'+self._draft_id(draft_id))
 
-    def publish_item(self,draft_id):
-        return self.client.json('/api/publish-drafts/'+self._draft_id(draft_id)+'/commit','POST',{})
+    def publish_item(self,draft_id,review_digest='',confirmed=False):
+        if type(confirmed) is not bool:
+            raise SquareError('등록 요청 확인 값은 true 또는 false여야 합니다.')
+        data={}
+        if confirmed:
+            if not isinstance(review_digest,str) or not re.fullmatch(r'[a-f0-9]{64}',review_digest):
+                raise SquareError('게시할 초안의 reviewDigest를 확인하세요. 내용이 달라졌다면 초안을 다시 준비하세요.')
+            data={'confirmed':True,'reviewDigest':review_digest}
+        elif review_digest:
+            raise SquareError('사용자가 요청한 등록 내용·대상·공개 범위를 확인한 뒤 confirmed=true로 게시하세요.')
+        # An empty body preserves the optional browser-approved legacy flow.
+        return self.client.json('/api/publish-drafts/'+self._draft_id(draft_id)+'/commit','POST',data)
 
     @staticmethod
     def _draft_id(value):

@@ -256,7 +256,7 @@ def publication_receipt(request_id):
 @api.post('/api/tools/<int:tid>/versions')
 def publish(tid=None):
     if getattr(g, 'api_token_id', None):
-        return jsonify(error='API KEY 게시에는 웹에서 승인한 등록 초안이 필요합니다.', code='publish_draft_required', draftUrl='/api/publish-drafts'),409
+        return jsonify(error='API KEY로 게시하려면 등록 초안을 준비하고 내용을 확인한 뒤 confirmed=true와 reviewDigest로 게시하세요. 웹 승인도 선택할 수 있습니다.', code='publish_draft_required', draftUrl='/api/publish-drafts'),409
     if tid is not None: tool(tid,True)
     raw=publication_request()
     artifact=publication_artifact(raw)

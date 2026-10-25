@@ -176,6 +176,30 @@ def test_reconnect_recreates_a_removed_automatic_download_folder(local):
     assert Settings(path).token() == NEW_KEY
 
 
+def test_reconnect_drops_only_missing_previous_sources(local):
+    home, path, _ = local
+    missing = home / '삭제한 원본'; missing.mkdir()
+    existing = home / '남아 있는 원본'; existing.mkdir()
+    connect(path, roots=[missing, existing])
+    missing.rmdir()
+    downloads = home / 'AI_SQUARE' / 'downloads'
+    downloads.rmdir()
+    result = connect(path, token=NEW_KEY)
+    assert result['removedWorkspaceCount'] == 1
+    assert Settings(path).roots == [existing, downloads]
+    assert Settings(path).token() == NEW_KEY
+    assert downloads.is_dir() and not missing.exists()
+
+
+def test_reconnect_still_rejects_explicit_missing_source(local):
+    home, path, _ = local
+    connect(path)
+    original = path.read_bytes()
+    with pytest.raises(SquareError, match='작업 폴더'):
+        connect(path, token=NEW_KEY, roots=[home / '없는 원본'])
+    assert path.read_bytes() == original and Settings(path).token() == KEY
+
+
 def test_environment_mode_references_the_environment_without_persisting_token(local, monkeypatch):
     home, path, manifest = local
     monkeypatch.setenv('PTAI_API_TOKEN', KEY)
@@ -206,49 +230,106 @@ def test_atomic_config_failure_cannot_replace_old_encrypted_key(local, monkeypat
     assert Settings(path).token() == KEY
 
 
-def test_cli_setup_asks_only_for_key_and_verifies_the_actual_account(local, monkeypatch, capsys):
+@pytest.mark.parametrize('command', ['connect', 'setup'])
+def test_cli_standard_routes_only_explain_chat_without_prompt_window_or_network(local, monkeypatch, capsys, command):
+    import getpass
+    import webbrowser
     home, path, manifest = local
-    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: True)
-    prompts = []
-    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: prompts.append(prompt) or KEY)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Standard launchers must not prompt, open windows, or authenticate')
+    monkeypatch.setattr('builtins.input', forbidden)
+    monkeypatch.setattr(getpass, 'getpass', forbidden)
+    monkeypatch.setattr(webbrowser, 'open', forbidden)
+    monkeypatch.setattr(cli, 'connect', forbidden)
+    monkeypatch.setitem(sys.modules, 'tkinter', None)
+    assert cli.main(['--config', str(path), command]) == 0
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result['chatRequired'] is True and result['keyRequired'] is True
+    assert result['connected'] is False and result['connectTool'] == 'connect_account'
+    assert result['baseUrl'] == ORIGIN and result['authUrl'] == ORIGIN + '/local-access'
+    assert KEY not in output.out + output.err
+    assert not path.exists()
+
+
+def test_cli_auth_only_prints_current_saved_origin_without_opening_browser(local, monkeypatch, capsys):
+    import webbrowser
+    home, path, manifest = local
+    current = 'https://already-connected.example.test'
+    old_connection(path, home, current)
+    before = path.read_bytes()
+    monkeypatch.setattr(webbrowser, 'open', lambda *a: pytest.fail('No browser window'))
+    assert cli.main(['--config', str(path), 'auth']) == 0
+    assert capsys.readouterr().out.strip() == current + '/local-access'
+    assert path.read_bytes() == before
+
+
+def test_cli_env_setup_verifies_account_without_prompt_or_permanent_key(local, monkeypatch, capsys):
+    import getpass
+    home, path, manifest = local
+    monkeypatch.setenv('PTAI_API_TOKEN', KEY)
+    monkeypatch.setattr(getpass, 'getpass', lambda *a: pytest.fail('No hidden prompt'))
+    monkeypatch.setattr('builtins.input', lambda *a: pytest.fail('No interactive prompt'))
     monkeypatch.setattr(onboarding, 'Client', VerifiedClient)
-    assert cli.main(['--config', str(path), 'setup']) == 0
+    assert cli.main(['--config', str(path), 'setup', '--token-from-env']) == 0
     output = capsys.readouterr()
     result = json.loads(output.out)
     assert result['connected'] is True and result['user']['name'] == '홍길동'
-    assert len(prompts) == 1 and 'KEY' in prompts[0]
     assert KEY not in output.out + output.err
+    assert Settings(path).token() == KEY
+    assert not list(path.parent.glob('credential*.json'))
 
 
-def test_cli_http_confirmation_is_yes_no_not_manual_origin_entry(local, monkeypatch, capsys):
+@pytest.mark.parametrize('ack', ['', 'http://other.example'])
+def test_cli_env_http_requires_exact_origin_without_prompt_or_network(local, monkeypatch, capsys, ack):
     home, path, manifest = local
-    manifest.write_text(json.dumps({'schemaVersion':1,'baseUrl':'http://intranet.example'}), encoding='utf-8')
-    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: True)
-    prompts = []
-    monkeypatch.setattr('builtins.input', lambda prompt: prompts.append(prompt) or 'y')
-    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: KEY)
+    manifest.write_text(json.dumps({'schemaVersion': 1, 'baseUrl': 'http://intranet.example'}), encoding='utf-8')
+    monkeypatch.setenv('PTAI_API_TOKEN', KEY)
+    monkeypatch.setattr('builtins.input', lambda *a: pytest.fail('No interactive prompt'))
+    monkeypatch.setattr(cli, 'connect', lambda *a, **k: pytest.fail('No unacknowledged HTTP request'))
+    argv = ['--config', str(path), 'setup', '--token-from-env']
+    if ack:
+        argv += ['--accept-http-origin', ack]
+    assert cli.main(argv) == 1
+    output = capsys.readouterr()
+    assert KEY not in output.out + output.err and not path.exists()
+
+
+def test_cli_env_http_exact_origin_and_explicit_extra_workspace(local, monkeypatch, capsys):
+    home, path, manifest = local
+    source = home / 'source'
+    source.mkdir()
+    monkeypatch.setenv('PTAI_API_TOKEN', KEY)
     monkeypatch.setattr(onboarding, 'Client', VerifiedClient)
-    assert cli.main(['--config', str(path), 'setup']) == 0
-    assert len(prompts) == 1 and '[y/N]' in prompts[0]
+    assert cli.main(['--config', str(path), 'setup', '--token-from-env',
+                     '--url', 'http://intranet.example', '--accept-http-origin', 'http://intranet.example',
+                     '--workspace', str(source)]) == 0
     assert json.loads(capsys.readouterr().out)['connected'] is True
+    settings = Settings(path)
+    assert settings.url == 'http://intranet.example' and source in settings.roots
 
 
-def test_cli_no_key_opens_the_preconfigured_issuance_page_without_claiming_connection(local, monkeypatch, capsys):
+def test_cli_env_setup_preserves_saved_origin_without_explicit_override(local, monkeypatch, capsys):
     home, path, manifest = local
-    monkeypatch.setattr(cli.sys.stdin, 'isatty', lambda: True)
-    monkeypatch.setattr(cli.getpass, 'getpass', lambda prompt: '')
-    opened = []
-    monkeypatch.setattr(cli.webbrowser, 'open', lambda url: opened.append(url))
-    assert cli.main(['--config', str(path), 'setup']) == 0
-    assert opened == [ORIGIN + '/local-access']
-    assert not path.exists() and 'connected' not in capsys.readouterr().out
+    origin = 'https://existing.example.test'
+    old_connection(path, home, origin)
+    monkeypatch.setenv('PTAI_API_TOKEN', NEW_KEY)
+    monkeypatch.setattr(onboarding, 'Client', VerifiedClient)
+    assert cli.main(['--config', str(path), 'setup', '--token-from-env']) == 0
+    assert json.loads(capsys.readouterr().out)['connected'] is True
+    assert Settings(path).url == origin
 
 
-def test_gui_command_delegates_to_the_key_window(local, monkeypatch):
+def test_cli_env_setup_cannot_overwrite_concurrent_connection(local, monkeypatch, capsys):
     home, path, manifest = local
-    from types import SimpleNamespace
-    seen = []
-    monkeypatch.setitem(sys.modules, 'pt_square_mcp.connection_ui',
-                        SimpleNamespace(open_connection=lambda target: seen.append(target) or 0))
-    assert cli.main(['--config', str(path), 'connect']) == 0
-    assert seen == [path]
+    monkeypatch.setenv('PTAI_API_TOKEN', KEY)
+    class ConcurrentClient(VerifiedClient):
+        def json(self, url):
+            response = super().json(url)
+            old_connection(path, home, 'https://new-connection.example.test')
+            return response
+    monkeypatch.setattr(onboarding, 'Client', ConcurrentClient)
+    assert cli.main(['--config', str(path), 'setup', '--token-from-env']) == 1
+    output = capsys.readouterr()
+    assert KEY not in output.out + output.err
+    assert Settings(path).url == 'https://new-connection.example.test'

@@ -12,6 +12,7 @@ import pytest
 from .conftest import ready, publish
 from .test_personal_api_usage import issue
 from .test_receiver import server
+from pt_ai_square.backend.storage import db
 
 PACKAGE = Path(__file__).parents[1] / 'integrations' / 'pt-square-mcp'
 sys.path.insert(0, str(PACKAGE))
@@ -93,6 +94,91 @@ except SquareError as error:
     assert Path(result['download']['file']).parent == folder / 'v2'
     assert list((folder / 'v1').iterdir())
     assert owner.get(f'/api/tools/{tid}').json['downloads'] == 1
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='The packaged connection stores Windows DPAPI credentials')
+def test_downloaded_zip_chat_publishes_new_and_owned_update_without_web_approval(app, server, tmp_path, monkeypatch):
+    owner, headers = ready(app)
+    issued, _ = issue(owner, headers)
+    # Existing valid web KEYs use the same flow without requiring rotation.
+    with app.app_context():
+        db().local_tokens.update_one({'id': issued['id']}, {'$set': {'scope': 'read'}})
+    def forbidden():
+        pytest.fail('No browser approval endpoint is needed for confirmed MCP publishing')
+    monkeypatch.setitem(app.view_functions, 'publish_drafts.approve', forbidden)
+    app.config['PUBLIC_URL'] = server
+    response = owner.get('/local-access/mcp.zip')
+    assert response.status_code == 200
+    extracted = tmp_path / 'unpacked'
+    with ZipFile(io.BytesIO(response.data)) as archive:
+        assert json.loads(archive.read('pt-square-mcp/connection.json'))['baseUrl'] == server
+        archive.extractall(extracted)
+    package = extracted / 'pt-square-mcp'
+    home = tmp_path / 'fake-home'; home.mkdir()
+    source = tmp_path / 'explicit-chat-project'; source.mkdir()
+    (source / 'SKILL.md').write_text('# Original memo summary\n', encoding='utf-8')
+    config = tmp_path / 'private' / 'config.json'
+    env = dict(os.environ, USERPROFILE=str(home), HOME=str(home), PYTHONIOENCODING='utf-8',
+               PYTHONPATH=str(package), SQUARE_TEST_KEY=issued['token'])
+    env.pop('PTAI_API_TOKEN', None)
+    script = '''
+import json, os, sys
+from pathlib import Path
+from pt_square_mcp.onboarding import resolve_connection, connect
+from pt_square_mcp.config import Settings, SquareError
+from pt_square_mcp.runtime import Runtime
+from pt_square_mcp.workspace_selection import start_selection, submit_selection
+config, source = map(Path, sys.argv[1:3])
+connected = connect(config, resolve_connection(config), os.environ['SQUARE_TEST_KEY'], allow_http=True)
+candidate = {'path': str(source), 'source': 'mcp-roots', 'name': 'Explicit test project'}
+selection = start_selection(config, 'publish', {'currentProject': candidate, 'projectCandidates': [candidate]})
+assert submit_selection(config, selection['requestId'], 'current', confirmed=True)['selected']
+runtime = Runtime(Settings(config))
+values = dict(name='Packaged MCP memo', desc='Summarize fixture notes', platform='Claude', type='Skill',
+              guide='Use the package in the chosen project', orgId='organization-0', categoryId='category-0',
+              approval=False, changes='First version', workTags=['memo'],
+              packageId='fixture.packaged-memo', entryPoint='SKILL.md')
+first = runtime.prepare_publish(values, str(source), target='new')
+assert first['approvalMethod'] == 'chat' and not first['serverReviewRequired']
+assert first['requiresConfirmation']
+blocked = False
+try:
+    runtime.publish_item(first['id'])
+except SquareError:
+    blocked = True
+created = runtime.publish_item(first['id'], review_digest=first['reviewDigest'], confirmed=True)
+replayed = runtime.publish_item(first['id'])
+first_file = runtime.download_item(created['id'])
+(source / 'SKILL.md').write_text('# Updated memo and action items\\n', encoding='utf-8')
+values['changes'] = 'Add action items'
+second = runtime.prepare_publish(values, str(source), target='update', tool_id=created['id'])
+updated = runtime.publish_item(second['id'], review_digest=second['reviewDigest'], confirmed=True)
+second_file = runtime.download_item(created['id'], update=True)
+print(json.dumps({'blockedWithoutConfirmation': blocked, 'created': created, 'replayed': replayed,
+                 'updated': updated, 'firstFile': first_file, 'secondFile': second_file,
+                 'connection': runtime.connection_status(), 'downloads': str(runtime.settings.downloads)}))
+'''
+    completed = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-c', script, str(config), str(source)],
+                               cwd=package, env=env, capture_output=True, text=True, encoding='utf-8', timeout=60)
+    assert issued['token'] not in completed.stdout + completed.stderr
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result['blockedWithoutConfirmation']
+    tid = result['created']['id']
+    assert result['created']['version'] == result['replayed']['version'] == 1
+    assert result['updated']['id'] == tid and result['updated']['version'] == 2
+    assert result['connection']['user']['id'] == 'owner'
+    assert Path(result['downloads']) == home / 'AI_SQUARE' / 'downloads'
+    assert Path(result['firstFile']['file']).is_file() and Path(result['secondFile']['file']).is_file()
+    assert issued['token'].encode() not in config.read_bytes()
+    assert owner.get('/api/local-tokens').json['usage'] == {'uploads': 2, 'downloads': 1}
+    with app.app_context():
+        assert db().tools.count_documents({}) == 1
+        tool = db().tools.find_one({'_id': tid})
+        assert tool['owner'] == 'owner' and len(tool['versions']) == 2
+        assert all(version['apiUsage']['tokenId'] == issued['id'] for version in tool['versions'])
+        assert db().publish_drafts.count_documents({'status': 'committed'}) == 2
+        assert db().local_tokens.find_one({'id': issued['id']})['scope'] == 'read'
 
 
 @pytest.mark.parametrize('suffix', ['', '.new'])

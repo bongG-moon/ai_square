@@ -1,5 +1,5 @@
 (() => {
-  let csrf = '', currentKeyId = null, issuedKeyId = null, loaded = false;
+  let csrf = '', currentKeyId = null, issuedKeyId = null;
   const api = 'api/local-tokens';
   const $ = selector => document.querySelector(selector);
   const status = $('#status');
@@ -21,18 +21,14 @@
     currentKeyId = data.currentKeyId;
     const key = data.connectionKey;
     $('#employee').textContent = `${data.employee.name} · 사번 ${data.employee.id}`;
-    $('#current-key-detail').textContent = key ? `${key.name} · ${scopeName(key.scope)} · ${lifetime(key)}` : '유효기간 제한 없이, 로그인한 본인 명의로 발급합니다.';
+    $('#current-key-detail').textContent = key ? `본인 사번에 연결된 KEY · ${lifetime(key)}` : '유효기간 제한 없이, 로그인한 본인 명의로 발급합니다.';
     $('#key-state').textContent = stateName(key?.status);
     $('#key-state').dataset.state = key?.status || 'none';
     $('#key-issue').textContent = data.tokens.length ? 'KEY 재발급' : '연결 KEY 발급';
     $('#key-issue').disabled = false;
     $('#key-revoke').hidden = key?.status !== 'active';
-    $('#key-rule').textContent = data.tokens.length ? '재발급하면 기존 KEY는 즉시 사용할 수 없습니다. 연결한 프로그램에도 새 KEY를 입력하세요. 기존 이용 이력은 유지됩니다.' : '본인 사번에 연결된 KEY로 조회·다운로드·좋아요와 신규 등록·내 도구 업데이트를 사용할 수 있습니다.';
+    $('#key-rule').textContent = data.tokens.length ? '재발급하면 기존 KEY는 즉시 사용할 수 없습니다. 확장 프로그램의 KEY 입력란이나 MCP 연결을 요청한 AI 채팅에 새 KEY를 입력하세요. 기존 이용 이력은 유지됩니다.' : 'KEY 원문은 발급 직후 한 번만 표시됩니다. 확장 프로그램의 KEY 입력란이나 MCP 연결을 요청한 AI 채팅에 입력하세요.';
     if (key && typeof key.expires === 'number') $('#key-rule').textContent += ' 이전에 발급한 KEY의 유효기간은 유지되며, 재발급하면 기간 제한이 없어집니다.';
-    if (!loaded && key) {
-      $('#token-name').value=key.name;
-    }
-    loaded = true;
     if (issuedKeyId && (issuedKeyId !== currentKeyId || key?.status !== 'active')) clearIssued();
     $('#usage').textContent = `내 API 이용 · 업로드 ${data.usage.uploads}건 · 다운로드 ${data.usage.downloads}건`;
     const historical=data.tokens.filter(t=>t.id!==currentKeyId), list=$('#tokens'); list.replaceChildren();
@@ -64,10 +60,10 @@
     e.preventDefault();const button=$('#key-issue');if(button.disabled)return;button.disabled=true;
     clearIssued(); status.textContent='연결 KEY를 발급하고 있습니다.';
     try {
-      const result=await call(api,{method:'POST',body:JSON.stringify({name:$('#token-name').value})});
+      const result=await call(api,{method:'POST',body:JSON.stringify({})});
       $('#secret').value=result.token;$('#issued').hidden=false;issuedKeyId=result.id;
       await refresh();
-      status.textContent=issuedKeyId ? '발급했습니다. KEY를 복사해 연결할 프로그램에 입력하세요.' : '다른 화면에서 KEY가 변경되었습니다. 최신 KEY를 다시 확인하세요.';
+      status.textContent=issuedKeyId ? '발급했습니다. KEY를 복사해 확장 프로그램의 KEY 입력란이나 MCP 연결을 요청한 AI 채팅에 입력하세요.' : '다른 화면에서 KEY가 변경되었습니다. 최신 KEY를 다시 확인하세요.';
     }catch(e){status.textContent=e.message;}
     finally{button.disabled=false;}
   };

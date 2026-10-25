@@ -62,7 +62,7 @@ class AuthenticationRequired(SquareError):
                          '채팅에 입력한 KEY는 대화·도구 호출 기록에 남을 수 있습니다. '
                          '웹에서도 이용할 수 없다면 운영자에게 계정 상태를 확인해 주세요. '
                          '재연결만으로 업로드·설치를 다시 실행하지 않습니다. '
-                         '재발급 전 게시 초안은 새 KEY로 다시 준비하고 웹에서 승인해야 합니다.')
+                         '재발급 전 게시 초안은 새 KEY로 다시 준비하고 확인한 내용으로 게시해야 합니다.')
 
     def recovery(self):
         return {'authRequired': True, 'errorCode': 'KEY_AUTH_REQUIRED',
@@ -218,7 +218,7 @@ class Settings:
             raise SquareError('현재 HTTP 주소에 대한 사용자 확인이 없습니다. 연결 설정을 확인하고 connect_account에서 정확한 HTTP 주소의 연결에 동의하세요.')
         self.roots = [no_links(p) for p in self.data.get('trustedRoots', [])]
         if not self.roots or any(not p.is_dir() or p == Path(p.anchor) for p in self.roots):
-            raise SquareError('허용된 작업 폴더 설정을 확인하세요.')
+            raise SquareError('허용된 작업 폴더가 없거나 변경되었습니다. connect_account로 다시 연결하면 사라진 폴더 권한을 정리하고 기본 다운로드 폴더를 복구합니다.')
         self.downloads = (scoped_path(self.data['downloadDirectory'], self.roots)
                           if 'downloadDirectory' in self.data else default_download_directory())
         self.state = no_links(self.path.parent / 'state')

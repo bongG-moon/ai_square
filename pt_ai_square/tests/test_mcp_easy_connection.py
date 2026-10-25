@@ -1,4 +1,4 @@
-"""KEY-only UI and managed downloads, using private test folders and fake widgets."""
+"""Retired native entry points and managed downloads in isolated test folders."""
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -27,70 +27,27 @@ def settings(tmp_path, monkeypatch):
     return Settings(path)
 
 
-def test_folder_cancel_keeps_configuration(settings):
+@pytest.mark.parametrize('purpose', ['publish', 'install'])
+def test_legacy_folder_entry_never_opens_picker_or_grants_access(settings, purpose):
     before = settings.path.read_bytes()
-    result = ui.choose_workspace(settings.path, chooser=lambda: '')
-    assert not result['selected']
+    def forbidden():
+        pytest.fail('Legacy folder entry must not invoke a native callback')
+    result = ui.choose_workspace(settings.path, purpose, chooser=forbidden)
+    assert result['selected'] is False and result['chatRequired'] is True
+    assert result['selectTool'] == 'select_workspace' and result['purpose'] == purpose
     assert settings.path.read_bytes() == before
 
 
-def test_native_folder_selection_adds_only_chosen_root_and_preserves_credential(settings, tmp_path):
-    source = tmp_path / 'source'
-    source.mkdir()
-    data = read_json(settings.path)
-    ref = 'windows-dpapi:credential.' + 'a' * 32 + '.dpapi.json'
-    data['credentialRef'] = ref
-    atomic_json(settings.path, data)
-    secret = settings.path.parent / ref.split(':')[1]
-    secret.write_text('{"encrypted":"placeholder"}', encoding='utf-8')
-    secret_before = secret.read_bytes()
+def test_legacy_folder_entry_rejects_unknown_purpose_without_opening_dialog(settings):
     with pytest.raises(SquareError):
-        scoped_path(source, settings.roots)
-    result = ui.choose_workspace(settings.path, 'publish', chooser=lambda: str(source))
-    updated = Settings(settings.path)
-    assert result['selected'] and result['purpose'] == 'publish'
-    assert updated.roots == [settings.downloads, source]
-    assert updated.data['credentialRef'] == ref
-    assert updated.downloads == settings.downloads
-    assert secret.read_bytes() == secret_before
-    assert scoped_path(source, updated.roots) == source
-    with pytest.raises(SquareError):
-        scoped_path(tmp_path / 'unselected', updated.roots)
-    ui.choose_workspace(settings.path, 'install', chooser=lambda: str(source))
-    assert Settings(settings.path).roots == updated.roots
+        ui.choose_workspace(settings.path, 'arbitrary', chooser=lambda: pytest.fail('No picker'))
 
 
-@pytest.mark.parametrize('kind', ['drive', 'missing', 'file'])
-def test_native_folder_rejects_unusable_targets(settings, tmp_path, kind):
-    path = {'drive': Path(tmp_path.anchor), 'missing': tmp_path / 'missing', 'file': tmp_path / 'file.txt'}[kind]
-    if kind == 'file':
-        path.write_text('not a directory')
-    before = settings.path.read_bytes()
-    with pytest.raises(SquareError):
-        ui.choose_workspace(settings.path, chooser=lambda: str(path))
-    assert settings.path.read_bytes() == before
-
-
-def test_native_folder_rejects_unknown_purpose_without_opening_dialog(settings):
-    def unexpected():
-        pytest.fail('Invalid purpose must not open a picker')
-    with pytest.raises(SquareError):
-        ui.choose_workspace(settings.path, 'arbitrary', chooser=unexpected)
-
-
-def test_native_folder_does_not_grant_to_a_connection_changed_during_picker(settings, tmp_path):
-    source = tmp_path / 'source'
-    source.mkdir()
-    def switch_connection():
-        data = read_json(settings.path)
-        data.update(baseUrl='https://other.example', acceptedHttpOrigin=None)
-        atomic_json(settings.path, data)
-        return str(source)
-    with pytest.raises(SquareError, match='사이트가 바뀌'):
-        ui.choose_workspace(settings.path, chooser=switch_connection)
-    current = Settings(settings.path)
-    assert current.url == 'https://other.example'
-    assert source not in current.roots
+def test_legacy_folder_guidance_does_not_need_connection_config(tmp_path):
+    path = tmp_path / 'absent.json'
+    result = ui.choose_workspace(path)
+    assert result['chatRequired'] is True
+    assert not path.exists()
 
 
 def test_download_without_folder_uses_managed_server_tool_release_path(settings):
@@ -137,154 +94,22 @@ def test_explicit_download_directory_still_requires_selected_root(settings, tmp_
     assert Path(result['file']).parent == chosen
 
 
-class Variable:
-    def __init__(self, root=None, value=''):
-        self.value = value
-    def get(self):
-        return self.value
-    def set(self, value):
-        self.value = value
+def test_retired_key_dialog_returns_without_importing_gui_or_touching_config(settings, monkeypatch):
+    before = settings.path.read_bytes()
+    monkeypatch.setitem(sys.modules, 'tkinter', None)
+    assert ui._show_connection(settings.path, settings.url) is False
+    assert settings.path.read_bytes() == before
+    assert not hasattr(ui, 'ConnectionWindow')
 
 
-class Widget:
-    def __init__(self, parent=None, **options):
-        self.options = options
-        self.bindings = {}
-        self.children = []
-        if parent is not None:
-            parent.children.append(self)
-    def pack(self, **options):
-        pass
-    def configure(self, **options):
-        self.options.update(options)
-    def bind(self, event, callback):
-        self.bindings[event] = callback
-    def focus_set(self):
-        pass
-
-
-class Root(Widget):
-    def __init__(self):
-        super().__init__()
-        self.destroyed = False
-        self.callbacks = []
-    def title(self, value):
-        self.window_title = value
-    def geometry(self, value):
-        pass
-    def minsize(self, *args):
-        pass
-    def protocol(self, *args):
-        pass
-    def after(self, delay, callback):
-        self.callbacks.append(callback)
-    def destroy(self):
-        self.destroyed = True
-
-
-class Style:
-    def __init__(self, root):
-        pass
-    def theme_use(self, *args):
-        pass
-    def configure(self, *args, **kwargs):
-        pass
-    def map(self, *args, **kwargs):
-        pass
-
-
-class InlineThread:
-    def __init__(self, target, **kwargs):
-        self.target = target
-    def start(self):
-        self.target()
-
-
-@pytest.fixture
-def window(settings, monkeypatch):
-    tk = SimpleNamespace(StringVar=Variable, BooleanVar=Variable)
-    ttk = SimpleNamespace(Style=Style, Frame=Widget, Label=Widget, Entry=Widget, Checkbutton=Widget, Button=Widget)
-    monkeypatch.setattr(ui, '_tk', lambda: (tk, ttk, None))
-    monkeypatch.setattr(ui, 'resolve_connection', lambda config: settings.url)
-    monkeypatch.setattr(ui.threading, 'Thread', InlineThread)
-    root = Root()
-    view = ui.ConnectionWindow(root, settings.path)
-    return view
-
-
-def test_key_form_masks_input_and_requires_http_ack_before_contact(window, monkeypatch):
-    def forbidden(*args, **kwargs):
-        pytest.fail('Unconfirmed HTTP must not send a KEY')
-    monkeypatch.setattr(ui, 'connect', forbidden)
-    window.key.set(KEY)
-    window.start_connect()
-    assert window.entry.options['show']
-    assert not window.busy and not window.completed
-    assert 'HTTP' in window.status.get()
-    assert not window.root.callbacks
-
-
-def test_key_form_requires_key_after_http_ack(window, monkeypatch):
-    monkeypatch.setattr(ui, 'connect', lambda *a, **k: pytest.fail('Empty KEY must not connect'))
-    window.http_ack.set(True)
-    window.start_connect()
-    assert not window.busy and not window.completed
-    assert 'KEY' in window.status.get()
-
-
-def test_key_form_success_requires_verified_account_and_clears_input(window, monkeypatch):
-    calls = []
-    def verified(*args, **kwargs):
-        calls.append((args, kwargs))
-        return {'connected': True, 'user': {'id': 'E1', 'name': '홍길동', 'dept': '융합기술'}}
-    monkeypatch.setattr(ui, 'connect', verified)
-    window.http_ack.set(True)
-    window.key.set(KEY)
-    window.start_connect()
-    assert window.busy and not window.completed
-    assert window.key.get() == ''
-    assert window.entry.options['state'] == 'disabled'
-    assert calls[0][0][2] == KEY and calls[0][1]['allow_http'] is True
-    assert calls[0][1]['expected_state'] == ui.connection_fingerprint(window.config_path)
-    assert calls[0][1]['cancel_event'] is None
-    window.poll()
-    assert window.completed and not window.busy
-    assert '홍길동 · 융합기술' in window.status.get()
-    assert KEY not in window.status.get()
-    assert window.button.options['text'] == '완료'
-    window.start_connect()
-    assert window.root.destroyed and len(calls) == 1
-
-
-@pytest.mark.parametrize('raw', [False, True])
-def test_key_form_failed_connection_keeps_no_success_and_sanitizes_raw_error(window, monkeypatch, raw):
-    def fail(*args, **kwargs):
-        if raw:
-            raise RuntimeError('unexpected secret=' + KEY)
-        raise SquareError('KEY를 확인하세요.')
-    monkeypatch.setattr(ui, 'connect', fail)
-    window.http_ack.set(True)
-    window.key.set(KEY)
-    window.start_connect()
-    window.poll()
-    assert not window.completed and not window.busy
-    assert window.key.get() == ''
-    assert window.entry.options['state'] == 'normal'
-    assert window.button.options['text'] == '다시 연결'
-    assert KEY not in window.status.get()
-
-
-def test_key_form_prevents_duplicate_connect_and_close_while_busy(window, monkeypatch):
-    started = []
-    class DeferredThread(InlineThread):
-        def start(self):
-            started.append(self.target)
-    monkeypatch.setattr(ui.threading, 'Thread', DeferredThread)
-    window.http_ack.set(True)
-    window.key.set(KEY)
-    window.start_connect()
-    window.start_connect()
-    window.close()
-    assert len(started) == 1
-    assert window.busy and not window.root.destroyed
-    assert window.key.get() == ''
+def test_legacy_open_connection_only_prints_chat_guidance(settings, monkeypatch, capsys):
+    import json
+    before = settings.path.read_bytes()
+    monkeypatch.setitem(sys.modules, 'tkinter', None)
+    assert ui.open_connection(settings.path) == 0
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert result['connected'] is False and result['keyRequired'] is True
+    assert result['connectTool'] == 'connect_account'
+    assert result['baseUrl'] == settings.url
+    assert KEY not in output and settings.path.read_bytes() == before

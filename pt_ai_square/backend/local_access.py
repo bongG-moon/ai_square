@@ -1,4 +1,4 @@
-"""Personal API credentials: catalog use and browser-reviewed, owner-only publishing."""
+"""Personal API credentials: catalog use and confirmed, owner-only publishing."""
 import hashlib
 import math
 import re

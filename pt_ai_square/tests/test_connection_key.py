@@ -140,7 +140,8 @@ def test_key_page_explains_rotation_without_promising_future_integrations(app):
     assert response.status_code == 200
     assert '연결 KEY 발급' in text and '한 개의 KEY' in text
     assert '로컬 MCP 받기' in text
-    assert '신규 등록·내 도구 업데이트' in text
+    assert '신규 도구 등록' in text and '내 도구 업데이트' in text
+    assert 'id="token-name"' not in text
     assert 'id="token-scope"' not in text
     assert 'autocomplete="off"' in text
 

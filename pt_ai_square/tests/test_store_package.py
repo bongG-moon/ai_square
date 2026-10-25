@@ -161,7 +161,8 @@ def test_key_page_keeps_downloads_visible_with_collapsed_connection_steps(packag
     assert '채팅에서 연결 요청하기' in procedures[1][1]
     assert '같은 채팅에서 개인 KEY 입력하기' in procedures[1][1]
     assert 'id="token-scope"' not in html
-    assert '신규 등록·내 도구 업데이트' in html
+    assert '신규 도구 등록' in html and '내 도구 업데이트' in html
+    assert 'id="token-name"' not in html
     assert 'href="/?view=ax"' in visible_html
     assert 'href="/static/guides/MCP_LOCAL_GUIDE.html"' in visible_html
     assert 'Skill로 연결하기' not in html

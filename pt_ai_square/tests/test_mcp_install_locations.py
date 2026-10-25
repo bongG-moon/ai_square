@@ -193,3 +193,25 @@ def test_user_scope_keeps_existing_per_account_location(settings):
     plan = installer.prepare(1, 'user')
     assert plan['scope'] == 'user' and plan['scopeDir'] == str(Path.home())
     assert Path(plan['destination']) == Path.home() / '.claude' / 'skills' / 'memo-summary'
+
+
+def test_location_discovery_uses_chat_choice_and_keeps_download_destination(settings):
+    before = settings.path.read_bytes()
+    ctx, _ = context([settings.roots[0].as_uri()])
+    result = discover(settings, ctx)
+    other = next(option for option in result['options'] if option['scope'] == 'other')
+    assert not other.get('requiresPicker', False)
+    assert '선택창' not in result['notice']
+    assert settings.path.read_bytes() == before
+    assert Settings(settings.path).downloads == settings.downloads
+
+
+def test_unconfirmed_cwd_guidance_never_instructs_opening_native_picker(settings, tmp_path):
+    cwd = tmp_path / 'unconfirmed project'
+    cwd.mkdir()
+    ctx, _ = context(supported=False)
+    result = discover(settings, ctx, launch_cwd=cwd)
+    assert result['currentProject'] is None
+    assert '채팅' in result['notice'] and '선택창' not in result['notice']
+    assert result['confirmationCandidates'][0]['path'] == str(cwd)
+    assert project_roots(result) == ()

@@ -1,7 +1,10 @@
 """End-to-end local MCP orchestration against the actual Flask+Mongo contracts."""
 import sys
+import asyncio
+from datetime import timedelta
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 import pytest
@@ -24,8 +27,21 @@ def fields():
                 installProfile={'schemaVersion':1,'kind':'skill','host':'claude','slug':'mcp-e2e-memo','scopes':['project','user'],'entrypoint':'SKILL.md'})
 
 
+def chat_publish(runtime, draft):
+    assert draft['serverReviewRequired'] is False
+    assert draft['requiresConfirmation'] is True and draft['approvalMethod'] == 'chat'
+    return runtime.publish_item(draft['id'], review_digest=draft['reviewDigest'], confirmed=True)
+
+
+def no_web_approval(app, monkeypatch):
+    def forbidden():
+        pytest.fail('MCP chat-confirmed publishing must not call the browser approval endpoint')
+    monkeypatch.setitem(app.view_functions, 'publish_drafts.approve', forbidden)
+
+
 @pytest.mark.parametrize('as_folder',[False,True])
 def test_real_mcp_new_update_install_counts_and_rollback(app,server,tmp_path,monkeypatch,as_folder):
+    no_web_approval(app,monkeypatch)
     home=tmp_path/'fake-home';home.mkdir()
     monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     owner,h=ready(app); key,_=issue(owner,h)
@@ -43,9 +59,8 @@ def test_real_mcp_new_update_install_counts_and_rollback(app,server,tmp_path,mon
     assert draft['status']=='pending'
     with app.app_context():assert db().tools.count_documents({})==0
     with pytest.raises(SquareError):runtime.publish_item(draft['id'])
-    approved=owner.post('/api/publish-drafts/'+draft['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':draft['reviewDigest']})
-    assert approved.status_code==200,approved.json
-    published=runtime.publish_item(draft['id']);tid=published['id']
+    with app.app_context():assert db().tools.count_documents({})==0
+    published=chat_publish(runtime,draft);tid=published['id']
     assert published['version']==1 and runtime.publish_item(draft['id'])['version']==1
     assert runtime.get_item(tid)['workflow']==values['workflow']
     assert runtime.search_items('업무 메모')['items'][0]['id']==tid
@@ -60,9 +75,7 @@ def test_real_mcp_new_update_install_counts_and_rollback(app,server,tmp_path,mon
     values['changes']='할 일 정리 추가'
     draft2=runtime.prepare_publish(values,input_path,target='update',tool_id=tid)
     assert draft2['toolId']==tid
-    approved=owner.post('/api/publish-drafts/'+draft2['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':draft2['reviewDigest']})
-    assert approved.status_code==200
-    assert runtime.publish_item(draft2['id'])['version']==2
+    assert chat_publish(runtime,draft2)['version']==2
     assert runtime.check_updates()['items'][0]['result']['status']=='update_available'
     plan2=runtime.installer.prepare(tid,'project',str(workspace))
     updated=runtime.installer.install(plan2['planId'],plan2['approvalDigest'],True)
@@ -92,7 +105,8 @@ def test_real_mcp_url_without_package_id_and_admin_key_owner_guard(app,server,tm
     with pytest.raises(SquareError):runtime.client.json('/api/admin/settings')
 
 
-def test_real_mcp_http_url_new_and_update_require_web_approval_without_creating_files(app,server,tmp_path,monkeypatch):
+def test_real_mcp_http_url_chat_confirmation_publishes_new_and_update_without_creating_files(app,server,tmp_path,monkeypatch):
+    no_web_approval(app,monkeypatch)
     home=tmp_path/'fake-home';home.mkdir();monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     owner,h=ready(app);key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
     workspace=tmp_path/'workspace';workspace.mkdir();config=tmp_path/'config.json'
@@ -109,9 +123,7 @@ def test_real_mcp_http_url_new_and_update_require_web_approval_without_creating_
     assert first['preparedFile'] is None and first['package'] is None
     with pytest.raises(SquareError):runtime.publish_item(first['id'])
     with app.app_context():assert db().tools.count_documents({})==0
-    approved=owner.post('/api/publish-drafts/'+first['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':first['reviewDigest']})
-    assert approved.status_code==200,approved.json
-    created=runtime.publish_item(first['id']);tid=created['id']
+    created=chat_publish(runtime,first);tid=created['id']
     assert created['version']==1 and runtime.get_item(tid)['url']==first_url
     assert runtime.publish_item(first['id'])['version']==1
     values.update(url=next_url,changes='새 API 주소 안내')
@@ -121,9 +133,7 @@ def test_real_mcp_http_url_new_and_update_require_web_approval_without_creating_
     assert second['toolId']==tid and second['expectedRevision']==1 and second['preparedFile'] is None
     with pytest.raises(SquareError):runtime.publish_item(second['id'])
     assert runtime.get_item(tid)['url']==first_url
-    approved=owner.post('/api/publish-drafts/'+second['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':second['reviewDigest']})
-    assert approved.status_code==200,approved.json
-    updated=runtime.publish_item(second['id']);assert updated['id']==tid and updated['version']==2
+    updated=chat_publish(runtime,second);assert updated['id']==tid and updated['version']==2
     assert runtime.publish_item(second['id'])['version']==2
     detail=runtime.get_item(tid)
     assert detail['url']==next_url and {v['n']:v['url'] for v in detail['versions']}=={1:first_url,2:next_url}
@@ -155,6 +165,7 @@ def test_real_mcp_url_credentials_are_rejected_before_draft_creation(app,server,
 
 
 def test_real_mcp_changed_zip_identity_requires_explicit_target_and_keeps_fixed_identity(app,server,tmp_path,monkeypatch):
+    no_web_approval(app,monkeypatch)
     home=tmp_path/'fake-home';home.mkdir();monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
     owner,h=ready(app);key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
     workspace=tmp_path/'workspace';workspace.mkdir();source=workspace/'source';source.mkdir()
@@ -162,8 +173,7 @@ def test_real_mcp_changed_zip_identity_requires_explicit_target_and_keeps_fixed_
     config=tmp_path/'config.json';save_config(config,server,[workspace],allow_http=True)
     runtime=Runtime(Settings(config),home=home);values=fields()
     first=runtime.prepare_publish(values,str(source),target='new')
-    assert owner.post('/api/publish-drafts/'+first['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':first['reviewDigest']}).status_code==200
-    created=runtime.publish_item(first['id']);tid=created['id']
+    created=chat_publish(runtime,first);tid=created['id']
     assert runtime.get_item(tid)['packageId']=='test.memo-summary'
     # Build a different declaration in an independently named ZIP. The MCP may
     # inspect/copy it, but neither it nor the server may rewrite these bytes.
@@ -188,8 +198,7 @@ def test_real_mcp_changed_zip_identity_requires_explicit_target_and_keeps_fixed_
     assert second['packageId']=='test.memo-summary' and second['sourcePackageId']=='new.source-identity'
     assert second['packageIdentityChanged'] is True and Path(second['preparedFile']).read_bytes()==raw
     with pytest.raises(SquareError):runtime.publish_item(second['id'])
-    assert owner.post('/api/publish-drafts/'+second['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':second['reviewDigest']}).status_code==200
-    published=runtime.publish_item(second['id']);assert published['id']==tid and published['version']==2
+    published=chat_publish(runtime,second);assert published['id']==tid and published['version']==2
     detail=runtime.get_item(tid)
     assert detail['packageId']=='test.memo-summary' and detail['sourcePackageId']=='new.source-identity'
     assert detail['packageIdentityChanged'] is True
@@ -207,3 +216,60 @@ def test_real_mcp_changed_zip_identity_requires_explicit_target_and_keeps_fixed_
         row=db().tools.find_one({'_id':tid});assert row['packageId']=='test.memo-summary'
         assert row['versions'][1]['package']['packageId']=='new.source-identity'
         assert db().tools.count_documents({})==1
+
+
+def test_actual_stdio_mcp_chat_publish_and_owned_update_without_browser(app,server,tmp_path,monkeypatch):
+    pytest.importorskip('mcp')
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    no_web_approval(app,monkeypatch)
+    home=tmp_path/'fake-home';home.mkdir()
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    owner,headers=ready(app);key,_=issue(owner,headers)
+    workspace=tmp_path/'workspace';workspace.mkdir()
+    config=tmp_path/'private'/'config.json';save_config(config,server,[workspace],allow_http=True)
+    values=fields()
+    for name in ('packageId','entryPoint','installProfile'):values.pop(name)
+    values.update(type='MCP/Tool',mode='url',url='http://internal.example.test/mcp',approval=True)
+    async def scenario():
+        params=StdioServerParameters(command=sys.executable,
+            args=['-X','utf8','-B',str(PACKAGE/'run_mcp.py'),'--config',str(config),'serve'],
+            env=dict(os.environ,PTAI_API_TOKEN=key['token'],USERPROFILE=str(home),HOME=str(home)))
+        with (tmp_path/'mcp-stderr.txt').open('w',encoding='utf-8') as errors:
+            async with stdio_client(params,errlog=errors) as (reader,writer):
+                async with ClientSession(reader,writer,read_timeout_seconds=timedelta(seconds=20)) as session:
+                    await session.initialize()
+                    async def call(name,arguments,*,error=False):
+                        response=await session.call_tool(name,arguments)
+                        assert key['token'] not in str(response.content)
+                        assert bool(response.isError) is error,response.content
+                        return None if error else json.loads(response.content[0].text)
+                    first=await call('prepare_publish',{'metadata':values,'target':'new'})
+                    assert first['requiresConfirmation'] and first['approvalMethod']=='chat'
+                    assert not first['serverReviewRequired']
+                    await call('publish_item',{'draft_id':first['id']},error=True)
+                    digest=first['reviewDigest']
+                    wrong=('0' if digest[0]!='0' else '1')+digest[1:]
+                    await call('publish_item',{'draft_id':first['id'],'review_digest':wrong,'confirmed':True},error=True)
+                    with app.app_context():
+                        assert db().tools.count_documents({})==0
+                        assert db().publish_drafts.find_one({'_id':first['id']})['status']=='pending'
+                    created=await call('publish_item',{'draft_id':first['id'],'review_digest':digest,'confirmed':True})
+                    tid=created['id'];assert created['version']==1
+                    again=await call('publish_item',{'draft_id':first['id']})
+                    assert again['id']==tid and again['version']==1 and again['replayed']
+                    member,_=ready(app,'member')
+                    assert member.get(f'/api/tools/{tid}').status_code==403
+                    values.update(url='http://internal.example.test/v2/mcp',changes='Second endpoint',approval=False)
+                    second=await call('prepare_publish',{'metadata':values,'target':'update','tool_id':tid})
+                    assert second['toolId']==tid and second['expectedRevision']==1
+                    updated=await call('publish_item',{'draft_id':second['id'],'review_digest':second['reviewDigest'],'confirmed':True})
+                    assert updated['id']==tid and updated['version']==2
+                    assert member.get(f'/api/tools/{tid}').status_code==200
+                    with app.app_context():
+                        assert db().tools.count_documents({})==1
+                        row=db().tools.find_one({'_id':tid})
+                        assert row['owner']=='owner' and len(row['versions'])==2
+                    assert owner.get('/api/local-tokens').json['usage']['uploads']==2
+    asyncio.run(scenario())
+    assert key['token'] not in (tmp_path/'mcp-stderr.txt').read_text(encoding='utf-8')

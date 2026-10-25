@@ -103,14 +103,14 @@ async def discover_locations(settings, context, *, launch_cwd=None, timeout=ROOT
             {'scope': 'user', 'label': '공통 (내 계정)', 'available': True, 'path': str(no_links(Path.home()))},
             {'scope': 'project', 'label': '현재 프로젝트', 'available': bool(candidates or confirmations),
              'path': current['path'] if current else None, 'candidates': candidates},
-            {'scope': 'other', 'label': '기타 경로', 'available': True, 'requiresPicker': True},
+            {'scope': 'other', 'label': '기타 경로', 'available': True, 'requiresChatSelection': True},
         ],
         'currentProject': current, 'projectCandidates': candidates, 'rootsStatus': roots_status,
         'confirmationCandidates': confirmations,
         'requiresProjectSelection': len(candidates) != 1,
         'notice': ('현재 프로젝트를 확인했습니다. 설치 범위와 준비안을 확인한 뒤 설치하세요.' if current else
                    '프로젝트가 여러 개입니다. 표시된 후보 중 설치할 프로젝트를 선택하세요.' if candidates else
-                   '시작 폴더 후보를 선택창에서 확인해 주세요. 직접 선택하기 전에는 설치 권한이 추가되지 않습니다.' if confirmations else
+                   '시작 폴더 후보를 채팅에서 확인해 주세요. 선택을 확인하기 전에는 폴더 접근 권한이 추가되지 않습니다.' if confirmations else
                    '현재 프로젝트를 확인하지 못했습니다. 공통 (내 계정) 또는 기타 경로를 선택하세요.'),
     }
 

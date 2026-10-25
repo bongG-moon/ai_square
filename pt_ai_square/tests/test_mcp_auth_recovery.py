@@ -192,22 +192,18 @@ def test_download_auth_failure_discards_partial_file_and_never_installs(settings
     assert len(opener.calls) == (1 if failure_at == 'transfer' else 2)
 
 
-@pytest.mark.parametrize('completed', [False, True])
-def test_reconnect_uses_current_settings_origin_not_zip_and_cancel_keeps_settings(settings, tmp_path, monkeypatch, completed):
+def test_legacy_reconnect_preserves_saved_origin_and_never_opens_native_dialog(settings, tmp_path, monkeypatch):
     manifest = tmp_path / 'connection.json'
     manifest.write_text(json.dumps({'schemaVersion': 1, 'baseUrl': 'https://different-package.example.test'}), encoding='utf-8')
     monkeypatch.setattr(onboarding, 'PACKAGE_MANIFEST', manifest)
     previous = settings.path.read_bytes()
-    seen = []
-    def dialog(path, url):
-        seen.append((path, url))
-        return completed
-    def no_network(*args, **kwargs):
-        pytest.fail('Opening/cancelling the private input dialog must not make an API request')
-    monkeypatch.setattr(Client, 'json', no_network)
-    result = connection_ui.reconnect_key(settings.path, show_dialog=dialog)
-    assert result == {'reconnected': completed, 'baseUrl': ORIGIN, 'authUrl': ORIGIN + '/local-access'}
-    assert seen == [(settings.path, ORIGIN)]
+    def forbidden(*args, **kwargs):
+        pytest.fail('Legacy reconnect must not open a window or make an API request')
+    monkeypatch.setattr(Client, 'json', forbidden)
+    result = connection_ui.reconnect_key(settings.path, show_dialog=forbidden)
+    assert result['reconnected'] is False and result['chatRequired'] is True
+    assert result['keyRequired'] is True and result['connectTool'] == 'connect_account'
+    assert result['baseUrl'] == ORIGIN and result['authUrl'] == ORIGIN + '/local-access'
     assert settings.path.read_bytes() == previous
 
 

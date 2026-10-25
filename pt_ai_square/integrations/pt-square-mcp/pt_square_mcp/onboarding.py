@@ -100,13 +100,19 @@ def connect(config_path, url, token=None, roots=None, *, allow_http=False,
                 if not isinstance(retained, list):
                     raise SquareError('기존 작업 폴더 설정을 확인하세요.')
         chosen = []
-        for value in [*retained, *(roots or [])]:
+        removed_workspace_count = 0
+        for value, previous in [(value, True) for value in retained] + [(value, False) for value in (roots or [])]:
             if not isinstance(value, (str, Path)):
                 raise SquareError('작업 폴더 경로를 확인하세요.')
             path = no_links(value)
             if path == downloads:
                 # The managed directory is recreated below if the user removed
                 # it between connections; no extra source access is introduced.
+                continue
+            if previous and not path.exists():
+                # A removed source folder must not block KEY recovery or be
+                # recreated as a side effect of reconnecting an account.
+                removed_workspace_count += 1
                 continue
             if path == Path(path.anchor) or not path.is_dir():
                 raise SquareError('기존 또는 추가 작업 폴더를 확인하세요. 드라이브 전체는 허용하지 않습니다.')
@@ -131,4 +137,5 @@ def connect(config_path, url, token=None, roots=None, *, allow_http=False,
     return {'connected': True, 'configured': True, 'baseUrl': url,
             'user': user, 'key': key, 'downloadDirectory': str(downloads),
             'config': str(config_path), 'credentialStored': data['credentialRef'].split(':')[0],
+            'removedWorkspaceCount': removed_workspace_count,
             'encryptedTransport': url.startswith('https:')}

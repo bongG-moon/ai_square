@@ -81,7 +81,8 @@ class FakeClient:
         return p
     def draft(self,metadata,artifact):
         self.drafts.append((copy.deepcopy(metadata),artifact.read_bytes() if artifact else None))
-        return {'id':'12345678-1234-1234-1234-123456789abc','status':'pending','reviewUrl':'/publish-review/12345678-1234-1234-1234-123456789abc'}
+        return {'id':'12345678-1234-1234-1234-123456789abc','status':'pending','reviewUrl':'/publish-review/12345678-1234-1234-1234-123456789abc',
+                'reviewDigest':'a'*64,'directCommitSupported':True}
 
 
 def metadata():
@@ -420,6 +421,44 @@ def test_commit_only_calls_draft_commit(settings):
     assert client.calls==[('/api/publish-drafts/12345678-1234-1234-1234-123456789abc/commit','POST',{})]
 
 
+def test_chat_commit_binds_prepared_digest_without_browser_approval(settings):
+    client=FakeClient();runtime=Runtime(settings,client)
+    source=settings.roots[0]/'SKILL.md';source.write_text('# original')
+    draft=runtime.prepare_publish(metadata(),str(source),'new')
+    assert draft['serverReviewRequired'] is False and draft['approvalMethod']=='chat'
+    assert draft['requiresConfirmation'] and draft['nextTool']=='publish_item'
+    assert '별도 웹 승인은 필요 없습니다' in draft['notice']
+    client.calls.clear()
+    result=runtime.publish_item(draft['id'],'a'*64,True)
+    assert result['version']==2
+    assert client.calls==[('/api/publish-drafts/'+draft['id']+'/commit','POST',
+                          {'confirmed':True,'reviewDigest':'a'*64})]
+
+
+def test_legacy_server_requires_upgrade_instead_of_claiming_chat_commit_is_supported(settings):
+    class LegacyClient(FakeClient):
+        def draft(self,metadata,artifact):
+            result=super().draft(metadata,artifact)
+            result.pop('directCommitSupported')
+            return result
+    source=settings.roots[0]/'SKILL.md';source.write_text('# old server')
+    client=LegacyClient();draft=Runtime(settings,client).prepare_publish(metadata(),str(source),'new')
+    assert draft['serverUpdateRequired'] and draft['nextTool']=='get_publish_status'
+    assert '웹 서버에 최신 버전' in draft['notice']
+    assert not any('/commit' in path for path,_,_ in client.calls)
+
+
+@pytest.mark.parametrize('review_digest,confirmed',[
+    ('',True),('a'*63,True),('a'*65,True),('G'*64,True),(None,True),
+    ('a'*64,False),('a'*64,1),('a'*64,'true'),('a'*64,None),
+])
+def test_invalid_chat_confirmation_never_sends_commit(settings,review_digest,confirmed):
+    client=FakeClient();runtime=Runtime(settings,client)
+    with pytest.raises(SquareError):
+        runtime.publish_item('12345678-1234-1234-1234-123456789abc',review_digest,confirmed)
+    assert client.calls==[]
+
+
 def test_skill_install_scope_confirm_update_rollback(settings,tmp_path):
     client=FakeClient();home=tmp_path/'fake-home';home.mkdir();installer=Installer(settings,client,home)
     with pytest.raises(SquareError):installer.prepare(1,'')
@@ -582,7 +621,9 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
                 download=next(t for t in listing.tools if t.name=='download_item')
                 assert download.inputSchema['required']==['tool_id']
                 picker=next(t for t in listing.tools if t.name=='select_workspace')
-                assert set(picker.inputSchema['properties'])=={'purpose'}
+                assert set(picker.inputSchema['properties'])=={'purpose','request_id','selection','path','confirmed'}
+                publish_tool=next(t for t in listing.tools if t.name=='publish_item')
+                assert set(publish_tool.inputSchema['properties'])=={'draft_id','review_digest','confirmed'}
                 result=await session.call_tool('list_install_locations',{})
                 assert not result.isError
                 locations=json.loads(result.content[0].text)

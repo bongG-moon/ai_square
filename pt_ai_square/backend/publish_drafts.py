@@ -1,4 +1,4 @@
-"""Employee/key-bound publish drafts with a browser-only review boundary."""
+"""Employee/key-bound drafts with explicit API or optional browser confirmation."""
 import copy
 import hashlib
 import hmac
@@ -60,6 +60,7 @@ def public(row):
                                     {'packageId': 1, 'versions.n': 1, 'versions.package.packageId': 1})
     value = dict(id=row['_id'], status=row['status'], created=row['created'], expires=row['expires'],
                  metadata=row['metadata'], toolId=row.get('toolId'), expectedRevision=row.get('expectedRevision'),
+                 directCommitSupported=True,
                  reviewDigest=row['reviewDigest'], reviewUrl='/publish-review/' + row['_id'],
                  artifact=dict(name=artifact['name'], bytes=artifact['size'], sha256=artifact['sha'],
                                url=artifact['url'], commands=artifact.get('commands', {}),
@@ -237,7 +238,8 @@ def approve(draft_id):
     raw = payload()
     if set(raw) != {'approval', 'reviewDigest'} or type(raw.get('approval')) is not bool or not isinstance(raw.get('reviewDigest'), str):
         raise BadRequest('검토한 내용과 공개 범위를 명시적으로 확인해 주세요.')
-    if not hmac.compare_digest(raw['reviewDigest'], row['reviewDigest']):
+    if (not raw['reviewDigest'].isascii()
+            or not hmac.compare_digest(raw['reviewDigest'], row['reviewDigest'])):
         raise Conflict('검토 화면과 현재 초안이 다릅니다. 화면을 새로고침하세요.')
     not_expired(row)
     active_key(row)
@@ -245,12 +247,18 @@ def approve(draft_id):
     verify_bytes(row)
     if row['status'] != 'pending':
         raise Conflict('이미 확인했거나 게시가 시작된 초안입니다.')
+    # Check the original reviewed content before applying the browser's explicit
+    # visibility choice. Rehashing first would legitimize an altered draft.
+    if row['reviewDigest'] != digest(row):
+        raise Conflict('검토한 초안 내용이 변경되었습니다. 새 초안을 준비하세요.')
     approved = copy.deepcopy(row)
     approved['metadata']['approval'] = raw['approval']
     approved['reviewDigest'] = digest(approved)
-    approved.update(status='approved', approvedAt=time.time(), approvedBy=g.user['id'])
+    approved.update(status='approved', approvedAt=time.time(), approvedBy=g.user['id'],
+                    approvalSource='browser', approvedDigest=approved['reviewDigest'])
     result = db().publish_drafts.update_one({'_id': row['_id'], 'status': 'pending', 'reviewDigest': row['reviewDigest']},
-        {'$set': {k: approved[k] for k in ('metadata', 'reviewDigest', 'status', 'approvedAt', 'approvedBy')}})
+        {'$set': {k: approved[k] for k in ('metadata', 'reviewDigest', 'status', 'approvedAt', 'approvedBy',
+                                         'approvalSource', 'approvedDigest')}})
     if not result.modified_count:
         raise Conflict('다른 화면에서 초안이 변경되었습니다.')
     return jsonify(public(approved))
@@ -260,9 +268,22 @@ def approve(draft_id):
 def commit(draft_id):
     row = own_draft(draft_id)
     active_key(row)
-    if row['status'] not in {'approved', 'committing', 'committed'}:
+    raw_confirmation = payload()
+    explicit_confirmation = bool(raw_confirmation)
+    if explicit_confirmation:
+        if (set(raw_confirmation) != {'confirmed', 'reviewDigest'}
+                or raw_confirmation.get('confirmed') is not True
+                or not isinstance(raw_confirmation.get('reviewDigest'), str)):
+            raise BadRequest('확인한 초안의 reviewDigest와 confirmed=true를 함께 보내세요.')
+        # Invalid Unicode must return a normal conflict, not a raw exception.
+        if (not raw_confirmation['reviewDigest'].isascii()
+                or not hmac.compare_digest(raw_confirmation['reviewDigest'], row['reviewDigest'])):
+            raise Conflict('확인한 내용과 현재 초안이 다릅니다. 초안을 다시 확인하세요.')
+    api_confirmation = (row['status'] == 'pending' and explicit_confirmation
+                        and getattr(g, 'api_token_id', None) == row['keyId'])
+    if row['status'] not in {'approved', 'committing', 'committed'} and not api_confirmation:
         not_expired(row)
-        raise Conflict('웹에서 등록 내용과 공개 범위를 먼저 승인하세요.')
+        raise Conflict('등록 내용과 공개 범위를 확인한 뒤 같은 KEY로 confirmed=true와 reviewDigest를 보내세요. 웹에서도 승인할 수 있습니다.')
     result = saved_result(row)
     if result:
         followup_pending('publish-draft-result', db().publish_drafts.update_one,
@@ -278,9 +299,19 @@ def commit(draft_id):
     verify_bytes(row)
     if row['reviewDigest'] != digest(row):
         raise Conflict('승인된 내용이 변경되었습니다. 새 초안을 준비하세요.')
-    changed = db().publish_drafts.update_one({'_id': row['_id'], 'status': {'$in': ['approved', 'committing']},
+    if row.get('approvedDigest', row['reviewDigest']) != row['reviewDigest']:
+        raise Conflict('확인한 초안 내용이 변경되었습니다. 새 초안을 준비하세요.')
+    changes = {'status': 'committing'}
+    if api_confirmation:
+        # This proves an authenticated API caller confirmed these exact bytes
+        # and metadata, not that a human or a particular MCP host did so.
+        changes.update(approvedAt=time.time(), approvedBy=g.user['id'],
+                       approvalSource='api', approvedDigest=row['reviewDigest'])
+    active_key(row)
+    eligible = ['pending'] if api_confirmation else ['approved', 'committing']
+    changed = db().publish_drafts.update_one({'_id': row['_id'], 'status': {'$in': eligible},
                                             'reviewDigest': row['reviewDigest']},
-                                           {'$set': {'status': 'committing'}})
+                                           {'$set': changes})
     if not changed.matched_count:
         raise Conflict('게시 상태가 변경되었습니다. 초안을 다시 확인하세요.')
     raw = dict(row['metadata'], clientRequestId=row['_id'])

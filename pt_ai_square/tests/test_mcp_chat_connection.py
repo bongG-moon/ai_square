@@ -129,6 +129,26 @@ def test_saved_origin_and_saved_exact_http_acknowledgement_are_reused(fresh, mon
     assert result['connected'] and result['baseUrl'] == HTTP
     assert seen == [(HTTP, '/api/integration/me')] and not context.requests
 
+
+@pytest.mark.parametrize('tool', ['connect_account', 'reconnect_key'])
+def test_chat_reconnect_repairs_deleted_folders_with_saved_origin_and_http_consent(fresh, monkeypatch, tool):
+    seen = fake_api(monkeypatch)
+    source = fresh.home / '삭제된 프로젝트'; source.mkdir()
+    downloads = fresh.home / 'AI_SQUARE' / 'downloads'; downloads.mkdir(parents=True)
+    save_config(fresh.path, HTTP, [source, downloads], allow_http=True, download_directory=downloads)
+    source.rmdir(); downloads.rmdir()
+    context = ConsentContext()
+    pending = invoke(fresh.path, context, tool=tool)
+    assert pending['keyRequired'] and pending['baseUrl'] == HTTP
+    assert not pending['requiresHttpConfirmation'] and not seen
+    result = invoke(fresh.path, context, KEY, tool=tool)
+    assert result['connected'] and result['baseUrl'] == HTTP
+    assert result['removedWorkspaceCount'] == 1
+    assert seen == [(HTTP, '/api/integration/me')] and not context.requests
+    assert Settings(fresh.path).roots == [downloads]
+    assert downloads.is_dir() and not source.exists()
+    assert KEY not in json.dumps(result) and KEY not in fresh.path.read_text()
+
 @pytest.mark.parametrize('capability', ['form', 'legacy'])
 def test_http_form_is_boolean_consent_only(fresh, monkeypatch, capability):
     set_http(fresh); seen = fake_api(monkeypatch)

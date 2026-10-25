@@ -1,4 +1,8 @@
-"""Native choice jobs respond immediately and grant only completed user choices."""
+"""Chat folder choices never open a native UI or grant an unconfirmed path."""
+import asyncio
+from datetime import timedelta
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -6,7 +10,8 @@ import time
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1] / 'integrations' / 'pt-square-mcp'))
+PACKAGE = Path(__file__).parents[1] / 'integrations' / 'pt-square-mcp'
+sys.path.insert(0, str(PACKAGE))
 from pt_square_mcp import workspace_selection as jobs
 from pt_square_mcp.config import Settings, SquareError, atomic_json, read_json, save_config
 
@@ -21,113 +26,269 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, 'home', classmethod(lambda cls: home))
     config = tmp_path / 'private' / 'config.json'
     save_config(config, 'https://company.example', [downloads], download_directory=downloads)
-    launches = []
-    child = SimpleNamespace(poll=lambda: None)
-    def launch(path):
-        launches.append(path)
-        return child
-    monkeypatch.setattr(jobs, '_launch', launch)
-    monkeypatch.setattr(jobs, '_children', {})
+    def forbidden(*args, **kwargs):
+        pytest.fail('Chat location selection must not spawn a native chooser')
+    monkeypatch.setattr(jobs, '_launch', forbidden, raising=False)
+    import subprocess
+    class ForbiddenProcess(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            forbidden(*args, **kwargs)
+    monkeypatch.setattr(subprocess, 'Popen', ForbiddenProcess)
     candidate = {'path': str(project), 'name': 'Project', 'source': 'mcp-roots'}
     choices = {'options': [{'scope': 'user', 'path': str(home)}],
-               'currentProject': candidate, 'projectCandidates': [candidate]}
+               'currentProject': candidate, 'projectCandidates': [candidate],
+               'confirmationCandidates': [], 'rootsStatus': 'available'}
     return SimpleNamespace(config=config, home=home, downloads=downloads, project=project,
-                           choices=choices, launches=launches, child=child)
+                           choices=choices, base=tmp_path)
 
 
 def start(setup, purpose='install'):
-    return jobs.start_selection(setup.config, purpose, setup.choices if purpose == 'install' else None)
+    return jobs.start_selection(setup.config, purpose, setup.choices)
 
 
-def complete(setup, result):
-    atomic_json(setup.launches[-1].with_name('result.json'), dict(completedAt=time.time(), **result))
+def submit(setup, request, selection='current', path='', confirmed=True):
+    return jobs.submit_selection(setup.config, request['requestId'], selection,
+                                 path=path, confirmed=confirmed)
 
 
-def test_pending_is_immediate_and_repeated_open_reuses_window(setup):
+def test_pending_returns_chat_choices_and_defaults_only_to_verified_project(setup):
     before = setup.config.read_bytes()
     first = start(setup)
     assert first['status'] == 'pending' and first['waitingForUser']
-    assert first['nextTool'] == 'get_workspace_selection'
-    assert first['pollAfterSeconds'] >= 3
+    assert first['selected'] is False and first['selectionMethod'] == 'chat'
+    assert first['defaultSelection'] == 'current' and first['defaultPath'] == str(setup.project)
+    assert {option['selection'] for option in first['options']} == {'user', 'current', 'other'}
+    assert first['projectCandidates'][0]['path'] == str(setup.project)
     assert start(setup)['requestId'] == first['requestId']
     assert jobs.selection_status(setup.config, first['requestId'])['status'] == 'pending'
-    assert len(setup.launches) == 1
     assert setup.config.read_bytes() == before
     assert not (setup.project / '.claude').exists()
-    content = setup.launches[0].read_text(encoding='utf-8')
-    assert 'credential' not in content and 'company.example' not in content
 
 
-def test_custom_directory_only_granted_after_completed_selection(setup, tmp_path):
+@pytest.mark.parametrize('confirmed', [False, None, 1, 'true', []])
+def test_tool_argument_without_strict_confirmation_never_grants_path(setup, confirmed):
+    request = start(setup)
+    before = setup.config.read_bytes()
+    try:
+        result = submit(setup, request, 'other', str(setup.project), confirmed=confirmed)
+    except SquareError:
+        pass
+    else:
+        assert result['selected'] is False
+    assert setup.config.read_bytes() == before
+    assert setup.project not in Settings(setup.config).roots
+
+
+def test_other_directory_granted_only_after_explicit_confirmed_path(setup, tmp_path):
     path = tmp_path / 'chosen folder'
     path.mkdir()
-    result = start(setup)
+    request = start(setup)
     assert path not in Settings(setup.config).roots
-    complete(setup, dict(selected=True, selection='other', scope='project', path=str(path)))
-    selected = jobs.selection_status(setup.config, result['requestId'])
+    selected = submit(setup, request, 'other', str(path))
     assert selected['status'] == 'selected' and selected['path'] == str(path)
+    assert selected['scope'] == 'project'
     assert Settings(setup.config).roots == [setup.downloads, path]
-    assert jobs.selection_status(setup.config, result['requestId']) == selected
+    assert Settings(setup.config).downloads == setup.downloads
+    assert jobs.selection_status(setup.config, request['requestId']) == selected
     assert not (path / '.claude').exists()
 
 
-@pytest.mark.parametrize('selection,scope', [('user', 'user'), ('current', 'project')])
-def test_common_and_current_do_not_permanently_expand_trust(setup, selection, scope):
+@pytest.mark.parametrize('purpose,selection', [('install', 'other'), ('publish', 'current')])
+def test_selection_record_write_failure_never_grants_and_pending_request_can_retry(setup, monkeypatch, purpose, selection):
+    request = start(setup, purpose)
     before = setup.config.read_bytes()
-    result = start(setup)
-    path = setup.home if selection == 'user' else setup.project
-    complete(setup, dict(selected=True, selection=selection, scope=scope, path=str(path)))
-    selected = jobs.selection_status(setup.config, result['requestId'])
-    assert selected['selected'] and selected['scope'] == scope
+    original = jobs.atomic_json
+    writes = []
+    def fail_record(path, value):
+        writes.append(Path(path))
+        if Path(path).name == 'record.json':
+            raise OSError('fixture result disk failure')
+        return original(path, value)
+    monkeypatch.setattr(jobs, 'atomic_json', fail_record)
+    with pytest.raises(OSError):
+        submit(setup, request, selection, str(setup.project))
     assert setup.config.read_bytes() == before
-
-
-@pytest.mark.parametrize('kind', ['unexpected_current', 'wrong_user', 'relative', 'drive', 'missing'])
-def test_unverified_selection_never_expands_trust(setup, tmp_path, kind):
-    before = setup.config.read_bytes()
-    result = start(setup)
-    selection, scope, path = 'other', 'project', str(tmp_path / 'missing')
-    if kind == 'unexpected_current':
-        selection, path = 'current', str(tmp_path)
-    if kind == 'wrong_user':
-        selection, scope, path = 'user', 'user', str(setup.project)
-    if kind == 'relative':
-        path = 'relative'
-    if kind == 'drive':
-        path = setup.project.anchor
-    complete(setup, dict(selected=True, selection=selection, scope=scope, path=path))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'failed'
-    assert setup.config.read_bytes() == before
-
-
-def test_changed_project_directory_identity_is_rejected(setup, monkeypatch):
-    result = start(setup)
-    complete(setup, dict(selected=True, selection='current', scope='project', path=str(setup.project)))
-    monkeypatch.setattr(jobs, '_identity', lambda path: [-1, -1])
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'failed'
-
-
-def test_untrusted_start_folder_requires_explicit_ui_confirmation_before_grant(setup):
-    setup.choices['confirmationCandidates'] = setup.choices['projectCandidates']
-    setup.choices['projectCandidates'] = []
-    setup.choices['currentProject'] = None
-    result = start(setup)
-    assert Settings(setup.config).roots == [setup.downloads]
-    complete(setup, dict(selected=True, selection='confirmed-current', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'selected'
+    assert setup.project not in Settings(setup.config).roots
+    assert setup.config not in writes
+    monkeypatch.setattr(jobs, 'atomic_json', original)
+    assert jobs.selection_status(setup.config, request['requestId'])['status'] == 'pending'
+    assert start(setup, purpose)['requestId'] == request['requestId']
+    result = submit(setup, request, selection, str(setup.project))
+    assert result['selected'] is True
     assert Settings(setup.config).roots == [setup.downloads, setup.project]
 
 
-def test_confirmation_cannot_grant_an_unlisted_start_folder(setup):
-    result = start(setup)
-    complete(setup, dict(selected=True, selection='confirmed-current', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'failed'
+@pytest.mark.parametrize('first_recovery', ['status', 'cancel', 'submit', 'start'])
+def test_config_cutover_failure_does_not_report_a_grant_or_reuse_incomplete_result(setup, monkeypatch, first_recovery):
+    request = start(setup, 'publish')
+    before = setup.config.read_bytes()
+    original = jobs.atomic_json
+    writes = []
+    def fail_config(path, value):
+        writes.append(Path(path))
+        if Path(path) == setup.config:
+            raise OSError('fixture config disk failure')
+        return original(path, value)
+    monkeypatch.setattr(jobs, 'atomic_json', fail_config)
+    with pytest.raises(OSError):
+        submit(setup, request, 'current')
+    assert setup.config.read_bytes() == before
+    assert setup.project not in Settings(setup.config).roots
+    assert [path.name for path in writes] == ['record.json', 'config.json']
+    monkeypatch.setattr(jobs, 'atomic_json', original)
+    if first_recovery == 'status':
+        recovered = jobs.selection_status(setup.config, request['requestId'])
+    elif first_recovery == 'cancel':
+        recovered = jobs.cancel_selection(setup.config, request['requestId'])
+    elif first_recovery == 'submit':
+        recovered = submit(setup, request, 'current')
+    else:
+        fresh = start(setup, 'publish')
+        assert fresh['requestId'] != request['requestId'] and not fresh['selected']
+        recovered = jobs.selection_status(setup.config, request['requestId'])
+    assert recovered['status'] == 'cancelled' and recovered['selected'] is False
+    assert setup.project not in Settings(setup.config).roots
+    fresh = start(setup, 'publish')
+    assert fresh['requestId'] != request['requestId']
+    assert start(setup, 'publish')['requestId'] == fresh['requestId']
+    assert submit(setup, fresh, 'current')['selected'] is True
+    assert Settings(setup.config).roots == [setup.downloads, setup.project]
+
+
+def test_config_write_exception_after_atomic_cutover_recovers_exact_selected_result(setup, monkeypatch):
+    request = start(setup, 'publish')
+    original = jobs.atomic_json
+    writes = []
+    def lose_config_ack(path, value):
+        writes.append(Path(path))
+        original(path, value)
+        if Path(path) == setup.config:
+            raise OSError('fixture response lost after config cutover')
+    monkeypatch.setattr(jobs, 'atomic_json', lose_config_ack)
+    selected = submit(setup, request, 'current')
+    assert selected['selected'] is True and selected['status'] == 'selected'
+    assert [path.name for path in writes] == ['record.json', 'config.json']
+    assert Settings(setup.config).roots == [setup.downloads, setup.project]
+    monkeypatch.setattr(jobs, 'atomic_json', original)
+    assert jobs.selection_status(setup.config, request['requestId']) == selected
+    assert jobs.cancel_selection(setup.config, request['requestId']) == selected
+    assert submit(setup, request, 'current') == selected
+
+
+@pytest.mark.parametrize('selection,scope', [('user', 'user'), ('current', 'project')])
+def test_install_common_and_verified_current_keep_trusted_roots_and_downloads(setup, selection, scope):
+    before = setup.config.read_bytes()
+    request = start(setup)
+    selected = submit(setup, request, selection)
+    assert selected['selected'] and selected['scope'] == scope
+    assert selected['path'] == str(setup.home if selection == 'user' else setup.project)
+    assert setup.config.read_bytes() == before
+    assert Settings(setup.config).downloads == setup.downloads
+
+
+def test_multiple_host_roots_require_exact_choice_without_default(setup, tmp_path):
+    second = tmp_path / 'another project'
+    second.mkdir()
+    setup.choices['projectCandidates'].append(
+        {'path': str(second), 'name': 'Second', 'source': 'mcp-roots'})
+    setup.choices['currentProject'] = None
+    request = start(setup)
+    assert request.get('defaultSelection') != 'current'
+    assert not request.get('defaultPath')
+    assert len(request['projectCandidates']) == 2
+    with pytest.raises(SquareError):
+        submit(setup, request, 'current')
+    assert setup.project not in Settings(setup.config).roots
+    chosen = submit(setup, request, 'current', str(second))
+    assert chosen['selected'] and chosen['path'] == str(second)
     assert Settings(setup.config).roots == [setup.downloads]
+
+
+def test_no_host_root_never_guesses_project_from_python_cwd(setup, monkeypatch):
+    setup.choices['currentProject'] = None
+    setup.choices['projectCandidates'] = []
+    monkeypatch.chdir(setup.project)
+    request = start(setup)
+    assert not request.get('defaultPath') and request.get('defaultSelection') != 'current'
+    with pytest.raises(SquareError):
+        submit(setup, request, 'current')
+    assert Settings(setup.config).roots == [setup.downloads]
+    assert submit(setup, request, 'user')['scope'] == 'user'
+
+
+def test_unconfirmed_launch_candidate_is_displayed_without_automatic_authority(setup):
+    candidate = {**setup.choices['projectCandidates'][0],
+                 'source': 'launch-cwd-unconfirmed', 'requiresUserSelection': True}
+    setup.choices['confirmationCandidates'] = [candidate]
+    setup.choices['projectCandidates'] = []
+    setup.choices['currentProject'] = None
+    request = start(setup)
+    assert request['confirmationCandidates'][0]['path'] == str(setup.project)
+    assert request.get('defaultSelection') != 'current' and not request.get('defaultPath')
+    assert Settings(setup.config).roots == [setup.downloads]
+    chosen = submit(setup, request, 'other', str(setup.project))
+    assert chosen['selected'] and Settings(setup.config).roots == [setup.downloads, setup.project]
+
+
+@pytest.mark.parametrize('kind', ['unexpected-current', 'wrong-user', 'relative', 'drive',
+                                 'missing', 'file', 'home', 'home-parent', 'downloads',
+                                 'private-state', 'program', 'system'])
+def test_invalid_or_overbroad_paths_never_expand_trust(setup, tmp_path, monkeypatch, kind):
+    from pt_square_mcp.install_locations import PACKAGE_DIRECTORY
+    selection, path = 'other', str(tmp_path / 'missing')
+    if kind == 'unexpected-current':
+        unexpected = tmp_path / 'not-listed-project'
+        unexpected.mkdir()
+        selection, path = 'current', str(unexpected)
+    elif kind == 'wrong-user':
+        selection, path = 'user', str(setup.project)
+    elif kind == 'relative':
+        path = 'relative'
+    elif kind == 'drive':
+        path = setup.project.anchor
+    elif kind == 'file':
+        file = tmp_path / 'plain.txt'
+        file.write_text('fixture')
+        path = str(file)
+    elif kind == 'home':
+        path = str(setup.home)
+    elif kind == 'home-parent':
+        path = str(setup.home.parent)
+    elif kind == 'downloads':
+        path = str(setup.downloads)
+    elif kind == 'private-state':
+        path = str(setup.config.parent)
+    elif kind == 'program':
+        path = str(PACKAGE_DIRECTORY)
+    elif kind == 'system':
+        system = tmp_path / 'system'
+        system.mkdir()
+        monkeypatch.setenv('ProgramFiles', str(system))
+        path = str(system)
+    request = start(setup)
+    before = setup.config.read_bytes()
+    if kind == 'unexpected-current':
+        result = submit(setup, request, selection, path)
+        assert result['status'] == 'failed' and not result['selected']
+    else:
+        with pytest.raises(SquareError):
+            submit(setup, request, selection, path)
+    assert setup.config.read_bytes() == before
+    assert Settings(setup.config).downloads == setup.downloads
+
+
+def test_changed_verified_directory_identity_is_rejected(setup, monkeypatch):
+    request = start(setup)
+    monkeypatch.setattr(jobs, '_identity', lambda path: [-1, -1])
+    before = setup.config.read_bytes()
+    result = submit(setup, request)
+    assert not result['selected'] and result['status'] in {'failed', 'cancelled'}
+    assert setup.config.read_bytes() == before
 
 
 @pytest.mark.parametrize('change', ['origin', 'credential', 'trust'])
 def test_connection_changes_cancel_pending_grant(setup, change):
-    result = start(setup)
+    request = start(setup)
     data = read_json(setup.config)
     if change == 'origin':
         data['baseUrl'] = 'https://another.example'
@@ -136,87 +297,332 @@ def test_connection_changes_cancel_pending_grant(setup, change):
     else:
         data['trustedRoots'].append(str(setup.home))
     atomic_json(setup.config, data)
-    complete(setup, dict(selected=True, selection='other', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'cancelled'
+    result = submit(setup, request, 'other', str(setup.project))
+    assert result['status'] == 'cancelled' and not result['selected']
     assert setup.project not in Settings(setup.config).roots
 
 
-def test_cancel_prevents_late_result_from_granting_folder(setup):
+def test_cancel_prevents_late_chat_confirmation_from_granting_folder(setup):
     before = setup.config.read_bytes()
-    result = start(setup)
-    assert jobs.cancel_selection(setup.config, result['requestId'])['status'] == 'cancelled'
-    assert setup.launches[0].with_name('cancel.marker').exists()
-    complete(setup, dict(selected=True, selection='other', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'cancelled'
+    request = start(setup)
+    assert jobs.cancel_selection(setup.config, request['requestId'])['status'] == 'cancelled'
+    result = submit(setup, request, 'other', str(setup.project))
+    assert result['status'] == 'cancelled' and not result['selected']
     assert setup.config.read_bytes() == before
-    assert start(setup)['requestId'] != result['requestId']
+    assert start(setup)['requestId'] != request['requestId']
 
 
-def test_ui_cancel_does_not_change_roots(setup):
-    result = start(setup)
-    complete(setup, dict(selected=False))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'cancelled'
+def test_expired_choice_rejects_late_chat_confirmation(setup, monkeypatch):
+    before = setup.config.read_bytes()
+    now = time.time()
+    request = start(setup)
+    monkeypatch.setattr(jobs.time, 'time', lambda: now + jobs.LIFETIME_SECONDS + 1)
+    result = submit(setup, request, 'other', str(setup.project))
+    assert result['status'] == 'expired' and not result['selected']
+    assert setup.config.read_bytes() == before
+
+
+def test_old_native_result_file_cannot_grant_path_without_chat_confirmation(setup):
+    before = setup.config.read_bytes()
+    request = start(setup)
+    directory = Settings(setup.config).state / 'workspace-selections' / request['requestId']
+    atomic_json(directory / 'result.json', {
+        'completedAt': time.time(), 'selected': True, 'selection': 'other',
+        'scope': 'project', 'path': str(setup.project)})
+    assert jobs.selection_status(setup.config, request['requestId'])['status'] == 'pending'
+    assert setup.config.read_bytes() == before
+
+
+def test_legacy_native_pending_job_is_cancelled_without_consuming_result(setup):
+    request = start(setup)
+    directory = Settings(setup.config).state / 'workspace-selections' / request['requestId']
+    record = read_json(directory / 'record.json')
+    record.pop('selectionMethod')
+    atomic_json(directory / 'record.json', record)
+    atomic_json(directory / 'result.json', {'completedAt': time.time(), 'selected': True,
+                'selection': 'other', 'scope': 'project', 'path': str(setup.project)})
+    before = setup.config.read_bytes()
+    result = jobs.selection_status(setup.config, request['requestId'])
+    assert result['status'] == 'cancelled' and not result['selected']
+    assert setup.config.read_bytes() == before
+    assert start(setup)['requestId'] != request['requestId']
+
+
+def test_publish_folder_requires_confirmation_and_does_not_install(setup):
+    before = setup.config.read_bytes()
+    request = start(setup, 'publish')
+    assert setup.config.read_bytes() == before
+    with pytest.raises(SquareError):
+        submit(setup, request, 'user')
+    chosen = submit(setup, request, 'current')
+    assert chosen['purpose'] == 'publish' and chosen['scope'] == 'project'
+    assert Settings(setup.config).roots == [setup.downloads, setup.project]
+    assert Settings(setup.config).downloads == setup.downloads
+    assert not (setup.project / '.claude').exists()
+
+
+def test_completed_choice_cannot_be_reused_to_grant_another_path(setup, tmp_path):
+    other = tmp_path / 'second choice'
+    other.mkdir()
+    request = start(setup)
+    original = submit(setup, request, 'other', str(setup.project))
+    assert submit(setup, request, 'other', str(other)) == original
+    assert other not in Settings(setup.config).roots
+
+
+def test_unknown_request_and_path_traversal_never_read_arbitrary_files(setup):
+    with pytest.raises(SquareError):
+        jobs.start_selection(setup.config, 'unknown')
+    for request_id in ('../config', 'f' * 32):
+        with pytest.raises(SquareError):
+            jobs.selection_status(setup.config, request_id)
+        with pytest.raises(SquareError):
+            jobs.cancel_selection(setup.config, request_id)
+        with pytest.raises(SquareError):
+            jobs.submit_selection(setup.config, request_id, 'other',
+                                  path=str(setup.project), confirmed=True)
+    assert setup.project not in Settings(setup.config).roots
+
+
+class ChatContext:
+    def __init__(self, roots=(), *, capability='form', action='accept', selection='current', path='', hook=None):
+        self.roots = list(roots)
+        self.action, self.selection, self.path, self.hook = action, selection, path, hook
+        self.prompts = []
+        capability = {'form': SimpleNamespace(form=object(), url=None),
+                      'url': SimpleNamespace(form=None, url=object()), 'none': None}[capability]
+        self.session = SimpleNamespace(
+            client_params=SimpleNamespace(capabilities=SimpleNamespace(roots=object(), elicitation=capability)),
+            list_roots=self.list_roots)
+
+    async def list_roots(self):
+        return SimpleNamespace(roots=[SimpleNamespace(uri=path.as_uri(), name=path.name) for path in self.roots])
+
+    async def elicit(self, message, schema):
+        document = schema.model_json_schema()
+        self.prompts.append(document)
+        assert set(document['properties']) == {'selection', 'path'}
+        if self.hook:
+            result = self.hook()
+            if hasattr(result, '__await__'):
+                await result
+        if self.action != 'accept':
+            return SimpleNamespace(action=self.action, data=None)
+        label = {'user': '공통 (내 계정)', 'other': '기타 경로'}.get(self.selection)
+        if label is None:
+            label = ('현재 프로젝트 · ' + self.path if self.path else
+                     document['properties']['selection']['default'])
+        return SimpleNamespace(action='accept', data=schema(selection=label, path=self.path))
+
+
+def chat_tool(setup, monkeypatch):
+    pytest.importorskip('mcp')
+    from pt_square_mcp.server import make_server
+    # An unrelated real checkout cwd must never enter this isolated test.
+    monkeypatch.chdir(setup.base)
+    return make_server(setup.config)._tool_manager.get_tool('select_workspace').fn
+
+
+@pytest.mark.parametrize('purpose', ['install', 'publish'])
+def test_server_hitl_defaults_to_host_current_and_confirms_only_chosen_purpose(setup, monkeypatch, purpose):
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([setup.project])
+    before = setup.config.read_bytes()
+    result = asyncio.run(fn(ctx, purpose=purpose))
+    assert result['selected'] and result['path'] == str(setup.project)
+    assert ctx.prompts[0]['properties']['selection']['default'] == '현재 프로젝트 · ' + str(setup.project)
+    if purpose == 'install':
+        assert setup.config.read_bytes() == before
+    else:
+        assert setup.project in Settings(setup.config).roots
+    assert Settings(setup.config).downloads == setup.downloads
+    assert not (setup.project / '.claude').exists()
+
+
+@pytest.mark.parametrize('capability', ['none', 'url'])
+def test_server_without_form_collects_explicit_chat_selection_without_native_fallback(setup, monkeypatch, capability):
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([setup.project], capability=capability)
+    first = asyncio.run(fn(ctx, purpose='install', selection='other', path=str(setup.project), confirmed=True))
+    assert first['status'] == 'pending' and first['confirmationRequired']
+    assert setup.project not in Settings(setup.config).roots and not ctx.prompts
+    pending = asyncio.run(fn(ctx, purpose='install', request_id=first['requestId'],
+                             selection='other', path=str(setup.project)))
+    assert pending['confirmationRequired'] and not pending['selected']
+    chosen = asyncio.run(fn(ctx, purpose='install', request_id=first['requestId'],
+                            selection='other', path=str(setup.project), confirmed=True))
+    assert chosen['selected'] and setup.project in Settings(setup.config).roots
+    assert not ctx.prompts
+
+
+def test_server_multiple_projects_has_no_default_and_uses_selected_candidate(setup, monkeypatch, tmp_path):
+    second = tmp_path / 'second'
+    second.mkdir()
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([setup.project, second], path=str(second))
+    result = asyncio.run(fn(ctx, purpose='install'))
+    field = ctx.prompts[0]['properties']['selection']
+    assert 'default' not in field and 'selection' in ctx.prompts[0]['required']
+    assert result['selected'] and result['path'] == str(second)
     assert Settings(setup.config).roots == [setup.downloads]
 
 
-def test_expired_window_has_finite_wait_and_rejects_late_result(setup, monkeypatch):
+def test_server_no_roots_can_select_common_without_guessing_current(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([], selection='user')
+    result = asyncio.run(fn(ctx, purpose='install'))
+    field = ctx.prompts[0]['properties']['selection']
+    assert 'default' not in field
+    assert field['enum'] == ['공통 (내 계정)', '기타 경로']
+    assert result['scope'] == 'user' and result['path'] == str(setup.home)
+    assert Settings(setup.config).roots == [setup.downloads]
+
+
+@pytest.mark.parametrize('action', ['decline', 'cancel'])
+def test_server_host_decline_or_cancel_does_not_grant_access(setup, monkeypatch, action):
+    fn = chat_tool(setup, monkeypatch)
     before = setup.config.read_bytes()
-    result = start(setup)
-    request = read_json(setup.launches[0])
-    monkeypatch.setattr(jobs.time, 'time', lambda: request['expiresAt'] + 1)
-    complete(setup, dict(selected=True, selection='other', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'expired'
+    result = asyncio.run(fn(ChatContext([setup.project], action=action), purpose='publish'))
+    assert result['status'] == 'cancelled' and not result['selected']
     assert setup.config.read_bytes() == before
 
 
-def test_completed_in_time_survives_delayed_status_read(setup, monkeypatch):
-    result = start(setup)
-    complete(setup, dict(selected=True, selection='current', scope='project', path=str(setup.project)))
-    request = read_json(setup.launches[0])
-    monkeypatch.setattr(jobs.time, 'time', lambda: request['expiresAt'] + 30)
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'selected'
+def test_server_roots_withdrawn_while_hitl_is_open_cannot_be_granted(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([setup.project])
+    ctx.hook = lambda: ctx.roots.clear()
+    before = setup.config.read_bytes()
+    with pytest.raises(SquareError, match='프로젝트가 바뀌었습니다'):
+        asyncio.run(fn(ctx, purpose='publish'))
+    assert setup.config.read_bytes() == before
 
 
-def test_exit_without_result_and_launch_error_are_reported(setup, monkeypatch):
-    result = start(setup)
-    setup.child.poll = lambda: 1
-    assert jobs.selection_status(setup.config, result['requestId'])['status'] == 'failed'
-    def fail(_):
-        raise OSError('sensitive contents must not be returned')
-    monkeypatch.setattr(jobs, '_launch', fail)
-    result = start(setup)
-    assert result['status'] == 'failed'
-    assert 'sensitive' not in str(result)
+def test_server_config_changed_while_hitl_is_open_preserves_new_config(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    def change():
+        data = read_json(setup.config)
+        data['baseUrl'] = 'https://changed.example'
+        atomic_json(setup.config, data)
+    ctx = ChatContext([setup.project], hook=change)
+    result = asyncio.run(fn(ctx, purpose='publish'))
+    assert result['status'] == 'cancelled'
+    assert Settings(setup.config).url == 'https://changed.example'
+    assert setup.project not in Settings(setup.config).roots
 
 
-def test_publish_selection_uses_same_nonblocking_path(setup):
-    result = start(setup, 'publish')
-    assert read_json(setup.launches[0])['locations'] == {}
-    complete(setup, dict(selected=True, selection='other', scope='project', path=str(setup.project)))
-    assert jobs.selection_status(setup.config, result['requestId'])['purpose'] == 'publish'
-    assert Settings(setup.config).roots == [setup.downloads, setup.project]
+def test_server_connection_changed_during_root_discovery_cannot_create_selection(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([setup.project])
+    original = ctx.session.list_roots
+    async def changing_roots():
+        data = read_json(setup.config)
+        data['baseUrl'] = 'https://new-origin.example'
+        atomic_json(setup.config, data)
+        return await original()
+    ctx.session.list_roots = changing_roots
+    with pytest.raises(SquareError, match='연결 설정이 바뀌었습니다'):
+        asyncio.run(fn(ctx, purpose='publish'))
+    assert Settings(setup.config).url == 'https://new-origin.example'
+    assert Settings(setup.config).roots == [setup.downloads]
+    assert not ctx.prompts
+    assert not (Settings(setup.config).state / 'workspace-selections' / 'publish.json').exists()
 
 
-def test_unknown_request_and_path_traversal_do_not_open_or_read_arbitrary_files(setup):
-    with pytest.raises(SquareError):
-        jobs.start_selection(setup.config, 'unknown')
-    with pytest.raises(SquareError):
-        jobs.selection_status(setup.config, '../config')
-    with pytest.raises(SquareError):
-        jobs.cancel_selection(setup.config, '../config')
-    with pytest.raises(SquareError):
-        jobs.selection_status(setup.config, 'f' * 32)
-    assert not setup.launches
+def test_server_elicitation_exception_is_sanitized_without_native_fallback(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    def fail():
+        raise RuntimeError('private host failure must not leak')
+    before = setup.config.read_bytes()
+    result = asyncio.run(fn(ChatContext([setup.project], hook=fail), purpose='publish'))
+    assert result['status'] == 'pending' and not result['selected']
+    assert 'private host failure' not in json.dumps(result)
+    assert setup.config.read_bytes() == before
 
 
-def test_launcher_hides_console_and_does_not_forward_key_environment(tmp_path, monkeypatch):
-    # Exercise the real launcher separately from the setup fixture replacement.
-    seen = []
-    monkeypatch.setenv('PTAI_API_TOKEN', 'test-only-secret')
-    monkeypatch.setattr(jobs.subprocess, 'Popen', lambda *a, **k: seen.append((a, k)))
-    jobs._launch(tmp_path / 'request.json')
-    args, kwargs = seen[0]
-    assert 'test-only-secret' not in str(args)
-    assert 'PTAI_API_TOKEN' not in kwargs['env']
-    assert kwargs['stdin'] == kwargs['stdout'] == kwargs['stderr'] == jobs.subprocess.DEVNULL
-    assert 'workspace_ui' in ' '.join(args[0])
+def test_server_task_cancellation_invalidates_pending_selection(setup, monkeypatch):
+    fn = chat_tool(setup, monkeypatch)
+    request = start(setup, 'publish')
+    before = setup.config.read_bytes()
+    async def scenario():
+        reached = asyncio.Event()
+        async def wait():
+            reached.set()
+            await asyncio.Future()
+        task = asyncio.create_task(fn(ChatContext([setup.project], hook=wait), purpose='publish'))
+        await asyncio.wait_for(reached.wait(), 3)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(scenario())
+    assert jobs.selection_status(setup.config, request['requestId'])['status'] == 'cancelled'
+    assert setup.config.read_bytes() == before
+
+
+STDIO_CHAT_FOLDER = '''import subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from pt_square_mcp.server import make_server
+config_path, home = map(Path, sys.argv[2:4])
+Path.home = classmethod(lambda cls: home)
+def no_native(*args, **kwargs):
+    raise AssertionError('Chat folder selection must not start a native process')
+subprocess.Popen = no_native
+make_server(config_path).run(transport='stdio')
+'''
+
+
+@pytest.mark.parametrize('action', ['accept', 'cancel'])
+def test_actual_sdk_stdio_folder_hitl_uses_current_project_without_native_ui(tmp_path, monkeypatch, action):
+    pytest.importorskip('mcp')
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from mcp.types import ElicitResult, ListRootsResult, Root
+    home = tmp_path / 'isolated-home'
+    downloads = home / 'AI_SQUARE' / 'downloads'
+    downloads.mkdir(parents=True)
+    project = tmp_path / 'host project'
+    project.mkdir()
+    config_path = tmp_path / 'private' / 'config.json'
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: home))
+    save_config(config_path, 'https://fixture-square.example.test', [downloads], download_directory=downloads)
+    before = config_path.read_bytes()
+    script = tmp_path / 'stdio_chat_folder.py'
+    script.write_text(STDIO_CHAT_FOLDER, encoding='utf-8')
+    prompts = []
+    async def roots(_ctx):
+        return ListRootsResult(roots=[Root(uri=project.as_uri(), name='Current project')])
+    async def confirm(_ctx, request):
+        doc = request.model_dump(mode='json')
+        prompts.append(doc)
+        fields = doc['requestedSchema']['properties']
+        assert set(fields) == {'selection', 'path'} and doc['mode'] == 'form'
+        assert fields['selection']['default'] == '현재 프로젝트 · ' + str(project)
+        return ElicitResult(action=action, content={
+            'selection': fields['selection']['default'], 'path': ''} if action == 'accept' else None)
+    async def scenario():
+        environment = {k: v for k, v in os.environ.items() if k != 'PTAI_API_TOKEN'}
+        params = StdioServerParameters(command=sys.executable,
+            args=['-X', 'utf8', '-B', str(script), str(PACKAGE), str(config_path), str(home)],
+            cwd=str(tmp_path), env=environment)
+        with (tmp_path / 'stdio-errors.txt').open('w', encoding='utf-8') as errors:
+            async with stdio_client(params, errlog=errors) as (reader, writer):
+                async with ClientSession(reader, writer, read_timeout_seconds=timedelta(seconds=15),
+                                         list_roots_callback=roots, elicitation_callback=confirm) as session:
+                    await session.initialize()
+                    listing = await session.list_tools()
+                    tool = next(row for row in listing.tools if row.name == 'select_workspace')
+                    assert set(tool.inputSchema['properties']) == {'purpose', 'request_id', 'selection', 'path', 'confirmed'}
+                    response = await session.call_tool('select_workspace', {'purpose': 'publish'})
+                    assert not response.isError, response.content
+                    result = json.loads(response.content[0].text)
+                    assert result['selectionMethod'] == 'chat'
+                    assert result['selected'] is (action == 'accept'), result
+                    assert result['status'] == ('selected' if action == 'accept' else 'cancelled'), result
+    asyncio.run(scenario())
+    assert len(prompts) == 1
+    assert Settings(config_path).downloads == downloads
+    if action == 'accept':
+        assert Settings(config_path).roots == [downloads, project]
+    else:
+        assert config_path.read_bytes() == before
+    assert not (project / '.claude').exists()

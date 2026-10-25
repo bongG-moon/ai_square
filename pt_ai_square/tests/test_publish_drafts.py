@@ -32,6 +32,181 @@ def commit(api, auth, draft):
     return api.post('/api/publish-drafts/' + draft['id'] + '/commit', headers=auth, json={})
 
 
+def confirm_commit(api, auth, draft, **changes):
+    confirmation = {'confirmed': True, 'reviewDigest': draft['reviewDigest']}
+    confirmation.update(changes)
+    return api.post('/api/publish-drafts/' + draft['id'] + '/commit', headers=auth, json=confirmation)
+
+
+@pytest.mark.parametrize('approval', [False, True])
+def test_api_confirmation_publishes_pending_draft_and_update_without_browser_review(app, approval):
+    owner, csrf = ready(app)
+    token, auth = issue(owner, csrf)
+    api = app.test_client()
+    first = create_draft(api, auth, approval=approval).json
+    assert first['status'] == 'pending'
+    assert first['directCommitSupported'] is True
+    assert api.get('/api/publish-drafts/' + first['id'], headers=auth).json['directCommitSupported'] is True
+    with app.app_context():
+        assert db().tools.count_documents({}) == 0
+    saved = confirm_commit(api, auth, first)
+    assert saved.status_code == 201 and saved.json['version'] == 1
+    assert confirm_commit(api, auth, first).json['replayed'] is True
+    assert confirm_commit(api, auth, first, reviewDigest='0' * 64).status_code == 409
+    second = create_draft(api, auth, toolId=saved.json['id'], expectedRevision=1,
+                          approval=approval, changes='새 버전').json
+    updated = confirm_commit(api, auth, second)
+    assert updated.status_code == 201 and updated.json['version'] == 2
+    assert confirm_commit(api, auth, second).json['replayed'] is True
+    member, _ = ready(app, 'member')
+    assert member.get(f'/download/{saved.json["id"]}/2').status_code == (403 if approval else 200)
+    with app.app_context():
+        assert db().tools.count_documents({}) == 1
+        stored = db().tools.find_one({'_id': saved.json['id']})
+        assert len(stored['versions']) == 2 and stored['data']['approval'] is approval
+        assert stored['versions'][1]['apiUsage']['tokenId'] == token['id']
+        for draft in (first, second):
+            row = db().publish_drafts.find_one({'_id': draft['id']})
+            assert row['status'] == 'committed' and row['approvalSource'] == 'api'
+            assert row['approvedDigest'] == draft['reviewDigest']
+            assert row['approvedBy'] == 'owner' and row['approvedAt'] > 0
+
+
+@pytest.mark.parametrize('body,expected', [
+    ({}, 409), ({'confirmed': True}, 400), ({'reviewDigest': 'digest'}, 400),
+    ({'confirmed': False, 'reviewDigest': 'digest'}, 400),
+    ({'confirmed': 1, 'reviewDigest': 'digest'}, 400),
+    ({'confirmed': 'true', 'reviewDigest': 'digest'}, 400),
+    ({'confirmed': True, 'reviewDigest': None}, 400),
+    ({'confirmed': True, 'reviewDigest': []}, 400),
+    ({'confirmed': True, 'reviewDigest': 'digest', 'approvalSource': 'human'}, 400),
+    ({'confirmed': True, 'reviewDigest': '0' * 64}, 409),
+    ({'confirmed': True, 'reviewDigest': '틀린 확인값'}, 409),
+    ({'confirmed': True, 'reviewDigest': '\ud800'}, 409),
+])
+def test_api_pending_commit_requires_exact_digest_and_strict_confirmation(app, body, expected):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    body = dict(body)
+    if body.get('reviewDigest') == 'digest':
+        body['reviewDigest'] = draft['reviewDigest']
+    result = api.post('/api/publish-drafts/' + draft['id'] + '/commit', headers=auth, json=body)
+    assert result.status_code == expected, result.json
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        assert row['status'] == 'pending' and 'approvedDigest' not in row
+        assert db().tools.count_documents({}) == 0
+
+
+def test_pending_cookie_commit_cannot_claim_api_confirmation(app):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    draft = create_draft(app.test_client(), auth).json
+    assert confirm_commit(owner, csrf, draft).status_code == 409
+    approved = approve(owner, csrf, draft)
+    assert approved.status_code == 200
+    assert commit(owner, csrf, approved.json).status_code == 201
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        assert row['approvalSource'] == 'browser'
+        assert row['approvedDigest'] == approved.json['reviewDigest']
+
+
+@pytest.mark.parametrize('changed', ['bytes', 'metadata', 'packageId', 'expired', 'revision'])
+def test_api_confirmation_revalidates_file_metadata_identity_expiry_and_revision(app, changed):
+    owner, csrf = ready(app)
+    if changed == 'revision':
+        publish(owner, csrf)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth, **({'toolId': 1, 'expectedRevision': 1} if changed == 'revision' else {})).json
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        if changed == 'bytes':
+            artifact_path(row['artifact']['path']).write_bytes(b'changed bytes')
+        elif changed in {'metadata', 'packageId', 'expired'}:
+            update = {'metadata': {'metadata.name': 'changed'}, 'packageId': {'packageId': 'changed-id'},
+                      'expired': {'expires': time.time() - 1}}[changed]
+            db().publish_drafts.update_one({'_id': draft['id']}, {'$set': update})
+    if changed == 'revision':
+        assert publish(owner, csrf, tid=1, revision=1).status_code == 201
+    result = confirm_commit(api, auth, draft)
+    assert result.status_code == (410 if changed == 'expired' else 409), result.json
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        assert row['status'] == 'pending' and 'approvedDigest' not in row
+        assert db().tools.count_documents({}) == (1 if changed == 'revision' else 0)
+
+
+def test_pending_api_confirmation_remains_employee_and_active_key_bound(app):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    other, other_csrf = ready(app, 'other')
+    _, other_auth = issue(other, other_csrf)
+    assert confirm_commit(api, other_auth, draft).status_code == 404
+    _, replaced_auth = issue(owner, csrf)
+    assert confirm_commit(api, auth, draft).status_code == 401
+    assert confirm_commit(api, replaced_auth, draft).status_code == 403
+    with app.app_context():
+        assert db().tools.count_documents({}) == 0
+
+
+def test_api_confirmation_cannot_update_a_tool_after_owner_change(app):
+    owner, csrf = ready(app)
+    publish(owner, csrf)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth, toolId=1, expectedRevision=1).json
+    with app.app_context():
+        db().tools.update_one({'_id': 1}, {'$set': {'owner': 'other'}})
+    assert confirm_commit(api, auth, draft).status_code == 403
+    with app.app_context():
+        assert len(db().tools.find_one({'_id': 1})['versions']) == 1
+
+
+def test_api_confirmed_commit_recovers_lost_result_after_expiry_without_duplicate(app, monkeypatch):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    original = publish_drafts.followup_pending
+    monkeypatch.setattr(publish_drafts, 'followup_pending',
+        lambda operation, callback, *args: True if operation == 'publish-draft-result' else original(operation, callback, *args))
+    assert confirm_commit(api, auth, draft).status_code == 201
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        assert row['status'] == 'committing' and row['approvedDigest'] == draft['reviewDigest']
+        db().publish_drafts.update_one({'_id': draft['id']}, {'$set': {'expires': time.time() - 1}})
+    again = confirm_commit(api, auth, draft)
+    assert again.status_code == 200 and again.json['replayed'] is True
+    with app.app_context():
+        assert db().tools.count_documents({}) == 1
+
+
+def test_api_confirmed_primary_failure_is_retryable_without_unconfirmed_publication(app, monkeypatch):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    original = publish_drafts.publish_prepared
+    def fail(*args, **kwargs):
+        raise OperationFailure('injected', 225)
+    monkeypatch.setattr(publish_drafts, 'publish_prepared', fail)
+    assert confirm_commit(api, auth, draft).status_code == 503
+    with app.app_context():
+        row = db().publish_drafts.find_one({'_id': draft['id']})
+        assert row['status'] == 'committing' and row['approvalSource'] == 'api'
+        assert row['approvedDigest'] == draft['reviewDigest']
+        assert db().tools.count_documents({}) == 0
+    monkeypatch.setattr(publish_drafts, 'publish_prepared', original)
+    assert confirm_commit(api, auth, draft).status_code == 201
+    assert confirm_commit(api, auth, draft).json['replayed'] is True
+
+
 @pytest.mark.parametrize('stored_scope', ['new', 'read', 'missing', 'publish'])
 def test_draft_review_commit_update_and_idempotency(app, stored_scope):
     owner, csrf = ready(app)
@@ -78,7 +253,7 @@ def test_draft_review_commit_update_and_idempotency(app, stored_scope):
 
 
 @pytest.mark.parametrize('stored_scope', ['read', 'missing', 'publish'])
-def test_direct_key_publish_requires_browser_review_and_admin_owner_only(app, stored_scope):
+def test_direct_key_publish_requires_reviewed_draft_and_admin_owner_only(app, stored_scope):
     owner, csrf = ready(app)
     assert publish(owner, csrf).status_code == 201
     admin, acsrf = ready(app, 'admin')
@@ -88,7 +263,11 @@ def test_direct_key_publish_requires_browser_review_and_admin_owner_only(app, st
         db().local_tokens.update_one({'id': token['id']}, update)
     api = app.test_client()
     assert publish(api, auth, tid=1, revision=1).status_code == 409
-    assert api.post('/api/tools', headers=auth, json={'confirmed': True}).json['code'] == 'publish_draft_required'
+    rejection = api.post('/api/tools', headers=auth, json={'confirmed': True})
+    assert rejection.json['code'] == 'publish_draft_required'
+    assert rejection.json['draftUrl'] == '/api/publish-drafts'
+    assert 'confirmed=true' in rejection.json['error'] and 'reviewDigest' in rejection.json['error']
+    assert '웹 승인도 선택' in rejection.json['error']
     assert create_draft(api, auth, toolId=1, expectedRevision=1).status_code == 403
     for method, path in [('delete', '/api/tools/1'), ('patch', '/api/tools/1'),
                          ('post', '/api/tools/1/grants'), ('post', '/api/tools/1/grants/departments'),
@@ -194,6 +373,41 @@ def test_review_requires_same_owner_session_csrf_digest_and_explicit_visibility(
     assert owner.post(path, headers=csrf, json={'approval': 'false', 'reviewDigest': draft['reviewDigest']}).status_code == 400
     assert owner.post(path, headers=csrf, json={'approval': False, 'reviewDigest': 'forged'}).status_code == 409
     assert approve(owner, csrf, draft).status_code == 200
+
+
+@pytest.mark.parametrize('invalid_digest', ['틀린 확인값', '\ud800'])
+def test_browser_review_rejects_non_ascii_digest_without_server_error(app, invalid_digest):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    draft = create_draft(app.test_client(), auth).json
+    response = owner.post('/api/publish-drafts/' + draft['id'] + '/approve', headers=csrf,
+                          json={'approval': False, 'reviewDigest': invalid_digest})
+    assert response.status_code == 409
+    with app.app_context():
+        stored = db().publish_drafts.find_one({'_id': draft['id']})
+        assert stored['status'] == 'pending' and 'approvedDigest' not in stored
+        assert db().tools.count_documents({}) == 0
+    # A malformed request must not prevent a subsequent valid browser approval.
+    assert approve(owner, csrf, draft).status_code == 200
+
+
+@pytest.mark.parametrize('field', ['metadata.name', 'metadata.guide', 'packageId'])
+def test_browser_review_cannot_rehash_changed_unapproved_content(app, field):
+    owner, csrf = ready(app)
+    _, auth = issue(owner, csrf)
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    with app.app_context():
+        db().publish_drafts.update_one({'_id': draft['id']}, {'$set': {field: 'changed-after-review'}})
+    # The browser's original digest must not approve newly stored content,
+    # including when it deliberately changes the visibility selection.
+    assert approve(owner, csrf, draft, True).status_code == 409
+    assert confirm_commit(api, auth, draft).status_code == 409
+    with app.app_context():
+        stored = db().publish_drafts.find_one({'_id': draft['id']})
+        assert stored['status'] == 'pending' and 'approvedDigest' not in stored
+        assert stored['reviewDigest'] == draft['reviewDigest']
+        assert db().tools.count_documents({}) == 0
 
 
 def test_reissued_key_invalidates_old_draft_even_for_browser_commit(app):
