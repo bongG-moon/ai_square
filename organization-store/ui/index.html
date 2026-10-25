@@ -11,7 +11,7 @@
   </header>
   <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
   <section id="connection-view" class="connection-view" aria-labelledby="connection-title" hidden>
-    <div class="intro"><span class="intro-icon" aria-hidden="true">◈</span><h2 id="connection-title">플랫폼과 한 번 연결하세요.</h2><p>웹에서 받은 개인 KEY로 연결합니다.<br>기존 좋아요와 다운로드 기록을 그대로 사용합니다.</p><ol class="steps"><li><b>01</b><span id="connection-server-step">플랫폼 주소 입력</span></li><li><b>02</b><span>웹의 연결 KEY 입력</span></li><li><b>03</b><span>기능을 찾아 다운로드·설치</span></li></ol><p class="muted">새 KEY를 발급할 필요는 없습니다. 기존에 발급받은 유효한 KEY를 사용하세요.</p></div>
+    <div class="intro"><span class="intro-icon" aria-hidden="true">◈</span><h2 id="connection-title">플랫폼과 한 번 연결하세요.</h2><p>웹에서 받은 개인 KEY로 연결합니다. 기존 좋아요와 다운로드 기록을 그대로 사용합니다.</p><ol class="steps"><li><b>01</b><span id="connection-server-step">플랫폼 주소 입력</span></li><li><b>02</b><span>웹의 연결 KEY 입력</span></li><li><b>03</b><span>기능을 찾아 다운로드·설치</span></li></ol><p class="muted">새 KEY를 발급할 필요는 없습니다. 기존에 발급받은 유효한 KEY를 사용하세요.</p></div>
     <form id="connection-form" class="connection-form">
       <div class="field-heading server-heading"><label for="server-url">연결할 플랫폼</label><button id="change-server" class="text-button" type="button" aria-controls="server-url" hidden>서버 주소 변경</button></div>
       <input id="server-url" type="url" placeholder="https://플랫폼-서버" autocomplete="url" required maxlength="500" aria-describedby="server-help">
@@ -20,6 +20,7 @@
       <input id="connection-key" type="password" placeholder="ptsq_…" autocomplete="off" spellcheck="false" maxlength="80" required>
       <p class="field-help">현재 Windows 계정에 암호화해 보관합니다. 대화나 로그에는 남기지 않습니다.</p>
       <label id="http-warning" class="check-row" hidden><input id="allow-http" type="checkbox"><span>이 서버는 HTTP를 사용해 연결 KEY와 통신 내용이 암호화되지 않습니다. 위 서버 주소를 확인했으며 이 연결을 사용하겠습니다.</span></label>
+      <p id="connection-feedback" class="connection-feedback" role="status" aria-live="polite" hidden></p>
       <button id="connect-submit" class="primary" type="button">연결하기</button>
       <button id="reuse-connection" class="secondary" type="button" aria-describedby="reuse-help" hidden>저장된 플랫폼(MCP) 연결 사용</button>
       <p id="reuse-help" class="field-help" hidden>이 PC의 플랫폼 MCP에 저장된 주소와 KEY를 사용합니다. MCP를 새로 설치하거나 실행하지 않습니다.</p>

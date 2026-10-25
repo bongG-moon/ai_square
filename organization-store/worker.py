@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import os
 import re
 import sys
 import time
@@ -39,7 +40,7 @@ if not (PACKAGE_ROOT / 'pt_square_mcp' / 'config.py').is_file():
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from pt_square_mcp.client import Client, positive
-from pt_square_mcp.config import (DEFAULT_CONFIG, Settings, SquareError, TOKEN_RE,
+from pt_square_mcp.config import (DEFAULT_CONFIG, Settings, SquareError, AuthenticationRequired, TOKEN_RE,
                                  atomic_json, no_links, normalize_url, operation_lock,
                                  read_json, save_config)
 from pt_square_mcp.install import Installer, tree_digest, check_directory_identity, digest
@@ -165,13 +166,78 @@ class Store:
                 result['message'] = '저장된 연결 설정을 읽지 못했습니다. 다시 연결해 주세요.'
         return result
 
+    def save_local_connection(self, url, token, accepted):
+        """Verify the encrypted copy before replacing a usable connection."""
+        suffix = uuid.uuid4().hex
+        candidate = no_links(self.config_path.parent / ('config.' + suffix + '.pending.json'))
+        credential = no_links(self.config_path.parent / ('credential.' + suffix + '.dpapi.json'))
+        previous_credential = None
+        previous_config = None
+        replaced = committed = rollback_failed = False
+        try:
+            previous_mode = self.selection().get('mode')
+            configuration = no_links(self.config_path)
+            if configuration.is_file():
+                if configuration.stat().st_size > 4 * 1024 * 1024:
+                    raise SquareError('설정 파일이 너무 큽니다.')
+                previous_config = configuration.read_bytes()
+                try:
+                    old_ref = json.loads(previous_config).get('credentialRef', '')
+                except (ValueError, TypeError, AttributeError):
+                    old_ref = ''  # A verified connection can repair broken metadata.
+                if isinstance(old_ref, str) and re.fullmatch(r'windows-dpapi:credential\.[a-f0-9]{32}\.dpapi\.json', old_ref):
+                    previous_credential = no_links(self.config_path.parent / old_ref.split(':', 1)[1])
+            downloads = no_links(self.directory / 'downloads')
+            downloads.mkdir(parents=True, exist_ok=True)
+            save_config(candidate, url, [self.directory], token, accepted,
+                        download_directory=downloads, credential_name=credential.name)
+            # Authentication succeeded in memory. Confirm Windows can reopen
+            # its encrypted copy too, as the next worker process must do.
+            if Settings(candidate).token() != token:
+                raise SquareError('Encrypted credential verification failed')
+            candidate.replace(no_links(self.config_path))
+            replaced = True
+            # A local-to-local reconnect needs just the atomic config swap.
+            if previous_mode != 'local':
+                atomic_json(self.selection_path, {'mode': 'local'})
+            committed = True
+        except (SquareError, OSError, ValueError):
+            if replaced:
+                try:
+                    if previous_config is None:
+                        no_links(self.config_path).unlink(missing_ok=True)
+                    else:
+                        with candidate.open('wb') as restored:
+                            restored.write(previous_config)
+                            restored.flush()
+                            os.fsync(restored.fileno())
+                        candidate.replace(no_links(self.config_path))
+                except (SquareError, OSError):
+                    rollback_failed = True
+            if rollback_failed:
+                raise SquareError('KEY는 서버에서 확인했지만 연결 설정을 저장하거나 복원하지 못했어요. Windows 사용자 폴더의 저장 권한을 확인한 뒤 연결 설정을 다시 확인해 주세요.') from None
+            raise SquareError('KEY는 서버에서 확인했지만 Windows 보안 저장소에 연결 정보를 저장하지 못했어요. 사용자 폴더의 저장 권한과 보안 프로그램 차단 여부를 확인해 주세요. 기존 연결은 그대로 유지됩니다.') from None
+        finally:
+            cleanup = [] if rollback_failed else [candidate, candidate.with_name(candidate.name + '.new')]
+            if not committed and not rollback_failed:
+                cleanup.extend([credential, credential.with_name(credential.name + '.new')])
+            if committed and previous_credential is not None:
+                cleanup.append(previous_credential)
+            for path in cleanup:
+                try:
+                    no_links(path).unlink(missing_ok=True)
+                except (SquareError, OSError):
+                    pass
+
     def connect(self, payload):
         with operation_lock(self.directory / 'connection-lock'):
-            previous_credential = None
             if payload.get('reuseExisting') is True:
                 settings = Settings(self.existing_config)
                 identity = self.client_factory(settings).json('/api/integration/me')
-                mode = 'existing'
+                try:
+                    atomic_json(self.selection_path, {'mode': 'existing'})
+                except (SquareError, OSError):
+                    raise SquareError('저장된 KEY의 연결은 확인했지만 연결 선택을 저장하지 못했어요. 사용자 폴더의 저장 권한을 확인해 주세요. 기존 연결은 그대로 유지됩니다.') from None
             else:
                 candidate = payload.get('url')
                 if candidate is None:
@@ -188,25 +254,7 @@ class Store:
                 # Validate before replacing a working connection or storing a KEY.
                 probe = SimpleNamespace(url=url, token=lambda: token)
                 identity = self.client_factory(probe).json('/api/integration/me')
-                downloads = no_links(self.directory / 'downloads')
-                downloads.mkdir(parents=True, exist_ok=True)
-                if self.config_path.is_file():
-                    try:
-                        old_ref = read_json(self.config_path).get('credentialRef', '')
-                    except (SquareError, OSError, ValueError):
-                        old_ref = ''  # A new valid connection may repair broken local metadata.
-                    if re.fullmatch(r'windows-dpapi:credential\.[a-f0-9]{32}\.dpapi\.json', old_ref):
-                        previous_credential = no_links(self.config_path.parent / old_ref.split(':', 1)[1])
-                save_config(self.config_path, url, [self.directory], token, accepted,
-                            download_directory=downloads,
-                            credential_name='credential.' + uuid.uuid4().hex + '.dpapi.json')
-                mode = 'local'
-            atomic_json(self.selection_path, {'mode': mode})
-            if previous_credential is not None:
-                try:
-                    previous_credential.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                self.save_local_connection(url, token, accepted)
         return dict(self.status(), user=identity.get('user', {}), capabilities=identity.get('capabilities', {}))
 
     def project(self):
@@ -654,6 +702,8 @@ def main():
         if len(raw) > MAX_INPUT:
             raise SquareError('스토어 요청이 너무 큽니다.')
         result = {'ok': True, 'result': handle(json.loads(raw))}
+    except AuthenticationRequired:
+        result = {'ok': False, 'error': '연결 KEY를 확인할 수 없어요. 만료되었거나 취소·재발급된 KEY일 수 있습니다. 연결 설정의 ‘웹에서 KEY 확인’에서 유효한 KEY를 확인한 뒤 이 화면에 다시 입력해 주세요.', 'code': 'store_auth_required'}
     except SquareError as error:
         result = {'ok': False, 'error': str(error), 'code': 'store_request_failed'}
     except (ValueError, TypeError, KeyError, OSError):

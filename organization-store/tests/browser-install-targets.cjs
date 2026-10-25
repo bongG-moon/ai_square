@@ -50,7 +50,7 @@ fs.mkdirSync(output, {recursive:true});
       await page.addScriptTag({content:script});await page.getByRole('button',{name:'업무 보고서 작성',exact:true}).click();await page.getByRole('tab',{name:'설치·연결',exact:true}).click();
     }
     const count=action=>page.evaluate(a=>requests.filter(r=>r.action===a).length,action);
-    await fixture();await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture();await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#confirm-yes').isDisabled(),true);
     await page.getByRole('button',{name:'설치할 업무',exact:true}).click();
     await page.getByRole('option',{name:/품질 개선 보고서/}).click();
@@ -70,36 +70,36 @@ fs.mkdirSync(output, {recursive:true});
     assert.deepEqual(installed,{planId:'approved-plan',approvalDigest:'approved-digest',confirmed:true,directoryToken:'work-token'});
     assert.equal(await count('download'),0);assert.equal(await count('install'),1);
 
-    await fixture();await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.locator('#confirm-no').click();
+    await fixture();await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.locator('#confirm-no').click();
     assert.equal(await count('prepareInstall'),0);assert.equal(await count('host.selectWorkspace'),0);
-    await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();
+    await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();
     await page.getByRole('dialog',{name:'이 내용으로 설치할까요?'}).waitFor();
     assert.match(await page.locator('#confirm-content').innerText(),/공통 \(내 계정\)/);
     assert.deepEqual(await page.evaluate(()=>requests.find(r=>r.action==='prepareInstall').payload),{toolId:1,scope:'user'});
     await page.locator('#confirm-no').click();assert.equal(await count('install'),0);
 
-    await fixture({empty:true});await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({empty:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('input[value=work]').isDisabled(),true);assert.match(await page.locator('#confirm-content').innerText(),/등록된 업무가 없습니다/);
     await page.getByText('목록에 없는 폴더에 설치',{exact:true}).click();await page.getByRole('button',{name:'폴더 선택',exact:true}).click();
     await page.locator('.selected-directory').filter({hasText:'E:/Selected'}).waitFor();assert.equal(await page.locator('input[value=directory]').isChecked(),true);await page.locator('#confirm-yes').click();
     await page.getByRole('dialog',{name:'이 내용으로 설치할까요?'}).waitFor();assert.match(await page.locator('#confirm-content').innerText(),/E:\/Selected/);
     await page.locator('#confirm-no').click();
 
-    await fixture({legacy:true});await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({legacy:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     assert.equal(await count('host.listWorkspaces'),0);assert.match(await page.locator('#confirm-content').innerText(),/AX Workspace를 업데이트/);await page.locator('#confirm-no').click();
-    await fixture({userOnly:true});await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({userOnly:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     assert.equal(await count('host.listWorkspaces'),0);assert.equal(await page.locator('input[value=work]').isDisabled(),true);assert.equal(await page.locator('input[value=directory]').count(),0);
     await page.locator('#confirm-no').click();
-    await fixture({manual:true});assert.equal(await page.getByRole('button',{name:'앱에서 설치',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),1);
-    await fixture({gated:true});assert.equal(await page.getByRole('button',{name:'앱에서 설치',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),0);
+    await fixture({manual:true});assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),1);
+    await fixture({gated:true});assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),0);
 
-    await fixture({inspect:true});await page.getByRole('button',{name:'ZIP 설치 내용 확인',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({inspect:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();await page.getByRole('dialog',{name:'이 내용으로 설치할까요?'}).waitFor();
     assert.match(await page.locator('#confirm-content').innerText(),/ZIP의 SKILL.md를 확인/);await page.locator('#confirm-no').click();assert.equal(await count('install'),0);
-    await fixture({inspect:true,unsupportedArchive:true});await page.getByRole('button',{name:'ZIP 설치 내용 확인',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({inspect:true,unsupportedArchive:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();await page.locator('#detail-feedback').filter({hasText:'ZIP에서 설치할 스킬이나 연결 설정을 확인하지 못했습니다.'}).waitFor();assert.equal(await count('install'),0);
 
-    await fixture({dark:true});await page.getByRole('button',{name:'앱에서 설치',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.getByRole('button',{name:'설치할 업무',exact:true}).click();
+    await fixture({dark:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.getByRole('button',{name:'설치할 업무',exact:true}).click();
     await page.screenshot({path:path.join(output,'03-dark-task-list.png'),animations:'disabled'});
     await page.setViewportSize({width:420,height:850});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

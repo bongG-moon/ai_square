@@ -41,12 +41,41 @@
   function show(view) { for (const id of ['connection-view', 'catalog-view']) $(id).hidden = id !== view; }
   function connectionView() { ++state.generation; show('connection-view'); $('connection-cancel').hidden = !state.connected; $('disconnect').hidden = !state.connected; }
   function httpConsent() {
-    const http = $('server-url').value.trim().startsWith('http:');
+    let http = false;
+    try { http = new URL($('server-url').value.trim()).protocol === 'http:'; } catch (_) { /* Invalid addresses are reported by the form. */ }
     $('http-warning').hidden = !http; $('allow-http').checked = false; $('allow-http').required = http;
   }
+  let connectionPending = false;
+  function connectionMessage(message, error = false) {
+    const notice = $('connection-feedback');
+    notice.textContent = message || ''; notice.hidden = !message; notice.classList.toggle('error', error);
+  }
+  async function connectionAction(node, action) {
+    if (connectionPending || node.disabled) return;
+    connectionPending = true;
+    const label = node.textContent;
+    feedback(''); connectionMessage('');
+    if (node.id !== 'disconnect') node.textContent = '연결 확인 중…';
+    // Direct KEY, reuse and disconnect share one connection. Keep the origin and action
+    // stable until its reply arrives, rather than queueing conflicting connection changes.
+    const controls = ['connect-submit', 'reuse-connection', 'disconnect', 'connection-cancel', 'change-server', 'server-url', 'connection-key', 'allow-http']
+      .map(id => [$(id), $(id).disabled]);
+    controls.forEach(([control]) => { control.disabled = true; });
+    node.setAttribute('aria-busy', 'true'); $('connection-form').setAttribute('aria-busy', 'true');
+    try { return await action(); }
+    catch (e) { connectionMessage(e.message || '연결하지 못했어요. 주소와 KEY를 확인하고 다시 시도해 주세요.', true); }
+    finally {
+      controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+      node.textContent = label;
+      node.removeAttribute('aria-busy'); $('connection-form').removeAttribute('aria-busy'); connectionPending = false;
+    }
+  }
   function connectionFields(result) {
+    connectionMessage('');
     state.presetBaseUrl = result.presetBaseUrl || '';
     $('server-url').value = state.baseUrl || state.presetBaseUrl;
+    // A successful reuse can select a different server than the typed KEY's origin.
+    $('connection-key').value = '';
     $('server-url').readOnly = !!state.presetBaseUrl;
     $('change-server').hidden = !state.presetBaseUrl; $('change-server').textContent = '서버 주소 변경';
     $('server-help').textContent = result.presetMessage || (state.connected && state.presetBaseUrl && state.baseUrl !== state.presetBaseUrl
@@ -85,7 +114,7 @@
     $('connection-key').value = ''; httpConsent();
     if (editing) $('server-url').focus();
   });
-  function connect(event) { event.preventDefault(); if (!$('connection-form').reportValidity()) return; busy($('connect-submit'), async () => {
+  function connect(event) { event.preventDefault(); if (connectionPending || !$('connection-form').reportValidity()) return; connectionAction($('connect-submit'), async () => {
     const key = $('connection-key').value.trim(); const url = normalUrl(); $('connection-key').value = '';
     const result = await rpc('connect', { url, key, allowHttp: $('allow-http').checked }); state.connected = result.configured;
     feedback('플랫폼에 연결했어요. 웹과 같은 계정으로 이용합니다.'); await initialize();
@@ -94,10 +123,10 @@
   $('connection-form').addEventListener('submit', event => event.preventDefault());
   $('connection-form').addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.matches('input:not([type=checkbox])')) connect(event); });
   $('key-guide').addEventListener('click', () => busy($('key-guide'), async () => rpc('host.openExternal', { url: normalUrl() + '/local-access' })));
-  $('reuse-connection').addEventListener('click', () => busy($('reuse-connection'), async () => { await rpc('connect', { reuseExisting: true }); feedback('저장된 주소와 KEY로 플랫폼에 연결했어요. MCP를 새로 설치하거나 실행하지 않았습니다.'); await initialize(); }));
+  $('reuse-connection').addEventListener('click', () => connectionAction($('reuse-connection'), async () => { await rpc('connect', { reuseExisting: true }); feedback('저장된 주소와 KEY로 플랫폼에 연결했어요. MCP를 새로 설치하거나 실행하지 않았습니다.'); await initialize(); }));
   $('connection-button').addEventListener('click', connectionView);
   $('connection-cancel').addEventListener('click', () => loadTab(state.tab).catch(e => feedback(e.message, true)));
-  $('disconnect').addEventListener('click', () => busy($('disconnect'), async () => {
+  $('disconnect').addEventListener('click', () => connectionAction($('disconnect'), async () => {
     if (!await confirm('스토어 연결을 해제할까요?', [el('p', '', '이 스토어의 연결만 해제합니다. 기존 MCP 연결, 내려받은 파일과 설치한 기능은 유지됩니다.')], '연결 해제')) return;
     await rpc('disconnect'); state.connected = false; state.baseUrl = ''; $('connection-key').value = ''; await initialize(); feedback('스토어 연결을 해제했어요.');
   }));
@@ -272,7 +301,7 @@
       if (gated) panel.append(section('사용 권한 확인',item.access==='pending'?'사용 신청을 검토 중입니다. 웹에서 신청 상태를 확인해 주세요.':'이 기능은 사용 승인이 필요합니다. 웹에서 담당자에게 사용 권한을 신청해 주세요.'));
       if (item.environment || item.platform) panel.append(section('실행 환경',item.environment || item.platform));
       const actions=el('div','detail-actions');
-      if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(button(result.canInstall?'앱에서 설치':'ZIP 설치 내용 확인','primary',()=>prepare(item.id)));
+      if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(button('바로 설치하기','primary',()=>prepare(item.id)));
       if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드',result.canInstall||result.canInspectInstall?'secondary':'primary',()=>downloadDetail(result)));
       if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기 ↗','text-button',()=>rpc('host.openExternal',{url:result.webUrl})));
       panel.append(actions,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));

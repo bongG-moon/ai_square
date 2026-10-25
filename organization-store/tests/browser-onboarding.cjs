@@ -27,7 +27,15 @@ const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
           window.requests.push(m);
           let result = {};
           if (m.action === 'status') result = status;
-          if (m.action === 'connect') { status = { ...status, configured: true, baseUrl: m.payload.url || status.baseUrl }; result = status; }
+          if (m.action === 'connect') {
+            const finish = () => {
+              const error = window.connectError;
+              if (!error) status = { ...status, configured: true, baseUrl: m.payload.url || (m.payload.reuseExisting && status.existingBaseUrl) || status.baseUrl };
+              window.postMessage({ type: 'ax-extension-response', channel: m.channel, requestId: m.requestId, ok: !error, result: status, error }, '*');
+            };
+            if (window.deferConnect) window.finishConnect = finish; else finish();
+            return;
+          }
           if (m.action === 'options') result = { organizations: [] };
           if (m.action === 'catalog') result = { items: [], total: 0 };
           window.postMessage({ type: 'ax-extension-response', channel: m.channel, requestId: m.requestId, ok: true, result }, '*');
@@ -82,13 +90,67 @@ const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
     assert.equal(await page.locator('#change-server').isVisible(), false);
     assert.match(await page.locator('#server-help').innerText(), /직접 입력/);
     await fixture({ configured: false, baseUrl: 'https://saved.example.test', existingConnectionAvailable: true });
-    await page.getByRole('button',{name:'저장된 플랫폼 연결 사용',exact:true}).waitFor();
+    await page.getByRole('button',{name:'저장된 플랫폼(MCP) 연결 사용',exact:true}).waitFor();
     assert.match(await page.locator('#reuse-help').innerText(), /MCP를 새로 설치하거나 실행하지 않습니다/);
-    await page.getByRole('button',{name:'저장된 플랫폼 연결 사용',exact:true}).click();
+    await page.getByRole('button',{name:'저장된 플랫폼(MCP) 연결 사용',exact:true}).click();
     await page.locator('#catalog-view').waitFor({state:'visible'});
     assert.deepEqual(await page.evaluate(()=>requests.find(r=>r.action==='connect').payload),{reuseExisting:true});
+
+    // Reusing another server must discard the KEY typed for the preset server.
+    await fixture({configured:false, baseUrl:'', presetBaseUrl:'https://preset.example.test', existingBaseUrl:'https://saved.example.test', existingConnectionAvailable:true});
+    await page.locator('#connection-view').waitFor({state:'visible'});
+    await page.locator('#connection-key').fill(key);
+    await page.locator('#reuse-connection').click();
+    await page.locator('#catalog-view').waitFor({state:'visible'});
+    await page.locator('#connection-button').click();
+    assert.equal(await page.locator('#server-url').inputValue(), 'https://saved.example.test');
+    assert.equal(await page.locator('#connection-key').inputValue(), '');
+    await page.locator('#connect-submit').click();
+    assert.equal(await page.evaluate(() => requests.filter(r => r.action === 'connect').length), 1);
+
+    // URL parsing and HTTP consent must agree even when the user pastes an uppercase scheme.
+    await fixture({ configured: false, baseUrl: '', presetBaseUrl: '' });
+    await page.locator('#server-url').fill('HTTP://INTERNAL.EXAMPLE.TEST');
+    assert.equal(await page.locator('#http-warning').isVisible(), true);
+    await page.locator('#connection-key').fill(key); await page.locator('#connect-submit').click();
+    assert.equal(await page.evaluate(() => requests.filter(r => r.action === 'connect').length), 0);
+    await page.locator('#allow-http').check(); await page.locator('#connect-submit').click();
+    await page.locator('#catalog-view').waitFor({state:'visible'});
+    assert.deepEqual(await page.evaluate(() => requests.find(r => r.action === 'connect').payload), {url:'http://internal.example.test',key,allowHttp:true});
+
+    // While a direct connection is pending, neither Enter nor reuse can queue a second connection.
+    await fixture({configured:false, baseUrl:'', presetBaseUrl:'https://square.example.test', existingConnectionAvailable:true});
+    await page.locator('#connection-view').waitFor({state:'visible'});
+    await page.evaluate(() => { window.deferConnect = true; window.connectError = '연결 KEY를 확인해 주세요.'; });
+    await page.locator('#connection-key').fill(key); await page.locator('#connection-key').press('Enter');
+    await page.waitForFunction(() => !!window.finishConnect);
+    assert.equal(await page.locator('#connect-submit').innerText(), '연결 확인 중…');
+    assert.equal(await page.locator('#connection-form').getAttribute('aria-busy'), 'true');
+    assert.equal(await page.locator('#reuse-connection').isDisabled(), true);
+    assert.equal(await page.locator('#change-server').isDisabled(), true);
+    assert.equal(await page.locator('#connection-key').isDisabled(), true);
+    await page.evaluate(() => {
+      document.querySelector('#reuse-connection').click();
+      document.querySelector('#connection-key').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+      window.finishConnect();
+    });
+    await page.waitForFunction(() => !document.querySelector('#connect-submit').disabled);
+    assert.equal(await page.evaluate(() => requests.filter(r => r.action === 'connect').length), 1);
+    assert.equal(await page.locator('#connection-view').isVisible(), true);
+    assert.equal(await page.locator('#reuse-connection').isEnabled(), true);
+    assert.equal(await page.locator('#connection-key').isEnabled(), true);
+    assert.match(await page.locator('#connection-feedback').innerText(), /KEY/);
+    assert.equal(await page.locator('#connection-feedback').isVisible(), true);
+    assert.equal(await page.locator('#connect-submit').innerText(), '연결하기');
+    assert.equal(await page.locator('#connection-form').getAttribute('aria-busy'), null);
+    assert.equal(await page.locator('#connection-key').inputValue(), '');
+    await page.evaluate(() => { window.deferConnect = false; window.connectError = ''; });
+    await page.locator('#connection-key').fill(key); await page.locator('#connect-submit').click();
+    await page.locator('#catalog-view').waitFor({state:'visible'});
+    assert.equal(await page.evaluate(() => requests.filter(r => r.action === 'connect').length), 2);
+    assert.equal(await page.locator('#connection-feedback').isVisible(), false);
     assert.deepEqual(errors, []);
-    console.log('PASS: preset KEY-only form, HTTP consent, manual switch clears KEY, saved connection precedence, invalid-preset fallback.');
+    console.log('PASS: preset KEY-only form, normalized HTTP consent, single connection in flight, failed connection retry, manual switch clears KEY, saved connection precedence, invalid-preset fallback.');
   } finally {
     if(process.platform==='win32')require('node:child_process').spawnSync('taskkill.exe',['/PID',String(server.process().pid),'/T','/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
     await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,3000))]);

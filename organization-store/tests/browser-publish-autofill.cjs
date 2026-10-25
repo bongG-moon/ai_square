@@ -129,7 +129,7 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
   fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2));process.stdout.write(JSON.stringify(report));
  }finally{
   const pid=server.process()?.pid;
-  if(pid)require('node:child_process').spawnSync('taskkill',['/PID',String(pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+  if(pid)require('node:child_process').spawnSync('taskkill.exe',['/PID',String(pid),'/T','/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
   await Promise.race([server.close().catch(()=>{}),new Promise(resolve=>setTimeout(resolve,1500))]);
  }
-})().catch(error=>{console.error(error);process.exitCode=1;});
+})().then(()=>process.exit(0),error=>{console.error(error);process.exit(1);});
