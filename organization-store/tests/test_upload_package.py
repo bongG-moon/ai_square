@@ -21,7 +21,7 @@ def test_package_is_directly_registerable_and_contains_no_native_installer(tmp_p
     def no_build(*args, **kwargs):
         raise AssertionError('Native installer must not be built or run')
     monkeypatch.setattr(sys.modules['build'], 'build', no_build)
-    report = uploader.create_upload(tmp_path, 'https://square.example')
+    report = uploader.create_upload(tmp_path, 'https://square.example', file_extension='.axextension')
     path = tmp_path / report['archive']
     assert path.suffix == '.axextension'
     assert hashlib.sha256(path.read_bytes()).hexdigest() == report['sha256']
@@ -42,8 +42,8 @@ def test_package_is_directly_registerable_and_contains_no_native_installer(tmp_p
 
 
 def test_server_binding_does_not_change_worker_payload_or_hide_http_warning(tmp_path):
-    first = uploader.create_upload(tmp_path / 'first', 'http://square.company.example')
-    second = uploader.create_upload(tmp_path / 'second', 'http://127.0.0.1:5080')
+    first = uploader.create_upload(tmp_path / 'first', 'http://square.company.example', file_extension='.axextension')
+    second = uploader.create_upload(tmp_path / 'second', 'http://127.0.0.1:5080', file_extension='.axextension')
     assert first['build'] == second['build']
     assert first['sha256'] != second['sha256']
     with zipfile.ZipFile(tmp_path / 'first' / first['archive']) as archive:
@@ -65,8 +65,8 @@ def test_invalid_origin_writes_no_package(tmp_path, value):
 
 
 def test_existing_output_is_not_overwritten(tmp_path):
-    result = uploader.create_upload(tmp_path, 'https://square.example')
+    result = uploader.create_upload(tmp_path, 'https://square.example', file_extension='.axextension')
     original = (tmp_path / result['archive']).read_bytes()
     with pytest.raises(ValueError, match='이미'):
-        uploader.create_upload(tmp_path, 'https://changed.example')
+        uploader.create_upload(tmp_path, 'https://changed.example', file_extension='.axextension')
     assert (tmp_path / result['archive']).read_bytes() == original

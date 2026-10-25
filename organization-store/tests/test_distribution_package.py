@@ -30,7 +30,9 @@ def test_public_bundle_is_neutral_and_only_has_offline_material(distribution):
     report, files = distribution
     assert report['serverPresetIncluded'] is False
     assert report['installerExecutableIncluded'] is False
-    assert set(files) == {'extension-template.zip', 'extension-template.zip.sha256', 'configure_server.py', 'README.txt'}
+    assert set(files) == {'extension-template.zip', 'extension-template.zip.sha256', 'configure_server.py', 'README.txt', 'exe_builder.py', 'installer/ImportExtension.nsi', 'nsis-toolchain.zip', 'nsis-toolchain.zip.sha256', 'licenses/NSIS-COPYING.txt', 'licenses/NSIS-Modern-UI-2.txt'}
+    assert report['standardCompilerIncluded'] is True
+    assert report['nativeHelperIncluded'] is False
     assert hashlib.sha256(files['extension-template.zip']).hexdigest() == report['templateSha256']
     assert files['extension-template.zip.sha256'].decode().strip() == report['templateSha256']
     with zipfile.ZipFile(io.BytesIO(files['extension-template.zip'])) as archive:
@@ -44,18 +46,19 @@ def test_operator_cli_works_without_checkout_and_output_matches_source_packager(
     isolated = tmp_path / 'isolated'
     isolated.mkdir()
     for name, data in files.items():
+        (isolated / name).parent.mkdir(parents=True, exist_ok=True)
         (isolated / name).write_bytes(data)
     result = subprocess.run([
         sys.executable, '-I', '-B', '-X', 'utf8', str(isolated / 'configure_server.py'),
         '--server-url', 'http://SQUARE.company.example:80/', '--output', 'ready.zip',
-    ], cwd=isolated, capture_output=True, text=True, encoding='utf-8', timeout=20)
+    ], cwd=isolated, capture_output=True, text=True, encoding='utf-8', timeout=120)
     assert result.returncode == 0, result.stderr
     assert '암호화되지 않은' in result.stdout
     ready = isolated / 'ready.zip'
-    source = uploader.create_upload(tmp_path / 'source', 'http://square.company.example')
+    source = uploader.create_upload(tmp_path / 'source', 'http://square.company.example', file_extension='.zip')
     assert ready.read_bytes() == (tmp_path / 'source' / source['archive']).read_bytes()
     assert source['build'] == report['build']
-    assert sorted(p.name for p in isolated.iterdir()) == sorted([*files, 'ready.zip'])
+    assert sorted(p.relative_to(isolated).as_posix() for p in isolated.rglob('*') if p.is_file()) == sorted([*files, 'ready.zip'])
     with zipfile.ZipFile(ready) as archive:
         assert '암호화되지 않은' in archive.read('README.txt').decode()
         assert json.loads(archive.read('connection.json')) == {'schemaVersion': 1, 'baseUrl': 'http://square.company.example'}
@@ -74,6 +77,7 @@ def _operator_copy(directory, files, *, server=None, output=None):
                         source, flags=re.M)
                     assert count == 1, 'The operator-editable setting must be available.'
             data = source.encode('utf-8')
+        (directory / name).parent.mkdir(parents=True, exist_ok=True)
         (directory / name).write_bytes(data)
     return directory / 'configure_server.py'
 
@@ -81,7 +85,7 @@ def _operator_copy(directory, files, *, server=None, output=None):
 def _run_operator(script, cwd, *arguments):
     return subprocess.run([
         sys.executable, '-I', '-B', '-X', 'utf8', str(script), *arguments,
-    ], cwd=cwd, capture_output=True, text=True, encoding='utf-8', timeout=20)
+    ], cwd=cwd, capture_output=True, text=True, encoding='utf-8', timeout=120)
 
 
 def test_editable_settings_run_without_arguments_from_another_directory(tmp_path, distribution):
@@ -109,12 +113,12 @@ def test_editable_settings_run_without_arguments_from_another_directory(tmp_path
 def test_blank_editable_server_explains_setting_and_writes_nothing(tmp_path, distribution):
     _, files = distribution
     script = _operator_copy(tmp_path / 'operator', files)
-    before = {path.name: path.read_bytes() for path in script.parent.iterdir()}
+    before = {path.relative_to(script.parent).as_posix(): path.read_bytes() for path in script.parent.rglob('*') if path.is_file()}
     result = _run_operator(script, tmp_path)
     assert result.returncode == 2
     assert 'SERVER_URL' in result.stderr
-    assert {path.name: path.read_bytes() for path in script.parent.iterdir()} == before
-    assert not (tmp_path / 'PNT-AI-Square-0.1.0.axextension').exists()
+    assert {path.relative_to(script.parent).as_posix(): path.read_bytes() for path in script.parent.rglob('*') if path.is_file()} == before
+    assert not (tmp_path / 'PNT-AI-Square-0.1.0-Setup.exe').exists()
 
 
 def test_default_operator_output_is_doubleclick_package(tmp_path, distribution):
@@ -122,11 +126,10 @@ def test_default_operator_output_is_doubleclick_package(tmp_path, distribution):
     script = _operator_copy(tmp_path / 'operator', files, server='https://square.company.example')
     result = _run_operator(script, tmp_path)
     assert result.returncode == 0, result.stderr
-    ready = script.parent / 'PNT-AI-Square-0.1.0.axextension'
-    assert zipfile.is_zipfile(ready)
-    with zipfile.ZipFile(ready) as archive:
-        assert json.loads(archive.read('connection.json'))['baseUrl'] == 'https://square.company.example'
-        assert '더블클릭' in archive.read('README.txt').decode('utf-8')
+    ready = script.parent / 'PNT-AI-Square-0.1.0-Setup.exe'
+    assert ready.read_bytes().startswith(b'MZ')
+    assert '"installerExecutableIncluded": true' in result.stdout
+    assert '"installerExecuted": false' in result.stdout
 
 
 def test_explicit_cli_values_override_editable_settings_and_keep_cwd_output(tmp_path, distribution):
@@ -146,7 +149,7 @@ def test_explicit_cli_values_override_editable_settings_and_keep_cwd_output(tmp_
 
 
 def test_rebinding_preserves_manifest_payload_and_refuses_overwrite(tmp_path):
-    first = uploader.create_upload(tmp_path / 'first', 'https://first.example')
+    first = uploader.create_upload(tmp_path / 'first', 'https://first.example', file_extension='.zip')
     original = tmp_path / 'first' / first['archive']
     destination = tmp_path / 'second.zip'
     second = binder.configure(original, destination, 'https://second.example:443/')
@@ -229,6 +232,6 @@ def test_invalid_origin_and_missing_cli_checksum_write_nothing(tmp_path, distrib
     result = subprocess.run([
         sys.executable, '-I', '-B', str(tmp_path / 'configure_server.py'),
         '--server-url', 'https://square.example', '--output', str(tmp_path / 'ready.zip'),
-    ], capture_output=True, timeout=20)
+    ], capture_output=True, timeout=120)
     assert result.returncode == 2
     assert not (tmp_path / 'ready.zip').exists()
