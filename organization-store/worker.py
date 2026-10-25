@@ -213,6 +213,8 @@ class Store:
 
     @staticmethod
     def install_support(manifest):
+        if Path(str(manifest.get('filename', ''))).suffix.lower() == '.axextension':
+            return False, 'AX Workspace 확장 파일입니다. 파일을 다운로드한 뒤 더블클릭해 설치하세요.'
         try:
             profile = validate_profile(manifest.get('installProfile'))
         except SquareError:

@@ -68,7 +68,7 @@ def remove_unreferenced(artifact, draft_id=None):
         return True
     if db().tools.find_one({'versions.path': name}, {'_id': 1}):
         return True
-    if db().workspace_files.find_one({'path': name}, {'_id': 1}):
+    if db().workspace_files.find_one({'$or': [{'path': name}, {'versions.path': name}]}, {'_id': 1}):
         return True
     query = {'artifact.path': name, 'status': {'$ne': 'expired'}}
     if draft_id:

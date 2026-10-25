@@ -1,14 +1,14 @@
 function fileSize(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function uploadArea(kind,files=[]){
  const multi=kind==='attachments';
- return `<section class="ws-upload-area" data-upload="${kind}"><div class="ws-drop-zone"><span class="ws-upload-icon">${icon(multi?'paperclip':'cloud-upload')}</span><h3>${multi?'요청을 설명할 자료를 첨부하세요':'공유할 파일을 여기에 놓으세요'}</h3><p>${multi?'이미지·PDF·문서·ZIP · 최대 5개, 파일당 20MB':'ZIP · EXE · MSI · PS1 · MD · 최대 128MB · 원본 형식으로 배포'}</p><button type="button" class="sq-secondary" data-file-pick="${kind}">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" name="${kind}" aria-label="${multi?'요청 첨부파일':'공유 파일'} 선택" ${multi?'multiple':''} accept="${multi?'.png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.xlsx,.docx,.zip':'.zip,.exe,.msi,.ps1,.md'}"></div><div class="ws-selected-files" aria-live="polite">${files.map((f,i)=>`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)} · 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="${kind}" data-index="${i}" aria-label="${esc(f.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div></section>`;
+ return `<section class="ws-upload-area" data-upload="${kind}"><div class="ws-drop-zone"><span class="ws-upload-icon">${icon(multi?'paperclip':'cloud-upload')}</span><h3>${multi?'요청을 설명할 자료를 첨부하세요':'공유할 파일을 여기에 놓으세요'}</h3><p>${multi?'이미지·PDF·문서·ZIP · 최대 5개, 파일당 20MB':'ZIP · AX 확장 · EXE · MSI · PS1 · MD · 최대 128MB · 원본 형식으로 배포'}</p><button type="button" class="sq-secondary" data-file-pick="${kind}">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" name="${kind}" aria-label="${multi?'요청 첨부파일':'공유 파일'} 선택" ${multi?'multiple':''} accept="${multi?'.png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.xlsx,.docx,.zip':'.zip,.axextension,.exe,.msi,.ps1,.md'}"></div><div class="ws-selected-files" aria-live="polite">${files.map((f,i)=>`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)} · 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="${kind}" data-index="${i}" aria-label="${esc(f.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div></section>`;
 }
 function attachmentLinks(files){return files.length?`<section class="ws-attachments"><h3>첨부 자료 <span>${files.length}</span></h3>${files.map(f=>`<a class="ws-selected-file" href="${esc(f.url)}" download>${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)}</small></span>${icon('download')}</a>`).join('')}</section>`:'';}
 function selectFiles(kind,files){
  if(!files.length)return;
  if(kind==='artifact'){
   if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
-  if(!/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
+  if(!/\.(zip|axextension|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·AX 확장(.axextension)·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
   captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();
   if(typeof inspectSelectedPackage==='function')inspectSelectedPackage(files[0]);
  }else{

@@ -23,6 +23,7 @@ def test_package_is_directly_registerable_and_contains_no_native_installer(tmp_p
     monkeypatch.setattr(sys.modules['build'], 'build', no_build)
     report = uploader.create_upload(tmp_path, 'https://square.example')
     path = tmp_path / report['archive']
+    assert path.suffix == '.axextension'
     assert hashlib.sha256(path.read_bytes()).hexdigest() == report['sha256']
     assert report['installerExecutableIncluded'] is False
     assert report['profileModified'] is False and report['antivirusCleared'] is False
@@ -31,6 +32,7 @@ def test_package_is_directly_registerable_and_contains_no_native_installer(tmp_p
         assert metadata['type'] == '플러그인/하네스'
         assert metadata['packageId'] == 'pt-ai-square.store'
         assert '확장 ZIP 가져오기' in metadata['guide']
+        assert '더블클릭' in metadata['guide']
         assert json.loads(archive.read('connection.json')) == {'schemaVersion': 1, 'baseUrl': 'https://square.example'}
         manifest = json.loads(archive.read('extension.json'))
         assert set(archive.namelist()) == set(manifest['files']) | {'extension.json', 'connection.json', 'README.txt', 'ai-square.json'}

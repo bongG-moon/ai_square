@@ -129,7 +129,7 @@ class Client:
         if type(size) is not int or not 0 < size <= MAX_FILE_BYTES or not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{64}', sha):
             raise SquareError('파일의 크기·무결성 정보를 확인할 수 없거나 128 MiB 한도를 초과합니다.')
         suffix = Path(str(manifest.get('filename', ''))).suffix.lower()
-        if suffix not in {'.md', '.zip', '.exe', '.msi', '.ps1'}:
+        if suffix not in {'.md', '.zip', '.axextension', '.exe', '.msi', '.ps1'}:
             raise SquareError('지원하지 않는 배포 파일 형식입니다.')
         directory = no_links(directory)
         directory.mkdir(parents=True, exist_ok=True)

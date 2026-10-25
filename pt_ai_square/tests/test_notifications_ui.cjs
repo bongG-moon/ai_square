@@ -5,7 +5,7 @@ const source=fs.readFileSync(path.join(__dirname,'../frontend/frontend_workspace
 const block=source.slice(source.indexOf('function renderUnreadCount(){'),source.indexOf('\nObject.assign(actions,{',source.indexOf('function renderUnreadCount(){')));
 function deferred(){let resolve,reject;const promise=new Promise((ok,no)=>{resolve=ok;reject=no;});return {promise,resolve,reject};}
 function fixture(){
- const requests=[],modals=[],details=[],badge={hidden:true,textContent:''},bell={setAttribute(k,v){this[k]=v;}};
+ const requests=[],modals=[],details=[],workspaceFiles=[],badge={hidden:true,textContent:''},bell={setAttribute(k,v){this[k]=v;}};
  const c={work:{notifications:[],unreadOnly:false},runtime:{detailLoadToken:0,requestBusy:0},server:{authMode:'mock',unread:0},document:{hidden:false},now:10000,
   $:s=>s==='#ws-unread'?badge:bell,Date:{now:()=>c.now},
   requestAPI:(url,method,body)=>{const job=deferred();requests.push({...job,url,method,body});c.runtime.requestBusy++;return job.promise.finally(()=>c.runtime.requestBusy--);},
@@ -13,12 +13,12 @@ function fixture(){
   render:()=>{throw Error('Inbox should not rebuild the catalog');},
   esc:s=>String(s??'').replaceAll('<','&lt;').replaceAll('"','&quot;'),dated:String,
   button:(action,label,cls,extra)=>`<button data-action="${action}" ${extra||''}>${label}</button>`,icon:()=>'',blank:(i,t,b)=>`<p>${t} ${b}</p>`,
-  afterWorkspaceSave:fn=>fn(),refresh:async()=>{},detail:async(id,tab)=>details.push({id,tab}),
+  afterWorkspaceSave:fn=>fn(),refresh:async()=>{},detail:async(id,tab)=>details.push({id,tab}),openAxWorkspaceFile:async id=>workspaceFiles.push(id),
  };
  vm.createContext(c);vm.runInContext(block+'\nglobalThis.api={inbox,checkNotifications};',c);
  const action=source.split('\n').find(line=>line.trim().startsWith("'notification-open':"));
  c.openNotice=vm.runInContext('({'+action.trim()+'})["notification-open"]',c);
- return {c,requests,modals,details,badge,bell,...c.api};
+ return {c,requests,modals,details,workspaceFiles,badge,bell,...c.api};
 }
 const notice={id:'event:owner',title:'동료가 도구에 의견을 남겼습니다.',kind:'feedback',created:1,read:false,target:{type:'feedback',id:7,feedbackId:12}};
 const response=(unread=1)=>({notifications:[notice],unread,nextCursor:null});
@@ -77,4 +77,22 @@ test('an older background response cannot restore unread count after opening a n
  const poll=h.checkNotifications(),opened=h.c.openNotice({dataset:{id:notice.id}});
  h.requests[1].resolve({ok:true});await opened;assert.equal(h.c.server.unread,0);
  h.requests[0].resolve(response(8));await poll;assert.equal(h.c.server.unread,0);
+});
+
+test('workspace release notification opens its stable AX file card instead of a tool detail',async()=>{
+ const h=fixture(),notification={...notice,kind:'release',target:{type:'workspace',id:'b'.repeat(32)}};h.c.work.notifications=[notification];
+ const opened=h.c.openNotice({dataset:{id:notification.id}});assert.equal(h.requests[0].body.id,notification.id);
+ h.requests[0].resolve({ok:true});await opened;assert.deepEqual(h.workspaceFiles,[notification.target.id]);assert.deepEqual(h.details,[]);
+});
+
+test('workspace notification read completion cannot redirect a user who has opened another view',async()=>{
+ const h=fixture();h.c.work.notifications=[{...notice,target:{type:'workspace',id:'file-a'}}];
+ const opened=h.c.openNotice({dataset:{id:notice.id}});h.c.runtime.detailLoadToken++;h.requests[0].resolve({ok:true});await opened;
+ assert.deepEqual(h.workspaceFiles,[]);assert.deepEqual(h.details,[]);
+});
+
+test('workspace notification refresh completion cannot redirect a newer dialog',async()=>{
+ const h=fixture(),refresh=deferred();h.c.refresh=()=>refresh.promise;h.c.work.notifications=[{...notice,target:{type:'workspace',id:'file-a'}}];
+ const opened=h.c.openNotice({dataset:{id:notice.id}});h.requests[0].resolve({ok:true});await new Promise(setImmediate);h.c.runtime.detailLoadToken++;
+ refresh.resolve();await opened;assert.deepEqual(h.workspaceFiles,[]);assert.deepEqual(h.details,[]);
 });

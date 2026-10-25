@@ -132,11 +132,11 @@ def package(source, metadata, roots, output):
     output = no_links(output)
     output.mkdir(parents=True, exist_ok=False)
     if source.is_file():
-        if source.suffix.lower() not in {'.md','.zip','.exe','.msi','.ps1'}:
-            raise SquareError('단일 파일은 MD·ZIP·EXE·MSI·PS1을 지원합니다.')
+        if source.suffix.lower() not in {'.md','.zip','.axextension','.exe','.msi','.ps1'}:
+            raise SquareError('단일 파일은 MD·ZIP·AX 확장(.axextension)·EXE·MSI·PS1을 지원합니다.')
         target = output / ('artifact' + source.suffix.lower())
         shutil.copyfile(source, target)
-        if target.suffix == '.zip':
+        if target.suffix in {'.zip', '.axextension'}:
             with zipfile.ZipFile(target) as z:
                 validate_publish_archive(z)
                 # Legacy ZIPs may remain manual; malformed declarations are presented before upload.

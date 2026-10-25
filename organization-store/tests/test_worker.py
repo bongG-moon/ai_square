@@ -55,6 +55,15 @@ class FakeClient:
         return {'items': []}
 
 
+def test_ax_extension_is_download_only_even_with_a_claude_install_profile():
+    manifest = dict(filename='PNT-AI-Square.axextension', downloadUrl='/download/1/1',
+                    installProfile=dict(schemaVersion=1, kind='skill', host='claude',
+                                        slug='fixture', scopes=['user'], entrypoint='SKILL.md'))
+    supported, notice = worker.Store.install_support(manifest)
+    assert supported is False
+    assert '더블클릭' in notice
+
+
 @pytest.fixture
 def configured(tmp_path):
     data, home, project = (tmp_path / part for part in ('extension-data', 'home', 'project'))

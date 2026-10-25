@@ -45,7 +45,7 @@ def _referenced(job, key):
             {'_id': {'$ne': job['entityId']}, 'attachments.path': key}, {'_id': 1}))
     return bool(db().tools.find_one(
         {'_id': {'$ne': job['entityId']}, 'versions.path': key}, {'_id': 1})
-        or db().workspace_files.find_one({'path': key}, {'_id': 1}))
+        or db().workspace_files.find_one({'$or': [{'path': key}, {'versions.path': key}]}, {'_id': 1}))
 
 
 def _job_from_source(kind, source):

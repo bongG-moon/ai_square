@@ -12,10 +12,11 @@ from __future__ import annotations
 #    HTTP 주소도 가능하지만, 연결 시 KEY가 암호화되지 않으므로 앱에서 확인합니다.
 SERVER_URL = ""
 
-# 2. 완성될 설치용 ZIP 이름입니다. 보통은 아래 이름을 그대로 사용하면 됩니다.
+# 2. 완성될 확장 설치 파일 이름입니다. 아래 이름을 그대로 사용하면 됩니다.
 #    이 Python 파일과 같은 폴더에 생성됩니다. 기존 파일은 덮어쓰지 않습니다.
-#    생성된 ZIP만 사내 웹에 업로드하세요. 사용자는 이 ZIP을 앱에서 가져옵니다.
-OUTPUT_ZIP = "PNT-AI-Square-0.1.0-Extension.zip"
+#    생성된 .axextension 파일만 웹에 올리세요. 사용자는 받아서 더블클릭합니다.
+#    내부는 검증 가능한 ZIP이며, 사용자가 압축을 풀거나 Python을 실행하지 않습니다.
+OUTPUT_ZIP = "PNT-AI-Square-0.1.0.axextension"
 # ── 아래 코드는 수정하지 않아도 됩니다. ──
 
 import argparse
@@ -65,18 +66,20 @@ def guide(origin, version):
 연결할 서버: {origin}
 
 설치 조건
-- 설정에 “확장 ZIP 가져오기”가 있는 AX Workspace가 필요합니다.
-- 이전 0.23.32 설치본은 이 기능이 없을 수 있습니다. 함께 제공된 ZIP 가져오기 지원 설치본을 사용하세요.
+- .axextension 더블클릭 설치를 지원하는 AX Workspace가 필요합니다.
+- 이전 0.23.32 설치본은 파일 연결이 없을 수 있습니다. 함께 제공된 최신 공통 앱 설치본을 먼저 설치하세요.
 - 확장은 현재 Windows 계정의 AX Workspace에 설치됩니다. 프로젝트별 설치는 지원하지 않습니다.
 - 앱의 Python 실행 환경을 사용하므로 확장용 Python을 따로 설치하지 않습니다.
 
 설치와 연결
-1. 이 ZIP은 압축을 풀거나 더블클릭으로 실행하지 않습니다.
-2. AX Workspace → 설정 → 추가 기능 → 확장 ZIP 가져오기에서 이 ZIP을 선택하세요.
+1. 내려받은 .axextension 파일을 압축 해제하지 말고 더블클릭하세요.
+2. AX Workspace가 열리며 설치 확인창을 표시합니다. 열리지 않으면 최신 공통 앱을 설치하세요.
 3. 확장 이름·버전·설치 위치·서버 주소를 확인하고 설치를 누르세요.
 4. 왼쪽 P&T AI Square 메뉴를 열고 웹에서 발급받은 유효한 개인 KEY를 입력하세요.
 5. {transport}
 6. 연결 후 기능 검색·상세 확인·좋아요·다운로드를 사용할 수 있습니다.
+
+수동 설치가 필요하거나 예전 .zip 파일을 받은 경우에는 AX Workspace → 설정 → 추가 기능 → 확장 ZIP 가져오기에서 파일을 선택할 수도 있습니다.
 
 사용 범위
 - 기존 대화·업무·작성 중인 입력과 개인 Claude 설정은 유지됩니다.
@@ -91,7 +94,7 @@ def guide(origin, version):
 - 이전 V3가 탐지한 StoreInstaller.exe는 이 배포 방식에서 사용하지 않습니다. V3 오탐 해제 또는 무탐지를 보장하지 않습니다.
 
 업데이트와 제거
-- 새 ZIP도 같은 가져오기 메뉴에서 변경 내용을 확인한 뒤 설치합니다. 자동 업데이트하지 않습니다.
+- 새 확장 파일도 더블클릭한 뒤 변경 내용을 확인하고 설치합니다. 자동 업데이트하지 않습니다.
 - 제거가 필요하면 앱을 완전히 종료한 뒤 설치 확인 화면에 표시된 extensions/pt-ai-square.store 폴더만 제거하세요.
 - extension-data/pt-ai-square.store는 연결 설정·다운로드 기록이므로 임의로 지우지 마세요.
 '''
@@ -103,12 +106,12 @@ def declaration():
         'desc': 'AX Workspace에서 P&T AI Square의 기능을 검색하고 상세 확인·좋아요·다운로드·지원되는 설치를 진행합니다.',
         'platform': '기타', 'type': '플러그인/하네스', 'entryPoint': 'extension.json',
         'guideFile': 'README.txt', 'requiredFiles': ['connection.json'],
-        'requirements': ['확장 ZIP 가져오기를 지원하는 AX Workspace', 'P&T AI Square 개인 연결 KEY', '지정된 서버에 접근할 수 있는 네트워크'],
-        'environment': 'Windows · AX Workspace 확장 ZIP 가져오기 지원 빌드',
-        'changes': '독립 ZIP 배포와 서버 주소 사전 설정. 별도 설치 도우미 EXE 없이 앱에서 검증 후 가져옵니다.',
+        'requirements': ['확장 파일 더블클릭 설치를 지원하는 AX Workspace', 'P&T AI Square 개인 연결 KEY', '지정된 서버에 접근할 수 있는 네트워크'],
+        'environment': 'Windows · AX Workspace 확장 파일 연결 지원 빌드',
+        'changes': '확장 파일 더블클릭 설치와 서버 주소 사전 설정. 별도 설치 도우미 EXE 없이 앱에서 검증 후 설치합니다.',
         'workTags': ['기능 검색', '업무 도구 공유'],
         'workflow': {'steps': [
-            {'title': '확장 ZIP 가져오기', 'description': '앱 설정에서 배포 ZIP과 설치 위치를 확인합니다.'},
+            {'title': '확장 파일 더블클릭', 'description': '설치 확인창에서 이름·서버·설치 위치를 확인하고 설치합니다.'},
             {'title': '개인 KEY 연결', 'description': '미리 설정된 서버 주소를 확인하고 KEY를 입력합니다.'},
             {'title': '기능 찾아 활용', 'description': '상세·좋아요·다운로드와 지원되는 Skill/MCP 설치를 진행합니다.'},
         ]},
@@ -262,8 +265,8 @@ def write_zip(target, files):
 def configure(template, target, origin, *, expected_sha256=None):
     origin = server_origin(origin)
     target = Path(target)
-    if target.suffix.lower() != '.zip':
-        raise ValueError('출력 파일 이름은 .zip으로 끝나야 합니다.')
+    if target.suffix.lower() not in {'.zip', '.axextension'}:
+        raise ValueError('출력 파일 이름은 .axextension 또는 .zip으로 끝나야 합니다.')
     files, manifest, build_id = read_template(template, expected_sha256)
     files = configured_files(files, origin, manifest['version'])
     write_zip(target, files)
@@ -292,7 +295,7 @@ def main():
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
         parser.exit(2, str(error) + '\n')
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    print('생성된 설치 ZIP: ' + str(target.resolve()))
+    print('생성된 확장 설치 파일: ' + str(target.resolve()))
     if result['baseUrl'].startswith('http:'):
         print('주의: HTTP에서는 개인 KEY가 암호화되지 않은 통신으로 전송됩니다. 사용자가 앱에서 확인해야 합니다.')
     print('지정한 서버에 접속하거나 업로드하지 않았습니다. 생성된 ZIP을 직접 등록하세요.')

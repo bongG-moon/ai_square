@@ -10,10 +10,10 @@ const people=fs.readFileSync(path.join(__dirname,'../frontend/frontend_people.js
 const peopleRefresh=people.slice(people.indexOf('refresh=async function(){'),people.indexOf("actions['rank-mode']="));
 const tick=()=>new Promise(setImmediate);
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
-const item={id:'a'.repeat(32),name:'AX Workspace 설치',description:'업무 공간을 설치합니다.',category:'workspace',version:'1.0.0',fileName:'workspace.zip',size:120,created:1,downloadUrl:'/api/ax-workspace/'+ 'a'.repeat(32)+'/download'};
+const item={id:'a'.repeat(32),name:'AX Workspace 설치',description:'업무 공간을 설치합니다.',category:'workspace',version:'1.0.0',fileName:'workspace.zip',size:120,created:1,revision:3,release:1,subscribed:false,downloadUrl:'/api/ax-workspace/'+ 'a'.repeat(32)+'/download'};
 
 function setup(role='admin',{search='',route='ax'}={}){
- const requests=[],errors=[],announcements=[],opened=[],listeners={};
+ const requests=[],errors=[],announcements=[],opened=[],listeners={},windowListeners={},documentListeners={},timers=[],subscriptionButtons=[],cards=[];
  const workspace={innerHTML:''},dialog={open:false},area={outerHTML:''},pageError={hidden:true,textContent:'',isConnected:true};
  let currentForm=null;
  class FormData{
@@ -22,11 +22,13 @@ function setup(role='admin',{search='',route='ax'}={}){
   [Symbol.iterator](){return this.values[Symbol.iterator]();}
  }
  const session={},demo={},logout={},catalogRequests=[];
- const context={runtime:{detailLoadToken:0},state:{route,rankMode:'recent'},server:{user:{id:'admin',role}},workspace,FormData,
+ const context={runtime:{detailLoadToken:0},state:{route,rankMode:'recent'},server:{user:{id:'admin',role}},workspace,FormData,now:10000,
+  window:{addEventListener:(name,fn)=>(windowListeners[name]??=[]).push(fn)},document:{hidden:false,addEventListener:(name,fn)=>(documentListeners[name]??=[]).push(fn)},Date:{now:()=>context.now},
+  setTimeout:(callback,delay)=>{const timer={callback,delay,cancelled:false};timers.push(timer);return timer;},clearTimeout:timer=>{if(timer)timer.cancelled=true;},
   location:{search},URLSearchParams,items:[],organizations:[],requests:catalogRequests,policy:{},audit:[],render(){},loadPeopleRanks:async()=>{},
   actions:{},root:{addEventListener:(name,fn)=>(listeners[name]??=[]).push(fn)},
   $:selector=>selector==='#sq-dialog'?dialog:selector==='#sq-ax-form'?currentForm:selector==='[data-ax-drop]'?area:selector==='#sq-server-error'?pageError:selector==='#sq-session'?session:selector==='.sq-demo'?demo:selector==='[data-action=logout]'?logout:null,
-  $$:()=>[],esc:value=>String(value).replace(/</g,'&lt;').replace(/"/g,'&quot;'),icon:()=>'',mountIcons(){},
+  $$:selector=>selector==='[data-action="ax-subscription"]'?subscriptionButtons:selector==='[data-ax-card]'?cards:[],esc:value=>String(value).replace(/</g,'&lt;').replace(/"/g,'&quot;'),icon:()=>'',mountIcons(){},
   button:(action,label,cls='',extra='')=>`<button data-action="${action}" ${extra}>${label}</button>`,
   badge:value=>String(value),blank:(icon,title,body)=>`<div class="ws-empty"><h3>${title}</h3><p>${body}</p></div>`,dated:()=>'',fileSize:bytes=>`${bytes} bytes`,
   openModal(title,kicker,html){context.runtime.detailLoadToken++;dialog.open=true;opened.push({title,html});},
@@ -36,8 +38,8 @@ function setup(role='admin',{search='',route='ax'}={}){
   requestAPI:(url,method='GET',body)=>{const pending=deferred();requests.push({...pending,url,method,body});return pending.promise;},
  };
  vm.createContext(context);vm.runInContext(bootstrapRefresh+'\nconst basePeopleRefresh=refresh;\n'+peopleRefresh+'\n'+afterSave+'\n'+source,context,{filename:'frontend_ax_workspace.js'});
- function newForm(){
-  context.actions['ax-register']();
+ function newForm(id=null){
+  id===null?context.actions['ax-register']():context.actions['ax-version']({dataset:{id}});
   const controls=[{disabled:false},{disabled:false}];
   const node={id:'sq-ax-form',dataset:{},isConnected:true,
    entries:[['name',item.name],['description',item.description],['category',item.category],['version',item.version]],
@@ -46,7 +48,7 @@ function setup(role='admin',{search='',route='ax'}={}){
   const file={name:item.fileName,size:item.size};context.chooseAxFile([file]);
   return {node,controls,file,submit:()=>listeners.submit[0]({target:node,preventDefault(){},stopImmediatePropagation(){}})};
  }
- return {context,requests,errors,announcements,opened,listeners,workspace,dialog,pageError,newForm,
+ return {context,requests,errors,announcements,opened,listeners,windowListeners,documentListeners,timers,subscriptionButtons,cards,workspace,dialog,pageError,newForm,
   value:expression=>vm.runInContext(expression,context)};
 }
 
@@ -84,6 +86,15 @@ test('empty catalog guides administrators to register without providing a built-
  assert.match(h.workspace.innerHTML,/아직 등록된 파일이 없습니다/);
  assert.match(h.workspace.innerHTML,/파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요/);
  assert.doesNotMatch(h.workspace.innerHTML,/ download[ >]|workspace-extension\.zip/);
+});
+
+test('AX extension selection preserves the download filename and excludes unrelated files',()=>{
+ const h=setup(),file={name:'PNT-AI-Square.axextension',size:1024};
+ h.context.chooseAxFile([file]);assert.equal(h.value('axFile'),file);
+ assert.match(h.context.axUploadArea(),/accept="\.zip,\.axextension,/);
+ assert.match(h.context.axUploadArea(),/PNT-AI-Square\.axextension/);
+ assert.throws(()=>h.context.chooseAxFile([{name:'not-package.html',size:1024}]));
+ assert.equal(h.value('axFile'),file);
 });
 
 const bootstrapData=(overrides={})=>({items:[],user:{id:'viewer',name:'사용자',org:'공통',role:'member'},csrf:'test-csrf',authMode:'mock',organizations:[],requests:[],policy:{},rankAsOf:123,audit:[],...overrides});
@@ -223,4 +234,125 @@ test('file picker uses server size configuration instead of a hardcoded installe
  h.context.chooseAxFile([{name:'large-installer.exe',size:200*1048576}]);
  assert.throws(()=>h.context.chooseAxFile([{name:'too-large.exe',size:maximum+1}]));
  assert.equal(h.value('axFile').name,'large-installer.exe');
+});
+
+function seed(h,rows=[item]){vm.runInContext(`axFiles=${JSON.stringify(rows)};`,h.context);}
+function subscriptionButton(h,id=item.id){const b={dataset:{id},disabled:false,innerHTML:'',setAttribute(k,v){this[k]=v;}};h.subscriptionButtons.push(b);return b;}
+
+test('administrator version form retains escaped metadata, requires a new version, and is unavailable to members',()=>{
+ for(const role of ['admin','member']){
+  const h=setup(role);seed(h,[{...item,name:'<img src=x>',description:'<script>unsafe</script>',category:'plugin'}]);h.context.renderAxWorkspace();
+  assert.equal(h.workspace.innerHTML.includes('data-action="ax-version"'),role==='admin');
+  h.context.actions['ax-version']({dataset:{id:item.id}});assert.equal(h.opened.length,role==='admin'?1:0);
+  if(role==='admin'){
+   const html=h.opened[0].html;assert.match(html,/value="&lt;img src=x>"/);assert.match(html,/&lt;script>unsafe&lt;\/script>/);
+   assert.match(html,/<option value="plugin" selected>/);assert.match(html,/name="version" required[^>]*현재 1\.0\.0/);
+   assert.doesNotMatch(html,/name="version"[^>]*value=/);assert.equal(h.value('axVersionTarget.revision'),3);
+  }
+ }
+});
+
+test('new version posts one multipart request to the stable file id with its revision and then refreshes the same card',async()=>{
+ const h=setup();seed(h);const form=h.newForm(item.id);form.node.entries[3][1]='1.1.0';form.submit();form.submit();
+ assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,`/api/ax-workspace/${item.id}/versions`);
+ assert.deepEqual(JSON.parse(h.requests[0].body.values.find(([k])=>k==='metadata')[1]),{...Object.fromEntries(form.node.entries),expectedRevision:3});
+ assert.equal(h.requests[0].body.values.find(([k])=>k==='file')[1],form.file);
+ h.requests[0].resolve({file:{...item,version:'1.1.0',revision:4,release:2},followupsPending:true});await tick();
+ h.requests[1].resolve({files:[{...item,version:'1.1.0',revision:4,release:2}]});await tick();
+ assert.equal(h.value('axFiles.length'),1);assert.equal(h.value('axFiles[0].id'),item.id);assert.match(h.workspace.innerHTML,/v1\.1\.0/);
+ assert.deepEqual(h.announcements,['새 버전을 등록했습니다.']);assert.equal(form.node.dataset.saved,'true');
+});
+
+test('legacy release uses revision 1, version conflict preserves its draft, and opening a fresh registration clears the target',async()=>{
+ const h=setup();seed(h,[{...item,revision:undefined}]);const form=h.newForm(item.id);form.submit();
+ assert.equal(JSON.parse(h.requests[0].body.values[0][1]).expectedRevision,1);
+ h.requests[0].reject(Error('다른 관리자가 새 버전을 등록했습니다.'));await tick();
+ assert.equal(h.value('axFile'),form.file);assert.ok(form.controls.every(x=>!x.disabled));assert.equal(h.errors.length,1);
+ form.submit();assert.equal(h.requests[1].url,`/api/ax-workspace/${item.id}/versions`);h.requests[1].reject(Error('conflict'));await tick();
+ h.newForm();assert.equal(h.value('axVersionTarget'),null);
+});
+
+test('subscription toggle blocks repeat clicks and uses only the confirmed response for its pressed state',async()=>{
+ const h=setup('member');seed(h);const b=subscriptionButton(h),first=h.context.toggleAxSubscription(item.id);
+ await h.context.toggleAxSubscription(item.id);assert.equal(h.requests.length,1);assert.equal(b.disabled,true);assert.equal(b['aria-pressed'],'false');
+ assert.equal(h.requests[0].url,`/api/ax-workspace/${item.id}/subscription`);assert.equal(h.requests[0].method,'PUT');assert.equal(h.requests[0].body.enabled,true);
+ h.requests[0].resolve({ok:true,subscribed:true});await first;assert.equal(b.disabled,false);assert.equal(b['aria-pressed'],'true');assert.match(b['aria-label'],/끄기$/);
+ const second=h.context.toggleAxSubscription(item.id);assert.equal(h.requests[1].body.enabled,false);
+ h.requests[1].resolve({ok:true,subscribed:false});await second;assert.equal(b['aria-pressed'],'false');assert.match(b.innerHTML,/꺼짐/);
+});
+
+test('failed or malformed subscription response does not invent success and leaves the control retryable',async()=>{
+ for(const malformed of [false,true]){
+  const h=setup('member');seed(h);const b=subscriptionButton(h),toggle=h.context.toggleAxSubscription(item.id);
+  malformed?h.requests[0].resolve({ok:true}):h.requests[0].reject(Error('offline'));
+  await assert.rejects(toggle);assert.equal(h.value('axFiles[0].subscribed'),false);assert.equal(b.disabled,false);
+  const retry=h.context.toggleAxSubscription(item.id);h.requests[1].resolve({subscribed:true});await retry;assert.equal(b['aria-pressed'],'true');
+ }
+});
+
+test('late subscription completion does not navigate or paint over another view, and late errors stay with the old view',async()=>{
+ for(const failed of [false,true]){
+  const h=setup('member');seed(h);const b=subscriptionButton(h),toggle=h.context.toggleAxSubscription(item.id);
+  h.context.navigate('ideas');h.workspace.innerHTML='새 화면';failed?h.requests[0].reject(Error('late')):h.requests[0].resolve({subscribed:true});await toggle;
+  assert.equal(h.context.state.route,'ideas');assert.equal(h.workspace.innerHTML,'새 화면');assert.deepEqual(h.errors,[]);
+  if(!failed)assert.equal(h.value('axFiles[0].subscribed'),true);
+  assert.equal(b['aria-pressed'],'false');
+ }
+});
+
+test('catalog and subscription reads started before a toggle cannot overwrite its confirmed value',async()=>{
+ for(const background of [false,true]){
+  const h=setup('member');seed(h);subscriptionButton(h);
+  const old=background?h.context.refreshAxSubscriptions(true):h.context.loadAxWorkspace();
+  const toggle=h.context.toggleAxSubscription(item.id);h.requests[1].resolve({subscribed:true});await toggle;
+  h.requests[0].resolve({files:[{...item,subscribed:false}]});await old;assert.equal(h.value('axFiles[0].subscribed'),true);
+ }
+});
+
+test('a catalog response during a pending toggle retains the earlier confirmed setting until mutation completes',async()=>{
+ const h=setup('member');seed(h);const toggle=h.context.toggleAxSubscription(item.id),read=h.context.loadAxWorkspace();
+ h.requests[1].resolve({files:[{...item,subscribed:true}]});await read;assert.equal(h.value('axFiles[0].subscribed'),false);
+ h.requests[0].resolve({subscribed:true});await toggle;assert.equal(h.value('axFiles[0].subscribed'),true);
+});
+
+test('browser download stays an anchor and later GET alone confirms automatic subscription without replacing the catalog',async()=>{
+ const h=setup('member');seed(h);const b=subscriptionButton(h);h.context.renderAxWorkspace();const before=h.workspace.innerHTML;
+ let prevented=false;h.listeners.click[0]({target:{closest:selector=>selector==='a[data-ax-download]'?{dataset:{axDownload:item.id}}:null},preventDefault(){prevented=true;}});
+ assert.equal(prevented,false);assert.equal(h.requests.length,0);assert.equal(h.value('axFiles[0].subscribed'),false);assert.equal(h.timers[0].delay,1500);
+ h.timers[0].callback();await tick();
+ assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,'/api/ax-workspace');assert.equal(h.requests[0].method,'GET');
+ h.requests[0].resolve({files:[{...item,subscribed:true}]});await tick();
+ assert.equal(b['aria-pressed'],'true');assert.equal(h.workspace.innerHTML,before);
+});
+
+test('explicit off survives the post-download check and refresh failure never blocks streaming or raises a download error',async()=>{
+ for(const failed of [false,true]){
+  const h=setup('member');seed(h);const b=subscriptionButton(h);
+  h.listeners.click[0]({target:{closest:()=>({})}});h.timers[0].callback();await tick();
+  failed?h.requests[0].reject(Error('status unavailable')):h.requests[0].resolve({files:[{...item,subscribed:false}]});await tick();
+  assert.equal(h.value('axFiles[0].subscribed'),false);assert.deepEqual(h.errors,[]);assert.notEqual(b['aria-pressed'],'true');
+ }
+});
+
+test('focus and visibility subscription reads are throttled, single flight, skipped when hidden or away, and ignore old navigation results',async()=>{
+ const h=setup('member');seed(h);h.context.document.hidden=true;h.documentListeners.visibilitychange[0]();assert.equal(h.requests.length,0);
+ h.context.document.hidden=false;h.windowListeners.focus[0]();h.windowListeners.focus[0]();assert.equal(h.requests.length,1);
+ h.requests[0].resolve({files:[item]});await tick();h.windowListeners.focus[0]();assert.equal(h.requests.length,1);
+ h.context.now+=6000;h.documentListeners.visibilitychange[0]();assert.equal(h.requests.length,2);
+ h.context.navigate('home');h.requests[1].resolve({files:[{...item,subscribed:true}]});await tick();assert.equal(h.value('axFiles[0].subscribed'),false);
+ h.windowListeners.focus[0]();assert.equal(h.requests.length,2);
+});
+
+test('workspace notification navigation clears filters and highlights, focuses and scrolls the stable file card',async()=>{
+ const h=setup('member');seed(h);h.context.actions['ax-filter']({dataset:{category:'plugin'}});
+ const calls=[],card={dataset:{axCard:item.id},focus:args=>calls.push(['focus',args]),scrollIntoView:args=>calls.push(['scroll',args])};h.cards.push(card);
+ const open=h.context.openAxWorkspaceFile(item.id);h.requests[0].resolve({files:[item]});await open;
+ assert.equal(h.context.state.route,'ax');assert.equal(h.value('axFilter'),'all');assert.match(h.workspace.innerHTML,/ws-ax-card is-highlighted/);
+ assert.ok(h.workspace.innerHTML.includes(`data-ax-card="${item.id}"`));assert.equal(calls[0][0],'focus');assert.equal(calls[1][0],'scroll');
+});
+
+test('late workspace notification catalog result cannot focus or replace a different page',async()=>{
+ const h=setup('member'),calls=[];h.cards.push({dataset:{axCard:item.id},focus:()=>calls.push('focus'),scrollIntoView:()=>calls.push('scroll')});
+ const open=h.context.openAxWorkspaceFile(item.id);h.context.navigate('home');h.workspace.innerHTML='home';h.requests[0].resolve({files:[item]});await open;
+ assert.equal(h.context.state.route,'home');assert.equal(h.workspace.innerHTML,'home');assert.deepEqual(calls,[]);
 });

@@ -78,6 +78,8 @@ def init_db(app):
         db().tools.create_index([('owner', 1), ('deleted', 1)])
         db().ideas.create_index([('status', 1), ('created', -1)])
         db().workspace_files.create_index([('created', -1)])
+        db().workspace_subscriptions.create_index([('file', 1), ('user', 1)], unique=True)
+        db().workspace_subscriptions.create_index([('user', 1), ('enabled', 1)])
         db().deletion_jobs.create_index([('state', 1), ('created', 1)])
         db().activity.create_index([('tool', 1), ('created', -1)])
         for kind, names in [('organization', ['공통', '제조팀', '장비팀', '기술팀']), ('category', ['공통 업무', '제조', '장비', '기술'])]:
@@ -166,6 +168,14 @@ def _deliver_event(e):
         # Recipients are independent. One unavailable inbox must not prevent
         # the others from receiving a notification about the saved comment.
         try:
+            if target.get('type') == 'workspace' and e.get('kind') == 'release':
+                # Recheck delayed deliveries: an explicit unsubscribe or an
+                # account disable must also suppress an already queued release.
+                if not db().workspace_subscriptions.find_one(
+                        {'file': target.get('id'), 'user': uid, 'enabled': True}, {'_id': 1}):
+                    continue
+                if not db().users.find_one({'_id': uid, 'enabled': {'$ne': False}}, {'_id': 1}):
+                    continue
             db().notifications.update_one(
                 {'_id': e['id'] + ':' + uid},
                 {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'],
@@ -191,7 +201,7 @@ def _deliver_event(e):
 def deliver_notifications(collection_name=None, document_id=None):
     """Deliver bounded, idempotent outbox work; leave failed events durable."""
     from .post_commit import DeliveryResult, deliver_job, log_deferred
-    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users', 'workspace_files', 'deletion_jobs', 'subscriptions')
+    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users', 'workspace_files', 'workspace_subscriptions', 'deletion_jobs', 'subscriptions')
     collections = supported if collection_name is None else (collection_name,)
     if any(name not in supported for name in collections):
         raise ValueError('Unsupported outbox collection')
@@ -234,7 +244,12 @@ def purge_deleted():
     for t in db().tools.find({'versions': {'$elemMatch': {'deleted': True, 'path': {'$ne': None}}}}):
         for v in t.get('versions', []):
             if not v.get('deleted') or not v.get('path'): continue
-            try: artifact_path(v['path']).unlink(missing_ok=True)
+            try:
+                # Historical Workspace releases remain downloadable references
+                # even if a tool happened to share the same stored artifact.
+                if not db().workspace_files.find_one(
+                        {'$or': [{'path': v['path']}, {'versions.path': v['path']}]}, {'_id': 1}):
+                    artifact_path(v['path']).unlink(missing_ok=True)
             except OSError: continue
             db().tools.update_one({'_id': t['_id']}, {'$set': {'versions.$[v].path': None}}, array_filters=[{'v.n': v['n'], 'v.deleted': True}])
 

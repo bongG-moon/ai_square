@@ -114,7 +114,19 @@ def test_blank_editable_server_explains_setting_and_writes_nothing(tmp_path, dis
     assert result.returncode == 2
     assert 'SERVER_URL' in result.stderr
     assert {path.name: path.read_bytes() for path in script.parent.iterdir()} == before
-    assert not (tmp_path / 'PNT-AI-Square-0.1.0-Extension.zip').exists()
+    assert not (tmp_path / 'PNT-AI-Square-0.1.0.axextension').exists()
+
+
+def test_default_operator_output_is_doubleclick_package(tmp_path, distribution):
+    _, files = distribution
+    script = _operator_copy(tmp_path / 'operator', files, server='https://square.company.example')
+    result = _run_operator(script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    ready = script.parent / 'PNT-AI-Square-0.1.0.axextension'
+    assert zipfile.is_zipfile(ready)
+    with zipfile.ZipFile(ready) as archive:
+        assert json.loads(archive.read('connection.json'))['baseUrl'] == 'https://square.company.example'
+        assert '더블클릭' in archive.read('README.txt').decode('utf-8')
 
 
 def test_explicit_cli_values_override_editable_settings_and_keep_cwd_output(tmp_path, distribution):

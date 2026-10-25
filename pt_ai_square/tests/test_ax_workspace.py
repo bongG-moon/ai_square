@@ -21,11 +21,12 @@ def archive(name='README.md'):
     return value.getvalue()
 
 
-def upload(client, headers, *, file_name='ax_workspace.zip', content=None, **metadata):
+def upload(client, headers, *, file_name='ax_workspace.zip', content=None, file_id=None, **metadata):
     data = dict(name='AX Workspace', description='사내 업무 환경 설치 파일입니다.',
                 category='workspace', version='1.0.0')
     data.update(metadata)
-    return client.post('/api/ax-workspace', headers=headers,
+    endpoint = '/api/ax-workspace' + (f'/{file_id}/versions' if file_id else '')
+    return client.post(endpoint, headers=headers,
                        data={'metadata': json.dumps(data),
                              'file': (io.BytesIO(archive() if content is None else content), file_name)})
 
@@ -131,6 +132,8 @@ def test_personal_key_cannot_bypass_workspace_browser_only_scope(app, scope):
     ('setup.ps1', b'Write-Output "Workspace"'),
     ('guide.md', '# 안내'.encode()),
     ('cube-plugin.zip', archive()),
+    ('PNT-AI-Square.axextension', archive()),
+    ('PNT-AI-Square.AXEXTENSION', archive()),
 ])
 def test_supported_download_formats_preserve_original_bytes(app, name, content):
     admin, headers = ready(app, 'admin')
@@ -140,6 +143,8 @@ def test_supported_download_formats_preserve_original_bytes(app, name, content):
     assert saved['fileName'] == name and saved['category'] == 'plugin'
     downloaded = admin.get(saved['downloadUrl'])
     assert downloaded.data == content
+    assert name in downloaded.headers['Content-Disposition']
+    assert downloaded.mimetype == 'application/octet-stream'
     downloaded.close()
 
 
@@ -148,6 +153,10 @@ def test_supported_download_formats_preserve_original_bytes(app, name, content):
     ('bad.msi', b'not msi'), ('bad.zip', b'not zip'), ('empty.md', b''),
     ('bad.zip', archive('../outside.md')), ('bad.zip', archive('/outside.md')),
     ('bad.zip', archive('C:/outside.md')),
+    ('bad.axextension', b'not zip'),
+    ('bad.axextension', archive('../outside.md')),
+    ('bad.axextension', archive('/outside.md')),
+    ('bad.axextension', archive('C:/outside.md')),
 ])
 def test_invalid_artifacts_leave_no_metadata_or_partial_file(app, name, content):
     admin, headers = ready(app, 'admin')

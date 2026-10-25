@@ -173,9 +173,34 @@ def test_prepare_does_not_auto_choose_update_and_requires_visibility(settings):
 
 
 @pytest.mark.parametrize('name,value',[('.env','TOKEN=private'),('runtime_config.py','secret'),('nested/credential.dpapi.json','value'),('readme.md',KEY)])
-def test_prebuilt_zip_inspects_compressed_names_and_content(settings,name,value):
-    source=settings.roots[0]/'legacy.zip';source.write_bytes(zipped({name:value}))
+@pytest.mark.parametrize('suffix',['.zip','.axextension'])
+def test_prebuilt_zip_inspects_compressed_names_and_content(settings,name,value,suffix):
+    source=settings.roots[0]/('legacy'+suffix);source.write_bytes(zipped({name:value}))
     with pytest.raises(SquareError):package(source,metadata(),settings.roots,settings.state/'rejected')
+
+
+def test_axextension_download_and_publication_preserve_format_without_install(settings,monkeypatch):
+    raw=zipped({'extension.json':'{}','README.txt':'Open with AX Workspace.'})
+    source=settings.roots[0]/'PNT-AI-Square.axextension';source.write_bytes(raw)
+    prepared,declaration=package(source,metadata(),settings.roots,settings.state/'prepared')
+    assert prepared.suffix=='.axextension' and prepared.read_bytes()==raw
+    assert declaration is None
+    manifest=FakeClient(raw,'.axextension').manifest(1)
+    client=Client(settings)
+    monkeypatch.setattr(client,'manifest',lambda _tid:copy.deepcopy(manifest))
+    monkeypatch.setattr(client,'open',lambda *_args,**_kwargs:io.BytesIO(raw))
+    downloaded=client.download(manifest,settings.state/'downloads')
+    assert downloaded.name=='tool-1-v1.axextension' and downloaded.read_bytes()==raw
+
+
+@pytest.mark.parametrize('kind',['skill','mcp','installer'])
+def test_axextension_is_never_installed_as_claude_content(settings,tmp_path,kind):
+    client=FakeClient(zipped({'extension.json':'{}'}),'.axextension',profile(kind))
+    installer=Installer(settings,client,tmp_path)
+    result=installer.prepare(1,'project',str(settings.roots[0]))
+    assert result['canInstall'] is False and result['installed'] is False
+    assert client.downloads==[]
+    assert not (settings.roots[0]/'.claude').exists()
 
 
 def test_missing_previous_backup_never_deletes_current_installation(settings,tmp_path):

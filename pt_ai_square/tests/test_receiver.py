@@ -190,6 +190,14 @@ def test_release_changes_during_download_and_safe_filename(tmp_path):
     assert all(u.startswith('https://square.example/prefix/') for u in op.urls)
 
 
+def test_axextension_download_preserves_file_association_without_installing(tmp_path):
+    info=manifest(filename='PNT-AI-Square.axextension')
+    result=receiver.Client('https://square.example',opener=FakeOpener([info,info])).download(1,tmp_path)
+    assert Path(result['file']).name=='tool-1-v1.axextension'
+    assert Path(result['file']).read_bytes()==b'abc'
+    assert result['installed'] is False
+
+
 def test_unsafe_urls_and_redirects_rejected():
     for url in ['http://company.example', 'https://user:pass@example.org', 'https://example.org?q=x', 'file:///x']:
         with pytest.raises(receiver.ClientError):

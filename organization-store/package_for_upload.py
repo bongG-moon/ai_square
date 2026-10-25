@@ -26,7 +26,7 @@ def create_upload(output, origin, *, source=HERE, vendor=CANONICAL):
         files, manifest, _ = read_template(details['package'])
     version = manifest['version']
     files = configured_files(files, origin, version)
-    target = output / f'PNT-AI-Square-{version}-Extension.zip'
+    target = output / f'PNT-AI-Square-{version}.axextension'
     if target.exists():
         raise ValueError('출력 ZIP이 이미 있습니다. 새 출력 폴더를 선택하세요.')
     write_zip(target, files)
@@ -42,7 +42,7 @@ def create_upload(output, origin, *, source=HERE, vendor=CANONICAL):
         '직접 등록할 파일: ' + target.name + '\n\n'
         '권장: 웹 AX Workspace → 파일 등록\n'
         '이름: P&T AI Square 확장\n분류: 플러그인\n버전: ' + version + '\n'
-        '설명: AX Workspace 설정에서 이 ZIP을 가져와 설치하고 개인 KEY로 연결합니다. 서버 주소는 포함되어 있습니다.\n\n'
+        '설명: 파일을 더블클릭하면 AX Workspace 설치 확인창이 열립니다. 설치 후 개인 KEY로 연결합니다. 서버 주소는 포함되어 있습니다.\n\n'
         '일반 도구 목록에 등록하려면 ZIP에서 불러오기로 ai-square.json을 읽을 수 있습니다.\n'
         '업로드나 게시를 자동 수행하지 않았습니다. 공개 Git에는 서버 주소가 포함된 ZIP을 올리지 마세요.\n', encoding='utf-8')
     return report

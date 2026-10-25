@@ -5,13 +5,13 @@ function packagePanel(d){
  if(p.state==='error')return `<div class="ws-package is-error" role="alert"><strong>배포 정보를 읽지 못했습니다.</strong><p>${esc(p.error)}</p><p>입력 항목을 직접 작성하면 그대로 게시할 수 있습니다. 게시 시 기본 파일 검사는 다시 진행합니다.</p><button type="button" class="sq-link" data-package-retry>다시 검사</button></div>`;
  if(!p.result.recognized)return `<div class="ws-package"><strong>${p.result.warning?'배포 정보를 읽지 못했습니다':'일반 파일 등록'}</strong><p>${esc(p.result.warning||p.result.notice)}</p><p>이름·유형·설치 안내를 직접 입력하고 게시하세요.</p></div>`;
  const info=p.result.package;
- return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'ZIP 정보 다시 적용':'ZIP 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
+ return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'배포 정보 다시 적용':'배포 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
 }
 function decoratePackageForm(form){
  if(form.id!=='sq-register-form')return;
  const d=runtime.draft;
  if(runtime.step===1){
-  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP의 배포 정보로 유형과 설명을 채워드려요. 읽지 못해도 직접 입력하여 등록할 수 있어요.</p></div><label class="sq-secondary">ZIP에서 불러오기<input type="file" name="artifact" accept=".zip" class="sq-sr" data-package-import aria-label="배포 ZIP에서 정보 불러오기"></label></div>`);
+  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP·AX 확장 파일의 배포 정보로 유형과 설명을 채워드려요. 읽지 못해도 직접 입력하여 등록할 수 있어요.</p></div><label class="sq-secondary">배포 파일에서 불러오기<input type="file" name="artifact" accept=".zip,.axextension" class="sq-sr" data-package-import aria-label="ZIP 또는 AX 확장에서 정보 불러오기"></label></div>`);
  }
  if(d.mode==='file'&&d.file){
   const anchor=form.querySelector('[data-upload="artifact"]')||form.querySelector('.ws-package-import');

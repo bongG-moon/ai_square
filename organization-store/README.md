@@ -4,8 +4,8 @@
 
 ## 사용 순서
 
-1. 설정에 **추가 기능 → 확장 ZIP 가져오기**가 있는 AX Workspace를 먼저 설치합니다. 이 개발본의 앱 버전은 0.23.32입니다. 기존에 배포된 동일 버전에는 가져오기 기능이 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다.
-2. 웹의 **AX Workspace** 탭에서 관리자가 등록한 `PNT-AI-Square-0.1.0-Extension.zip`을 받습니다. **압축을 풀거나 EXE를 실행하지 않고** 앱의 확장 ZIP 가져오기에서 파일을 선택합니다. 이름·버전·설치 위치·서버 주소를 확인하고 설치하면 왼쪽 메뉴에 **P&T AI Square**가 나타납니다. 현재 Windows 계정의 확장 폴더에만 설치하며 일반 대화와 업무 모드 모두에서 열 수 있습니다.
+1. **.axextension 파일 더블클릭 설치**를 지원하는 AX Workspace를 먼저 설치합니다. 이 개발본의 앱 버전은 0.23.32입니다. 기존에 배포된 동일 버전에는 파일 연결 기능이 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다.
+2. 웹의 **AX Workspace** 탭에서 관리자가 등록한 `PNT-AI-Square-0.1.0.axextension`을 받아 **더블클릭**합니다. 압축 해제나 Python 실행 없이 AX Workspace의 설치 확인창이 열립니다. 이름·버전·설치 위치·서버 주소를 확인하고 설치하면 왼쪽 메뉴에 **P&T AI Square**가 나타납니다. 현재 Windows 계정의 확장 폴더에만 설치하며 일반 대화와 업무 모드 모두에서 열 수 있습니다. 수동 설치나 기존 ZIP은 설정의 **확장 ZIP 가져오기**에서도 지원합니다.
 3. 배포자가 서버 주소를 담은 `connection.json`을 포함했다면 앱에서는 웹 `/local-access`에서 발급받은 **기존의 유효한 개인 KEY만 입력**합니다. 주소 파일이 없는 범용 설치 파일은 서버 주소도 직접 입력합니다. HTTP 서버는 최초 연결 시 암호화되지 않은 전송임을 확인합니다. 새 KEY를 자동 발급하거나 교체하지 않습니다. 기존 플랫폼 MCP 연결이 있다면 **기존 플랫폼 MCP 연결 사용**을 직접 선택할 수도 있습니다.
 4. 기능을 검색하고 상세 화면에서 사용 방법을 확인합니다. **파일 다운로드**와 **설치하기**는 다른 동작입니다.
 5. 설치하려면 **전체 공간(내 계정) / 현재 업무 폴더 / 특정 폴더 선택**을 직접 선택한 뒤 실제 변경 경로를 확인합니다. 진행 중인 대화를 자동으로 끊거나 Claude를 재시작하지 않습니다.
@@ -41,13 +41,13 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 
 서버 주소는 **배포자**가 `package_for_upload.py --server-url <서버 기본 주소>`로 지정합니다. 확장 코드·`extension.json`·`connection.json`·설치 안내를 한 ZIP으로 만들며 별도 설치 EXE는 포함하지 않습니다. 주소 파일은 `{"schemaVersion": 1, "baseUrl": "http://pntaisquare.company.example"}` 형식입니다. 서버 실행 주소 `0.0.0.0` 대신 사용자가 접속하는 주소를 사용하고 KEY·쿠키·MongoDB 접속 정보를 넣지 않습니다. 사내 주소가 포함된 ZIP은 사내 배포용으로 관리하고 공개 Git에 올리지 않습니다. ZIP 전체를 원본 그대로 등록하세요.
 
-Git 릴리즈에서 받은 **`PNT-AI-Square-0.1.0-Distribution.zip`**은 서버 주소가 없는 관리자용 준비 자료입니다. 전체를 풀고 **`configure_server.py` 상단의 `SERVER_URL`**에 실제 서버 주소를 입력하세요. 한국어 주석 아래의 `OUTPUT_ZIP`은 생성할 파일명이며 기본값을 그대로 사용해도 됩니다. 저장한 뒤 아래 한 줄로 **`Extension.zip`**을 만들고 이 최종 ZIP을 웹에 등록합니다. Python 3.10 이상 표준 라이브러리만 사용하며 소스 저장소·vendor·추가 패키지·네이티브 빌드 도구는 필요하지 않습니다.
+Git 릴리즈에서 받은 **`PNT-AI-Square-0.1.0-Distribution.zip`**은 서버 주소가 없는 관리자용 준비 자료입니다. 전체를 풀고 **`configure_server.py` 상단의 `SERVER_URL`**에 실제 서버 주소를 입력하세요. 한국어 주석 아래의 `OUTPUT_ZIP`은 생성할 파일명이며 기본값 `PNT-AI-Square-0.1.0.axextension`을 그대로 사용하면 됩니다. 저장한 뒤 아래 한 줄로 설치 파일을 만들고 이 파일을 웹에 등록합니다. Python 3.10 이상 표준 라이브러리만 사용하며 소스 저장소·vendor·추가 패키지·네이티브 빌드 도구는 필요하지 않습니다.
 
 ```powershell
 python configure_server.py
 ```
 
-생성된 ZIP은 Python 파일과 같은 폴더에 놓입니다. 주소를 비워 두면 수정할 위치를 안내하고 종료합니다. 기존 `--server-url`·`--output` 옵션도 유지하며, 지정한 옵션이 파일 상단 설정보다 우선합니다. 명시적으로 `--output`에 상대 경로를 주면 기존처럼 실행한 폴더를 기준으로 합니다.
+생성된 확장 파일은 Python 파일과 같은 폴더에 놓입니다. 내부는 기존 ZIP 패키지와 같은 검증 구조이며 파일을 실행해도 확장 코드가 자동으로 실행되지 않고 설치 확인창을 표시합니다. 주소를 비워 두면 수정할 위치를 안내하고 종료합니다. 기존 `--server-url`·`--output` 옵션과 수동 가져오기용 `.zip` 출력도 유지합니다. 지정한 옵션이 파일 상단 설정보다 우선하며, 명시적으로 `--output`에 상대 경로를 주면 기존처럼 실행한 폴더를 기준으로 합니다.
 
 `Distribution.zip` 자체를 사용자 설치 파일로 올리지 않습니다. 도우미는 동봉 template의 전체 SHA256과 각 payload 파일·경로·빌드 해시를 검증하고, 실행 코드는 그대로 유지한 채 주소·등록 정보·안내만 새 ZIP에 넣습니다. 압축 해제·payload 실행·서버 접속·개인 프로필 변경을 하지 않고 기존 출력 파일을 덮어쓰지 않습니다. HTTP 전송 주의 안내를 최종 ZIP과 실행 결과에 표시합니다. 해시는 전자서명이 아니므로 Git 릴리즈의 출처와 공개 체크섬을 함께 확인하세요. 상세 절차는 [DISTRIBUTION_README.txt](DISTRIBUTION_README.txt)를 따릅니다.
 
@@ -106,7 +106,7 @@ python configure_server.py
 python organization-store/package_for_upload.py --server-url 'https://square.company.example' --output-directory outputs/square-upload
 ```
 
-출력 중 `PNT-AI-Square-0.1.0-Extension.zip`을 등록하고 `SHA256SUMS.txt`·등록 안내·빌드 보고서는 관리자가 보관합니다. 일반 도구 등록에서도 `ai-square.json`을 읽을 수 있습니다. ZIP 생성은 웹 업로드·게시·개인 프로필 설치를 하지 않습니다.
+출력 중 `PNT-AI-Square-0.1.0.axextension`을 등록하고 `SHA256SUMS.txt`·등록 안내·빌드 보고서는 관리자가 보관합니다. 일반 도구 등록에서도 `ai-square.json`을 읽을 수 있습니다. 파일 생성은 웹 업로드·게시·개인 프로필 설치를 하지 않습니다.
 
 공개 Git 릴리즈용은 주소를 넣지 않고 별도로 생성합니다. 아래 출력의 `Distribution.zip`과 체크섬을 전달하면 관리자가 사내에서 위 `configure_server.py` 명령을 실행할 수 있습니다. 기존에 만든 서버 포함 ZIP을 공개 ZIP 안에 다시 넣지 않습니다.
 

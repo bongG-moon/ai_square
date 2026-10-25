@@ -8,6 +8,10 @@ vm.runInContext(fs.readFileSync(path.join(__dirname,'../frontend/frontend_packag
 const result={recognized:true,metadata:{name:'선언 이름',desc:'설명',platform:'Claude',type:'Skill',environment:'Python',changes:'v1',guide:'안내',workTags:['분석']},package:{type:'Skill',name:'선언 이름',platform:'Claude',entryPoint:'SKILL.md',requirements:['Python']}};
 const fresh=()=>({file:{name:'test.zip'},mode:'file',name:'',desc:'',org:'장비팀',owner:'사번 사용자',approval:true});
 (async()=>{
+ let imported='';context.runtime.step=1;context.runtime.draft={};
+ context.decoratePackageForm({id:'sq-register-form',insertAdjacentHTML:(_where,html)=>imported+=html});
+ assert.match(imported,/accept="\.zip,\.axextension"/);
+ assert.match(imported,/배포 파일에서 불러오기/);
  let d=context.runtime.draft=fresh();
  let pending=context.inspectSelectedPackage(d.file);
  assert.equal(context.packageBlockingError(d),'');

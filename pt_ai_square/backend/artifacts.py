@@ -13,7 +13,7 @@ def stage_upload(upload):
     name=upload.filename.replace('\\','/').split('/')[-1]
     if not name or len(name)>180 or any(ord(c)<32 for c in name): raise BadRequest('파일 이름을 확인해 주세요.')
     ext=Path(name).suffix.lower()
-    if ext not in {'.zip','.exe','.msi','.ps1','.md'}: raise BadRequest('ZIP, EXE, MSI, PS1, MD 파일을 등록해 주세요.')
+    if ext not in {'.zip','.axextension','.exe','.msi','.ps1','.md'}: raise BadRequest('ZIP, AX 확장(.axextension), EXE, MSI, PS1, MD 파일을 등록해 주세요.')
     directory=Path(current_app.config['DATA_DIR'])/'artifacts'
     path=directory/(uuid.uuid4().hex+ext)
     try:
@@ -32,7 +32,9 @@ def stage_upload(upload):
             except UnicodeError: raise BadRequest('MD 파일은 UTF-8로 저장해 주세요.')
         package=None
         package_warning=''
-        if ext=='.zip':
+        # AX extension packages contain ZIP bytes. Apply the same bounded
+        # archive/declaration validation without executing or installing them.
+        if ext in {'.zip', '.axextension'}:
             try:
                 with zipfile.ZipFile(path) as z:
                     entries=z.infolist()

@@ -15,7 +15,7 @@ const Core={
  canDelete:(item,v)=>!v.deleted&&v.n!==item.active&&v.n!==item.fallback&&!v.refs,
  retention:(item,keep,days)=>{const retained=[...item.versions].filter(v=>!v.deleted).sort((a,b)=>b.n-a.n).slice(0,keep).map(v=>v.n);return item.versions.filter(v=>!retained.includes(v.n)&&v.age>days&&Core.canDelete(item,v));},
  rollback:(item,target)=>{const v=item.versions.find(v=>v.n===target&&!v.deleted&&!v.withdrawn);if(!v||target===item.active)throw Error('복구할 수 없는 버전입니다.');const previous=item.active;item.versions.find(v=>v.n===previous).withdrawn=true;item.active=target;item.fallback=target;item.revision++;item.updatePaused=true;return previous;},
- validate:(draft,step)=>{if(step===1){if(Core.tagError(draft.workTags))return Core.tagError(draft.workTags);if(!draft.name.trim())return '도구 이름을 입력해 주세요.';if(!draft.desc.trim())return '어떤 업무를 돕는지 한 줄로 적어 주세요.';if(!draft.owner.trim())return '담당자를 입력해 주세요.';if(draft.visibility==='선택 조직'&&!draft.audience.length)return '공개할 조직을 하나 이상 선택해 주세요.';}if(step===2){if(!draft.guide.trim())return '설치하거나 연결하는 방법을 적어 주세요.';if(draft.mode==='url'){try{const u=new URL(draft.url);if(u.protocol!=='https:')return 'https://로 시작하는 연결 주소를 입력해 주세요.';}catch{return '올바른 연결 주소를 입력해 주세요.';}}else if(draft.mode==='command'){if(!draft.commandProject?.trim()&&!draft.commandUser?.trim())return '지원하는 설치 범위의 명령어를 하나 이상 적어 주세요.';if([draft.commandProject,draft.commandUser].some(s=>(s||'').length>8000))return '명령어는 범위별 8,000자 이내로 입력하세요.';}else if(!draft.file)return '공유할 파일을 선택해 주세요.';else if(!/\.(zip|exe|msi|ps1|md)$/i.test(draft.file.name))return 'ZIP, EXE, MSI, PS1, MD 중 하나를 선택해 주세요. 여러 코드 파일은 ZIP으로 묶어 주세요.';}return '';}
+ validate:(draft,step)=>{if(step===1){if(Core.tagError(draft.workTags))return Core.tagError(draft.workTags);if(!draft.name.trim())return '도구 이름을 입력해 주세요.';if(!draft.desc.trim())return '어떤 업무를 돕는지 한 줄로 적어 주세요.';if(!draft.owner.trim())return '담당자를 입력해 주세요.';if(draft.visibility==='선택 조직'&&!draft.audience.length)return '공개할 조직을 하나 이상 선택해 주세요.';}if(step===2){if(!draft.guide.trim())return '설치하거나 연결하는 방법을 적어 주세요.';if(draft.mode==='url'){try{const u=new URL(draft.url);if(u.protocol!=='https:')return 'https://로 시작하는 연결 주소를 입력해 주세요.';}catch{return '올바른 연결 주소를 입력해 주세요.';}}else if(draft.mode==='command'){if(!draft.commandProject?.trim()&&!draft.commandUser?.trim())return '지원하는 설치 범위의 명령어를 하나 이상 적어 주세요.';if([draft.commandProject,draft.commandUser].some(s=>(s||'').length>8000))return '명령어는 범위별 8,000자 이내로 입력하세요.';}else if(!draft.file)return '공유할 파일을 선택해 주세요.';else if(!/\.(zip|axextension|exe|msi|ps1|md)$/i.test(draft.file.name))return 'ZIP, EXE, MSI, PS1, MD 중 하나를 선택해 주세요. 여러 코드 파일은 ZIP으로 묶어 주세요.';}return '';}
 };
 const items=[];
 const state={route:'home',homeType:'전체',platform:'전체',org:'전체 조직',type:'전체',category:'모든 업무',query:'',sort:'discovery',page:0,rankPage:0,rankMode:'recent',auto:!motion.matches,liked:new Set(),snapshot:0};
@@ -157,7 +157,7 @@ function wizard(){
  const steps=`<div class="sq-wizard-steps">${['기본 정보','파일·연결','확인·게시'].map((label,i)=>`<span class="${step===i+1?'active':''}"><b>${i+1}</b>${label}</span>`).join('')}</div>`;
  let content='';
  if(step===1)content=`<div class="sq-form-grid"><label class="sq-field wide"><span>도구 이름 *</span><input name="name" value="${esc(d.name)}" maxlength="50" placeholder="예: 주간 보고서 작성" required></label><label class="sq-field wide"><span>한 줄 소개 *</span><textarea name="desc" maxlength="200" placeholder="어떤 업무를 어떻게 도와주는지 적어주세요." required>${esc(d.desc)}</textarea></label>${workTagField(d.workTags)}<label class="sq-field"><span>사용 프로그램</span><select name="platform">${options(['Claude','ChatGPT','기타'],d.platform)}</select></label><label class="sq-field"><span>공유 유형</span><select name="type">${options(['MCP/Tool','Skill','플러그인/하네스'],d.type)}</select></label><label class="sq-field"><span>등록 조직</span><select name="org">${options(organizations.filter(o=>server.user.role==='admin'||o.name==='공통'||o.name===server.user.org).map(o=>o.name),d.org)}</select></label><label class="sq-field"><span>업무 분야</span><select name="category">${options(['공통 업무','제조','장비','기술'],d.category)}</select></label><label class="sq-field"><span>담당자 *</span><input name="owner" value="${esc(d.owner)}" required></label><label class="sq-field"><span>목록 공개 범위</span><select name="visibility">${options(['전체 공개','선택 조직'],d.visibility)}</select></label><div class="sq-field wide" id="sq-audience" ${d.visibility==='선택 조직'?'':'hidden'}><span>열람할 수 있는 조직</span><div class="sq-choice-row">${organizations.map(o=>`<label><input type="checkbox" name="audience" value="${esc(o.name)}" ${d.audience.includes(o.name)?'checked':''}>${esc(o.name)}</label>`).join('')}</div></div><div class="sq-field wide"><span>사용 승인</span><label class="sq-choice-row"><input type="checkbox" name="approval" ${d.approval?'checked':''}>사용 전 담당자의 승인이 필요합니다.</label><small>목록을 볼 수 있는 사람과 실제 사용할 수 있는 사람을 따로 정합니다.</small></div></div><div class="sq-callout">Skill에는 지침 문서뿐 아니라 Python 코드와 참고 자료도 포함할 수 있습니다. 함께 쓰는 파일은 ZIP으로 묶어주세요.</div>`;
- if(step===2)content=`<div class="sq-choice-row"><label><input type="radio" name="mode" value="file" ${d.mode==='file'?'checked':''}>파일 등록</label><label><input type="radio" name="mode" value="url" ${d.mode==='url'?'checked':''}>URL 연결</label><label><input type="radio" name="mode" value="command" ${d.mode==='command'?'checked':''}>명령어 안내</label></div>${d.mode==='file'?`<div class="sq-upload">${icon('upload-cloud')}<h3>${d.file?esc(d.file.name):'공유할 파일을 선택하세요.'}</h3><p>ZIP · EXE · MSI · PS1 · MD / 게시할 때 서버로 전송합니다.</p><input type="file" name="artifact" accept=".zip,.exe,.msi,.ps1,.md" aria-label="공유 파일 선택"></div>`:d.mode==='command'?commandFields(d):`<label class="sq-field" style="margin-top:20px"><span>연결 주소 *</span><input name="url" type="url" value="${esc(d.url)}" placeholder="https://mcp.example.internal/team"></label><div class="sq-callout">서버 연결형 MCP나 웹 서비스 주소를 등록합니다. 웹이 임의로 EXE로 변환하지 않습니다.</div>`}<div class="sq-form-grid"><label class="sq-field"><span>사용 환경</span><input name="environment" value="${esc(d.environment)}" placeholder="예: Windows · Claude Code"></label><label class="sq-field"><span>자동 배포 번호</span><input value="v${nextVersion} · 게시할 때 자동 생성" readonly></label><label class="sq-field wide"><span>설치·연결 방법 *</span><small>받은 파일이나 URL로 실제 사용을 시작하는 순서입니다. EXE도 실행할 파일과 설치 후 확인 방법을 적어주세요.</small><textarea name="guide" required placeholder="예: EXE 실행 후 Claude를 다시 시작하세요. / ZIP을 풀어 Skills 폴더에 넣으세요. / MCP URL을 연결 설정에 추가하세요.">${esc(d.guide)}</textarea></label><label class="sq-field wide"><span>이번에 바뀐 내용</span><textarea name="changes" placeholder="예: 보고서 양식 선택 기능을 추가했습니다.">${esc(d.changes)}</textarea></label></div>${d.platform==='ChatGPT'?'<div class="sq-callout">ChatGPT 항목은 파일 활용인지 원격 연결인지 구분합니다. 사내 계정에서 확인되지 않은 연결은 ‘조건 확인 필요’로 표시합니다.</div>':''}`;
+ if(step===2)content=`<div class="sq-choice-row"><label><input type="radio" name="mode" value="file" ${d.mode==='file'?'checked':''}>파일 등록</label><label><input type="radio" name="mode" value="url" ${d.mode==='url'?'checked':''}>URL 연결</label><label><input type="radio" name="mode" value="command" ${d.mode==='command'?'checked':''}>명령어 안내</label></div>${d.mode==='file'?`<div class="sq-upload">${icon('upload-cloud')}<h3>${d.file?esc(d.file.name):'공유할 파일을 선택하세요.'}</h3><p>ZIP · AX 확장 · EXE · MSI · PS1 · MD / 게시할 때 서버로 전송합니다.</p><input type="file" name="artifact" accept=".zip,.axextension,.exe,.msi,.ps1,.md" aria-label="공유 파일 선택"></div>`:d.mode==='command'?commandFields(d):`<label class="sq-field" style="margin-top:20px"><span>연결 주소 *</span><input name="url" type="url" value="${esc(d.url)}" placeholder="https://mcp.example.internal/team"></label><div class="sq-callout">서버 연결형 MCP나 웹 서비스 주소를 등록합니다. 웹이 임의로 EXE로 변환하지 않습니다.</div>`}<div class="sq-form-grid"><label class="sq-field"><span>사용 환경</span><input name="environment" value="${esc(d.environment)}" placeholder="예: Windows · Claude Code"></label><label class="sq-field"><span>자동 배포 번호</span><input value="v${nextVersion} · 게시할 때 자동 생성" readonly></label><label class="sq-field wide"><span>설치·연결 방법 *</span><small>받은 파일이나 URL로 실제 사용을 시작하는 순서입니다. EXE도 실행할 파일과 설치 후 확인 방법을 적어주세요.</small><textarea name="guide" required placeholder="예: EXE 실행 후 Claude를 다시 시작하세요. / ZIP을 풀어 Skills 폴더에 넣으세요. / MCP URL을 연결 설정에 추가하세요.">${esc(d.guide)}</textarea></label><label class="sq-field wide"><span>이번에 바뀐 내용</span><textarea name="changes" placeholder="예: 보고서 양식 선택 기능을 추가했습니다.">${esc(d.changes)}</textarea></label></div>${d.platform==='ChatGPT'?'<div class="sq-callout">ChatGPT 항목은 파일 활용인지 원격 연결인지 구분합니다. 사내 계정에서 확인되지 않은 연결은 ‘조건 확인 필요’로 표시합니다.</div>':''}`;
  if(step===3)content=`<div class="sq-detail-hero"><span class="sq-badge blue">배포 미리보기 · v${nextVersion}</span><h3 style="margin-top:12px">${esc(d.name)}</h3><p>${esc(d.desc)}</p></div><dl class="sq-meta"><dt>프로그램 / 유형</dt><dd>${esc(d.platform)} / ${esc(d.type)}</dd><dt>조직 / 담당자</dt><dd>${esc(d.org)} / ${esc(d.owner)}</dd><dt>공개 / 사용</dt><dd>${esc(d.visibility)}${d.visibility==='선택 조직'?' · '+esc(d.audience.join(', ')):''} / ${d.approval?'승인 후 사용':'바로 안내'}</dd><dt>관련 업무</dt><dd>${tagChips(Core.normalizeTags(d.workTags))||'미입력'}</dd><dt>등록 대상</dt><dd>${esc(d.mode==='command'?'설치 범위 선택 후 명령어 복사':d.mode==='url'?d.url:d.file?.name)}</dd><dt>지원 수준</dt><dd>${d.platform==='ChatGPT'?(d.mode==='url'?'연결 조건 확인 필요':'파일 활용 안내'):d.mode==='url'?'서버 연결 안내':/\.(exe|msi|ps1)$/i.test(d.file?.name||'')?'수동 설치 · 자동 업데이트 미검증':'패키지 설치 안내'}</dd></dl><div class="sq-callout"><strong>${d.mode==='file'?'게시하면 서버에서 기본 파일 검사를 진행합니다.':'게시하면 입력한 연결·설치 정보를 버전별로 저장합니다.'}</strong><br>${d.mode==='command'?'명령어는 서버에서 실행하지 않으며, 사용자가 설치 범위를 선택해 복사합니다.':d.mode==='url'?'입력한 HTTPS 주소와 안내를 저장합니다.':'올린 파일 형식 그대로 저장하고 v1, v2처럼 배포 번호를 발급합니다. EXE 설치 파일을 배포하려면 완성된 EXE를 선택하세요. ZIP은 ZIP으로 배포됩니다. 기본 파일 검사에는 악성코드 검사와 실행 검증이 포함되지 않습니다.'}</div>`;
  openModal(x?'새 버전 등록':'도구 등록',x?`${x.name} · 버전은 자동으로 관리합니다.`:'잘 만든 도구를 동료들과 나눠보세요.',`${steps}<form id="sq-register-form" novalidate>${content}<p id="sq-register-error" class="sq-error" role="alert"></p><div class="sq-actions">${step>1?button('wizard-back','이전'):button('creator-guide','작성 가이드','sq-link')}${step<3?'<button class="sq-primary cursor-interaction">다음</button>':button('publish','게시','sq-primary')}</div></form>`);
 }
@@ -673,7 +673,7 @@ Object.assign(actions,{
  'inbox-more':()=>inbox(true),
  'inbox-filter':b=>{work.unreadOnly=b.dataset.unread==='true';return inbox();},
  'read-all':async()=>{await requestAPI('/api/notifications/read','PUT',{all:true});nextNotificationRead();await afterWorkspaceSave(()=>inbox());},
- 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id);await requestAPI('/api/notifications/read','PUT',{id:n.id});nextNotificationRead();return afterWorkspaceSave(async()=>{await refresh();if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
+ 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id),workspaceToken=n.target.type==='workspace'?runtime.detailLoadToken:null;await requestAPI('/api/notifications/read','PUT',{id:n.id});nextNotificationRead();if(workspaceToken!==null&&workspaceToken!==runtime.detailLoadToken)return;return afterWorkspaceSave(async()=>{await refresh();if(n.target.type==='workspace'){if(workspaceToken!==runtime.detailLoadToken)return;return openAxWorkspaceFile(n.target.id);}if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
 });
 function userPicker(mode){work.userMode=mode;work.users=[];openModal(mode==='grant'?'조회 사용자 추가':'추가 관리자 지정',mode==='grant'?getItem(work.grantTool).name:'기본 관리자 전용',`<p class="sq-note">이 사이트에 로그인한 적이 있는 계정을 이름 또는 사번으로 검색하세요.</p><form data-work-form="user-search" class="ws-user-search"><input id="ws-user-search" type="search" placeholder="이름 또는 사번" aria-label="사용자 검색"><button class="sq-primary">검색</button></form><div id="ws-user-results"></div>`);}
 function renderUserChoices(){$('#ws-user-results').innerHTML=work.users.map(u=>`<div class="ws-row"><span class="ws-avatar">${esc(u.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(u.name)}</strong><p>${esc(u.id)}</p></div>${button('choose-user',work.userMode==='admin'?'관리자 지정':'조회 승인','sq-secondary',`data-user="${esc(u.id)}"`)}</div>`).join('')||blank('search','일치하는 사용자가 없습니다.','먼저 사이트에 로그인한 계정인지 확인해 주세요.');mountIcons();}
@@ -720,14 +720,14 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkNotif
 function fileSize(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function uploadArea(kind,files=[]){
  const multi=kind==='attachments';
- return `<section class="ws-upload-area" data-upload="${kind}"><div class="ws-drop-zone"><span class="ws-upload-icon">${icon(multi?'paperclip':'cloud-upload')}</span><h3>${multi?'요청을 설명할 자료를 첨부하세요':'공유할 파일을 여기에 놓으세요'}</h3><p>${multi?'이미지·PDF·문서·ZIP · 최대 5개, 파일당 20MB':'ZIP · EXE · MSI · PS1 · MD · 최대 128MB · 원본 형식으로 배포'}</p><button type="button" class="sq-secondary" data-file-pick="${kind}">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" name="${kind}" aria-label="${multi?'요청 첨부파일':'공유 파일'} 선택" ${multi?'multiple':''} accept="${multi?'.png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.xlsx,.docx,.zip':'.zip,.exe,.msi,.ps1,.md'}"></div><div class="ws-selected-files" aria-live="polite">${files.map((f,i)=>`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)} · 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="${kind}" data-index="${i}" aria-label="${esc(f.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div></section>`;
+ return `<section class="ws-upload-area" data-upload="${kind}"><div class="ws-drop-zone"><span class="ws-upload-icon">${icon(multi?'paperclip':'cloud-upload')}</span><h3>${multi?'요청을 설명할 자료를 첨부하세요':'공유할 파일을 여기에 놓으세요'}</h3><p>${multi?'이미지·PDF·문서·ZIP · 최대 5개, 파일당 20MB':'ZIP · AX 확장 · EXE · MSI · PS1 · MD · 최대 128MB · 원본 형식으로 배포'}</p><button type="button" class="sq-secondary" data-file-pick="${kind}">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" name="${kind}" aria-label="${multi?'요청 첨부파일':'공유 파일'} 선택" ${multi?'multiple':''} accept="${multi?'.png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.xlsx,.docx,.zip':'.zip,.axextension,.exe,.msi,.ps1,.md'}"></div><div class="ws-selected-files" aria-live="polite">${files.map((f,i)=>`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)} · 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="${kind}" data-index="${i}" aria-label="${esc(f.name)} 선택 취소">${icon('x')}</button></div>`).join('')}</div></section>`;
 }
 function attachmentLinks(files){return files.length?`<section class="ws-attachments"><h3>첨부 자료 <span>${files.length}</span></h3>${files.map(f=>`<a class="ws-selected-file" href="${esc(f.url)}" download>${icon('file')}<span><strong>${esc(f.name)}</strong><small>${fileSize(f.size)}</small></span>${icon('download')}</a>`).join('')}</section>`:'';}
 function selectFiles(kind,files){
  if(!files.length)return;
  if(kind==='artifact'){
   if(files.length!==1)throw Error('공유 파일은 하나만 선택하세요. 여러 파일은 ZIP으로 묶어주세요.');
-  if(!/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
+  if(!/\.(zip|axextension|exe|msi|ps1|md)$/i.test(files[0].name)||files[0].size>128*1048576||!files[0].size)throw Error('ZIP·AX 확장(.axextension)·EXE·MSI·PS1·MD 파일을 선택하세요. 빈 파일은 등록할 수 없고 최대 128MB입니다.');
   captureDraft();runtime.draft.file=files[0];runtime.draft.mode='file';runtime.draft.packageInspection=null;runtime.draft.workflow=null;wizard();
   if(typeof inspectSelectedPackage==='function')inspectSelectedPackage(files[0]);
  }else{
@@ -757,13 +757,13 @@ function packagePanel(d){
  if(p.state==='error')return `<div class="ws-package is-error" role="alert"><strong>배포 정보를 읽지 못했습니다.</strong><p>${esc(p.error)}</p><p>입력 항목을 직접 작성하면 그대로 게시할 수 있습니다. 게시 시 기본 파일 검사는 다시 진행합니다.</p><button type="button" class="sq-link" data-package-retry>다시 검사</button></div>`;
  if(!p.result.recognized)return `<div class="ws-package"><strong>${p.result.warning?'배포 정보를 읽지 못했습니다':'일반 파일 등록'}</strong><p>${esc(p.result.warning||p.result.notice)}</p><p>이름·유형·설치 안내를 직접 입력하고 게시하세요.</p></div>`;
  const info=p.result.package;
- return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'ZIP 정보 다시 적용':'ZIP 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
+ return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'배포 정보 다시 적용':'배포 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
 }
 function decoratePackageForm(form){
  if(form.id!=='sq-register-form')return;
  const d=runtime.draft;
  if(runtime.step===1){
-  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP의 배포 정보로 유형과 설명을 채워드려요. 읽지 못해도 직접 입력하여 등록할 수 있어요.</p></div><label class="sq-secondary">ZIP에서 불러오기<input type="file" name="artifact" accept=".zip" class="sq-sr" data-package-import aria-label="배포 ZIP에서 정보 불러오기"></label></div>`);
+  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP·AX 확장 파일의 배포 정보로 유형과 설명을 채워드려요. 읽지 못해도 직접 입력하여 등록할 수 있어요.</p></div><label class="sq-secondary">배포 파일에서 불러오기<input type="file" name="artifact" accept=".zip,.axextension" class="sq-sr" data-package-import aria-label="ZIP 또는 AX 확장에서 정보 불러오기"></label></div>`);
  }
  if(d.mode==='file'&&d.file){
   const anchor=form.querySelector('[data-upload="artifact"]')||form.querySelector('.ws-package-import');
@@ -990,6 +990,8 @@ detail=async function(id,tab='intro'){
 // Administrator-published downloads are kept separate from community tool rankings.
 const axCategories={workspace:'AX Workspace',plugin:'플러그인',integration:'연동 도구',other:'기타'};
 let axFiles=[],axFilter='all',axFile=null,axLoadToken=0,axUploadBusy=false,axMaxFileBytes=128*1048576-65536;
+let axVersionTarget=null,axHighlightId=null,axMutationToken=0,axCatalogGeneration=0,axSubscriptionRead=null,axSubscriptionCheckedAt=0,axDownloadTimer=null;
+const axSubscriptionBusy=new Set();
 // A KEY-page link can open this catalog after the first completed bootstrap.
 // The existing navigation/dialog generation preserves any choice made while it loads.
 const axInitialViews=new URLSearchParams(typeof location==='undefined'?'':location.search).getAll('view');
@@ -1005,34 +1007,79 @@ refresh=async function(){
  return result;
 };
 async function loadAxWorkspace(){
- const token=++axLoadToken,result=await requestAPI('/api/ax-workspace');
- if(token!==axLoadToken)return false;
- axFiles=result.files;if(Number.isSafeInteger(result.maxFileBytes)&&result.maxFileBytes>=0)axMaxFileBytes=result.maxFileBytes;return true;
+ const token=++axLoadToken,mutation=axMutationToken,result=await requestAPI('/api/ax-workspace');
+ if(token!==axLoadToken||mutation!==axMutationToken)return false;
+ axFiles=result.files.map(row=>axSubscriptionBusy.has(row.id)?{...row,subscribed:axFiles.find(x=>x.id===row.id)?.subscribed===true}:row);axCatalogGeneration++;
+ if(Number.isSafeInteger(result.maxFileBytes)&&result.maxFileBytes>=0)axMaxFileBytes=result.maxFileBytes;return true;
 }
+function axSubscriptionLabel(row){return icon(row.subscribed?'bell-ring':'bell')+(row.subscribed?' 업데이트 알림 켜짐':' 업데이트 알림 꺼짐');}
+function updateAxSubscriptionControls(){
+ if(state.route!=='ax')return;
+ $$('[data-action="ax-subscription"]').forEach(b=>{const row=axFiles.find(x=>x.id===b.dataset.id);if(!row)return;b.disabled=axSubscriptionBusy.has(row.id);b.setAttribute('aria-pressed',String(row.subscribed===true));b.setAttribute('aria-label',row.name+' 업데이트 알림 '+(row.subscribed?'끄기':'켜기'));b.innerHTML=axSubscriptionLabel(row);});mountIcons();
+}
+async function toggleAxSubscription(id){
+ const row=axFiles.find(x=>x.id===id);if(!row||axSubscriptionBusy.has(id))return;
+ const token=runtime.detailLoadToken;axSubscriptionBusy.add(id);axMutationToken++;updateAxSubscriptionControls();
+ try{const result=await requestAPI(`/api/ax-workspace/${encodeURIComponent(id)}/subscription`,'PUT',{enabled:row.subscribed!==true});
+  if(typeof result.subscribed!=='boolean')throw Error('알림 설정 응답을 확인하지 못했습니다. 목록을 다시 열어 현재 상태를 확인해 주세요.');
+  const current=axFiles.find(x=>x.id===id);if(current)current.subscribed=result.subscribed;
+ }catch(error){if(token===runtime.detailLoadToken&&state.route==='ax')throw error;}
+ finally{axMutationToken++;axSubscriptionBusy.delete(id);updateAxSubscriptionControls();}
+}
+async function refreshAxSubscriptions(force=false){
+ if(state.route!=='ax'||document.hidden||$('#sq-dialog').open||axSubscriptionBusy.size||axSubscriptionRead||(!force&&Date.now()-axSubscriptionCheckedAt<5000))return;
+ const token=runtime.detailLoadToken,generation=axCatalogGeneration,mutation=axMutationToken;
+ const pending=(async()=>{const result=await requestAPI('/api/ax-workspace');
+  if(token!==runtime.detailLoadToken||state.route!=='ax'||generation!==axCatalogGeneration||mutation!==axMutationToken)return;
+  let changed=false;for(const row of result.files||[]){const current=axFiles.find(x=>x.id===row.id);if(current&&typeof row.subscribed==='boolean'&&current.subscribed!==row.subscribed){current.subscribed=row.subscribed;changed=true;}}
+  axSubscriptionCheckedAt=Date.now();if(changed)updateAxSubscriptionControls();
+ })();axSubscriptionRead=pending;try{await pending;}finally{if(axSubscriptionRead===pending)axSubscriptionRead=null;}
+}
+function focusAxWorkspaceFile(){
+ if(!axHighlightId||state.route!=='ax')return;
+ const card=$$('[data-ax-card]').find(x=>x.dataset.axCard===axHighlightId);if(card){card.focus({preventScroll:true});card.scrollIntoView({block:'center',behavior:'auto'});}
+}
+async function showAxWorkspace(id=null){
+ axHighlightId=id===null?null:String(id);if(id!==null)axFilter='all';
+ closeModal();navigate('ax');const token=runtime.detailLoadToken;
+ try{await loadAxWorkspace();if(token===runtime.detailLoadToken&&state.route==='ax'){renderAxWorkspace();focusAxWorkspaceFile();}}
+ catch(error){if(token===runtime.detailLoadToken&&state.route==='ax')throw error;}
+}
+function openAxWorkspaceFile(id){return showAxWorkspace(id);}
 function renderAxWorkspace(){
  const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||x.category===axFilter);
- workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구를 찾아보세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
+ workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구를 찾아보세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card${axHighlightId===String(x.id)?' is-highlighted':''}" data-ax-card="${esc(x.id)}" tabindex="-1"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.updated||x.created)} ${x.release>1?'업데이트':'등록'}</small><a class="sq-primary" href="${esc(x.downloadUrl)}" data-ax-download="${esc(x.id)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div><div class="ws-ax-card-actions">${button('ax-subscription',axSubscriptionLabel(x),'ws-ax-subscription',`data-id="${esc(x.id)}" aria-pressed="${x.subscribed===true}" aria-label="${esc(x.name)} 업데이트 알림 ${x.subscribed?'끄기':'켜기'}" ${axSubscriptionBusy.has(x.id)?'disabled':''}`)}${admin?button('ax-version','새 버전 등록','sq-link',`data-id="${esc(x.id)}"`):''}</div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
  mountIcons();
 }
 function axUploadArea(){
- return `<section class="ws-upload-area" data-ax-drop><div class="ws-drop-zone"><span class="ws-upload-icon">${icon('cloud-upload')}</span><h3>배포할 파일을 여기에 놓으세요</h3><p>ZIP · EXE · MSI · PS1 · MD · 최대 ${fileSize(axMaxFileBytes)}</p><button type="button" class="sq-secondary" data-action="ax-pick">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" id="sq-ax-file" aria-label="AX Workspace 배포 파일 선택" accept=".zip,.exe,.msi,.ps1,.md"></div><div class="ws-selected-files" aria-live="polite">${axFile?`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(axFile.name)}</strong><small>${fileSize(axFile.size)}</small></span>${button('ax-remove',icon('x'),'sq-icon','type="button" aria-label="선택한 파일 취소"')}</div>`:''}</div></section>`;
+ return `<section class="ws-upload-area" data-ax-drop><div class="ws-drop-zone"><span class="ws-upload-icon">${icon('cloud-upload')}</span><h3>배포할 파일을 여기에 놓으세요</h3><p>ZIP · AX 확장 · EXE · MSI · PS1 · MD · 최대 ${fileSize(axMaxFileBytes)}</p><button type="button" class="sq-secondary" data-action="ax-pick">${icon('plus')} 파일 선택</button><input class="sq-sr" type="file" id="sq-ax-file" aria-label="AX Workspace 배포 파일 선택" accept=".zip,.axextension,.exe,.msi,.ps1,.md"></div><div class="ws-selected-files" aria-live="polite">${axFile?`<div class="ws-selected-file">${icon('file')}<span><strong>${esc(axFile.name)}</strong><small>${fileSize(axFile.size)}</small></span>${button('ax-remove',icon('x'),'sq-icon','type="button" aria-label="선택한 파일 취소"')}</div>`:''}</div></section>`;
 }
 function chooseAxFile(files){
+ if(axUploadBusy)return;
  if(!files.length)return;
- if(files.length!==1||!files[0].size||files[0].size>axMaxFileBytes||!(/\.(zip|exe|msi|ps1|md)$/i.test(files[0].name)))throw Error(`ZIP·EXE·MSI·PS1·MD 파일을 하나 선택하세요. 빈 파일은 등록할 수 없고 최대 ${fileSize(axMaxFileBytes)}입니다.`);
+ if(files.length!==1||!files[0].size||files[0].size>axMaxFileBytes||!(/\.(zip|axextension|exe|msi|ps1|md)$/i.test(files[0].name)))throw Error(`ZIP·AX 확장(.axextension)·EXE·MSI·PS1·MD 파일을 하나 선택하세요. 빈 파일은 등록할 수 없고 최대 ${fileSize(axMaxFileBytes)}입니다.`);
  axFile=files[0];refreshAxFile();
 }
 function refreshAxFile(){const area=$('[data-ax-drop]');if(area){area.outerHTML=axUploadArea();mountIcons();}}
 Object.assign(actions,{
- 'ax-workspace':async()=>{closeModal();navigate('ax');const token=runtime.detailLoadToken;try{await loadAxWorkspace();if(token===runtime.detailLoadToken&&state.route==='ax')renderAxWorkspace();}catch(error){if(token===runtime.detailLoadToken&&state.route==='ax')throw error;}},
+ 'ax-workspace':()=>showAxWorkspace(),
  'ax-filter':b=>{axFilter=b.dataset.category;renderAxWorkspace();},
- 'ax-register':()=>{
-  if(server.user.role!=='admin')return;axFile=null;
-  openModal('배포 파일 등록','AX Workspace · 관리자',`<form id="sq-ax-form"><div class="sq-form-grid"><label class="sq-field wide"><span>이름 *</span><input name="name" maxlength="100" required placeholder="예: AX Workspace Windows 설치 파일"></label><label class="sq-field wide"><span>설명 *</span><textarea name="description" maxlength="2000" required placeholder="어떤 파일인지, 설치 전에 알아둘 내용을 적어주세요."></textarea></label><label class="sq-field"><span>분류</span><select name="category">${Object.entries(axCategories).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label><label class="sq-field"><span>배포 버전 *</span><input name="version" required maxlength="40" placeholder="예: 1.0.0"></label></div>${axUploadArea()}<p class="sq-note">등록하면 사내 사용자가 바로 내려받을 수 있습니다. 선택한 파일 형식 그대로 배포됩니다.</p><div class="sq-actions"><button class="sq-primary">파일 등록</button></div></form>`);
- },
+ 'ax-register':()=>openAxUpload(),
+ 'ax-version':b=>openAxUpload(b.dataset.id),
+ 'ax-subscription':b=>toggleAxSubscription(b.dataset.id),
  'ax-pick':()=>$('#sq-ax-file')?.click(),
  'ax-remove':()=>{if(!axUploadBusy){axFile=null;refreshAxFile();}}
 });
+function openAxUpload(id=null){
+ if(server.user.role!=='admin'||axUploadBusy)return;
+ const item=id===null?null:axFiles.find(x=>x.id===id);if(id!==null&&!item)return;
+ axFile=null;axVersionTarget=item?{id:item.id,revision:item.revision||1}:null;
+ openModal(item?'새 버전 등록':'배포 파일 등록','AX Workspace · 관리자',`<form id="sq-ax-form"><div class="sq-form-grid"><label class="sq-field wide"><span>이름 *</span><input name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="예: AX Workspace Windows 설치 파일"></label><label class="sq-field wide"><span>설명 *</span><textarea name="description" maxlength="2000" required placeholder="어떤 파일인지, 설치 전에 알아둘 내용을 적어주세요.">${esc(item?.description||'')}</textarea></label><label class="sq-field"><span>분류</span><select name="category">${Object.entries(axCategories).map(([key,label])=>`<option value="${key}" ${item?.category===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="sq-field"><span>${item?'새 배포 버전':'배포 버전'} *</span><input name="version" required maxlength="40" placeholder="${item?esc('현재 '+(item.version||'버전 미입력')+' · 예: 1.1.0'):'예: 1.0.0'}"></label></div>${axUploadArea()}<p class="sq-note">${item?'기존 카드의 파일을 새 버전으로 바꾸고, 업데이트 알림을 켠 사용자에게 소식을 전합니다.':'등록하면 사내 사용자가 바로 내려받을 수 있습니다. 선택한 파일 형식 그대로 배포됩니다.'}</p><div class="sq-actions"><button class="sq-primary">${item?'새 버전 등록':'파일 등록'}</button></div></form>`);
+}
+// Keep browser streaming downloads intact. Only a later API read confirms auto-subscription.
+root.addEventListener('click',e=>{if(!e.target.closest('a[data-ax-download]'))return;clearTimeout(axDownloadTimer);axDownloadTimer=setTimeout(()=>refreshAxSubscriptions(true).catch(()=>{}),1500);});
+window.addEventListener('focus',()=>refreshAxSubscriptions().catch(()=>{}));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshAxSubscriptions().catch(()=>{});});
 root.addEventListener('change',e=>{if(e.target.id!=='sq-ax-file')return;try{chooseAxFile([...e.target.files]);}catch(error){e.target.value='';showError(error);}});
 for(const type of ['dragenter','dragover','dragleave','drop'])root.addEventListener(type,e=>{
  const area=e.target.closest('[data-ax-drop]');if(!area)return;e.preventDefault();if(axUploadBusy)return;
@@ -1043,13 +1090,14 @@ root.addEventListener('submit',e=>{
  const form=e.target;if(form.id!=='sq-ax-form')return;e.preventDefault();e.stopImmediatePropagation();
  if(axUploadBusy||form.dataset.saved)return;
  if(!axFile){showError(Error('등록할 파일을 선택해 주세요.'));return;}
- const token=runtime.detailLoadToken,body=new FormData();let errorToken=token;body.append('metadata',JSON.stringify(Object.fromEntries(new FormData(form))));body.append('file',axFile);
+ const token=runtime.detailLoadToken,target=axVersionTarget,body=new FormData(),metadata=Object.fromEntries(new FormData(form));let errorToken=token;
+ if(target)metadata.expectedRevision=target.revision;body.append('metadata',JSON.stringify(metadata));body.append('file',axFile);
  axUploadBusy=true;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=true);
  (async()=>{
-  await requestAPI('/api/ax-workspace','POST',body);form.dataset.saved='true';
+  await requestAPI(target?`/api/ax-workspace/${encodeURIComponent(target.id)}/versions`:'/api/ax-workspace','POST',body);form.dataset.saved='true';
   if(token!==runtime.detailLoadToken)return;
   axFile=null;axFilter='all';closeModal();navigate('ax');const listToken=runtime.detailLoadToken;errorToken=listToken;
-  await afterWorkspaceSave(async()=>{await loadAxWorkspace();if(listToken===runtime.detailLoadToken&&state.route==='ax'){renderAxWorkspace();announce('배포 파일을 등록했습니다.');}},form);
+  await afterWorkspaceSave(async()=>{await loadAxWorkspace();if(listToken===runtime.detailLoadToken&&state.route==='ax'){renderAxWorkspace();announce(target?'새 버전을 등록했습니다.':'배포 파일을 등록했습니다.');}},form);
  })().catch(error=>{if(errorToken===runtime.detailLoadToken)showError(error);}).finally(()=>{axUploadBusy=false;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=!!form.dataset.saved);});
 },true);
 

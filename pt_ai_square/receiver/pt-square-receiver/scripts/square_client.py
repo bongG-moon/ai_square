@@ -130,7 +130,7 @@ class Client:
         # Never use an untrusted filename as a filesystem path (including ADS).
         original = manifest.get('filename', '')
         suffix = Path(original).suffix.lower() if isinstance(original, str) else ''
-        if suffix not in {'.zip', '.exe', '.msi', '.ps1', '.md'}:
+        if suffix not in {'.zip', '.axextension', '.exe', '.msi', '.ps1', '.md'}:
             suffix = '.bin'
         folder = Path(output).expanduser().resolve()
         folder.mkdir(parents=True, exist_ok=True)

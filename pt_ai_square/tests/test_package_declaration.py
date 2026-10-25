@@ -31,33 +31,39 @@ def bundle(raw=None,missing=None,manifest_path='ai-square.json'):
     return b.getvalue()
 
 
-def post(c,h,blob,url='/api/tools',**extra):
+def post(c,h,blob,url='/api/tools',file_name='tool.zip',**extra):
     meta=dict(org='공통',category='공통 업무',owner='등록자',approval=False,mode='file')
     meta.update(extra)
-    return c.post(url,headers=h,data={'metadata':json.dumps(meta),'artifact':(io.BytesIO(blob),'tool.zip')})
+    return c.post(url,headers=h,data={'metadata':json.dumps(meta),'artifact':(io.BytesIO(blob),file_name)})
 
 
-def test_inspect_publish_original_bytes_versions_and_rollback(app):
+@pytest.mark.parametrize('file_name', ['tool.zip', 'PNT-AI-Square.axextension'])
+def test_inspect_publish_original_bytes_versions_and_rollback(app,file_name):
     c,h=ready(app);v1=bundle()
     before=list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
-    inspected=c.post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(v1),'tool.zip')})
+    inspected=c.post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(v1),file_name)})
     assert inspected.status_code==200 and inspected.json['recognized']
     assert inspected.json['metadata']['guide']=='압축을 풀고 Python 환경을 준비하세요.'
     assert inspected.json['sha256']==hashlib.sha256(v1).hexdigest()
     assert list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())==before
     with app.app_context():assert db().tools.count_documents({})==0
-    published=post(c,h,v1);assert published.status_code==201,published.json
+    published=post(c,h,v1,file_name=file_name);assert published.status_code==201,published.json
     tid=published.json['id'];url=published.json['deploymentUrl']
     info=c.get(url);assert info.status_code==200
     assert info.json['toolId']==tid and info.json['release']==1
     assert info.json['package']['entryPoint']=='main.py'
     assert info.json['managedInstall'] is False
+    assert info.json['filename']==file_name
+    assert info.json['installProfile'] is None
     assert 'attachment;' in info.headers['Content-Disposition']
-    assert c.get(info.json['downloadUrl']).data==v1
+    downloaded=c.get(info.json['downloadUrl'])
+    assert downloaded.data==v1
+    assert file_name in downloaded.headers['Content-Disposition']
+    downloaded.close()
     assert c.get(info.json['versionCheckUrl']).json['status']=='current'
     updated=declaration();updated.update(changes='두 번째',entryPoint='requirements.txt')
     v2=bundle(updated)
-    result=post(c,h,v2,f'/api/tools/{tid}/versions',expectedRevision=1)
+    result=post(c,h,v2,f'/api/tools/{tid}/versions',file_name=file_name,expectedRevision=1)
     assert result.status_code==201,result.json
     assert c.get(result.json['deploymentUrl']).json['release']==2
     assert c.get(f'/api/tools/{tid}/manifest').json['package']['entryPoint']=='requirements.txt'
@@ -70,7 +76,8 @@ def test_inspect_publish_original_bytes_versions_and_rollback(app):
 
 
 @pytest.mark.parametrize('case',['missing','path','nested','schema','duplicate','unknown','wrong-kind','empty-guide'])
-def test_invalid_declaration_warns_but_manual_publish_succeeds(app,case):
+@pytest.mark.parametrize('file_name',['tool.zip','tool.axextension'])
+def test_invalid_declaration_warns_but_manual_publish_succeeds(app,case,file_name):
     c,h=ready(app);raw=declaration()
     if case=='path':raw['entryPoint']='../private.py'
     if case=='schema':raw['schemaVersion']=2
@@ -88,11 +95,11 @@ def test_invalid_declaration_warns_but_manual_publish_succeeds(app,case):
                 z.writestr('ai-square.json',json.dumps(raw));z.writestr('EMPTY.md','')
                 z.writestr('main.py','x');z.writestr('requirements.txt','x')
         blob=b.getvalue()
-    result=post(c,h,blob,'/api/packages/inspect')
+    result=post(c,h,blob,'/api/packages/inspect',file_name=file_name)
     assert result.status_code==200 and not result.json['recognized'],(case,result.json)
     assert result.json['warning']
     assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
-    result=post(c,h,blob,name='직접 작성',desc='수동 등록',platform='Claude',type='Skill',guide='수동 설치 안내')
+    result=post(c,h,blob,file_name=file_name,name='직접 작성',desc='수동 등록',platform='Claude',type='Skill',guide='수동 설치 안내')
     assert result.status_code==201 and result.json['packageWarning'],(case,result.json)
     assert c.get(f'/download/{result.json["id"]}/1').data==blob
     with app.app_context():assert db().tools.count_documents({})==1

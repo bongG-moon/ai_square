@@ -5,12 +5,12 @@
 ## 공개 배포 ZIP과 운영자 준비 순서
 
 - **ai-square-2026.10.25-source.zip**: 플랫폼과 확장 개발 소스입니다. 기존 운영 설정·MongoDB·업로드 저장소를 유지한 채 웹 소스를 교체합니다.
-- **PNT-AI-Square-0.1.0-Distribution.zip**: 서버 주소가 없는 공개 배포 준비 묶음입니다. 확장 template과 독립 설정 도우미를 포함하며 설치 EXE가 없습니다. 운영자가 서버 주소를 지정해 만든 **PNT-AI-Square-0.1.0-Extension.zip**을 웹의 AX Workspace 탭에 직접 등록합니다. 사용자는 완성된 Extension ZIP을 받아 공통 앱에서 가져온 후 개인 KEY를 입력합니다.
+- **PNT-AI-Square-0.1.0-Distribution.zip**: 서버 주소가 없는 공개 배포 준비 묶음입니다. 확장 template과 독립 설정 도우미를 포함하며 설치 EXE가 없습니다. 운영자가 서버 주소를 지정해 만든 **PNT-AI-Square-0.1.0.axextension**을 웹의 AX Workspace 탭에 직접 등록합니다. 사용자는 완성된 확장 파일을 더블클릭하고 앱의 설치 확인창에서 설치한 뒤 개인 KEY를 입력합니다.
 - **SHA256SUMS.txt**: 두 공개 배포 파일의 검증용 SHA-256입니다.
 
-Distribution ZIP의 README에 따라 서버 주소를 지정하세요. 웹은 업로드된 ZIP을 그대로 제공하며 주소를 자동 삽입하지 않습니다. 서버 주소를 포함한 Extension ZIP은 사내 공유 대상으로 보관하고 공개 GitHub에 올리지 않습니다. 기존 확장 설치 EXE 자산은 이번 릴리즈에서 ZIP 방식으로 대체합니다.
+Distribution ZIP을 푼 뒤 `configure_server.py` 상단의 `SERVER_URL`을 수정하고 `python configure_server.py`를 실행하세요. 기본 출력은 `.axextension` 파일이며, 사용자는 Python을 실행하거나 압축을 풀지 않습니다. 웹은 업로드된 파일을 그대로 제공하며 주소를 자동 삽입하지 않습니다. 서버 주소를 포함한 확장 파일은 사내 공유 대상으로 보관하고 공개 GitHub에 올리지 않습니다. 기존 확장 설치 EXE 자산은 검증 가능한 ZIP 컨테이너 방식으로 대체합니다.
 
-공통 앱의 사내 GitLab 배포에는 [workspace-local-0.23.32-source.zip](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/workspace-local-0.23.32-source.zip)을 사용합니다. PC 설치에는 [AX Workspace 0.23.32 설치 파일](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/AX-Workspace-0.23.32-Setup.exe)을 사용합니다. 이전 동일 버전에는 확장 ZIP 가져오기 메뉴가 없을 수 있습니다.
+공통 앱의 사내 GitLab 배포에는 [workspace-local-0.23.32-source.zip](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/workspace-local-0.23.32-source.zip)을 사용합니다. PC 설치에는 [AX Workspace 0.23.32 설치 파일](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/AX-Workspace-0.23.32-Setup.exe)을 사용합니다. 이전 동일 버전에는 `.axextension` 파일 연결이 없을 수 있으므로 이번 Setup으로 한 번 갱신해야 합니다.
 
 ## 최신 웹 배포 정책
 
@@ -20,9 +20,15 @@ KEY 페이지의 Skill 연결 안내는 제거했습니다. 배포 Skill 자체�
 
 등록된 파일은 원본 그대로 전달합니다. 프로그램이 설치 EXE와 `connection.json`을 함께 요구하면 **배포자가** 완성된 ZIP에 넣어 등록해야 합니다. 웹이 EXE를 추가하거나 서버 주소를 주입하지 않습니다. `organization-store/` 개발 소스는 보존하며 프로그램이 완성되면 관리자가 원하는 분류로 등록합니다.
 
-P&T AI Square의 최신 선택 확장은 **EXE가 없는 별도 확장 ZIP**으로 준비합니다. 배포자가 서버 주소를 지정해 패키징한 파일을 AX Workspace 자료실에 직접 등록하고, 사용자는 ZIP 가져오기를 지원하는 공통 앱의 **설정 → 추가 기능 → 확장 ZIP 가져오기**로 설치한 뒤 개인 KEY를 입력합니다. 예전 0.23.32에는 가져오기 메뉴가 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다. 사내 주소를 넣은 배포 ZIP은 공개 Git에 올리지 않습니다. 구형 `StoreInstaller.exe`를 포함하지 않는 것과 V3의 안전 판정은 별개이며 실제 사내 환경 확인이 필요합니다.
+P&T AI Square의 최신 선택 확장은 **별도 설치 EXE가 없는 `.axextension` 파일**로 준비합니다. 이 파일의 내부 형식은 ZIP이며 웹은 기존 ZIP과 같은 크기·경로·선언 검사를 적용합니다. 배포자가 서버 주소를 지정해 패키징한 파일을 AX Workspace 자료실에 직접 등록하고, 사용자는 파일을 더블클릭해 열린 공통 앱의 확인창에서 설치한 뒤 개인 KEY를 입력합니다. 기존 ZIP은 설정의 **추가 기능 → 확장 ZIP 가져오기**에서도 설치할 수 있습니다. 예전 0.23.32에는 파일 연결이 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다. 사내 주소를 넣은 확장 파일은 공개 Git에 올리지 않습니다. 구형 `StoreInstaller.exe`를 포함하지 않는 것과 V3의 안전 판정은 별개이며 실제 사내 환경 확인이 필요합니다. MCP/스토어에서 이 파일을 받을 때도 원본 확장자를 유지하고, Claude Skill/MCP로 자동 설치하지 않습니다.
 
 기존 `/local-access/workspace-extension.zip`과 `/static/guides/ax-workspace-extension-setup.exe` 링크는 로그인 후 AX Workspace 탭(`/?view=ax`)으로 이동합니다. 최신 웹 소스에는 해당 고정 EXE가 포함되지 않습니다. 코드 교체 시 기존 `runtime_config.py`, MongoDB 데이터와 업로드 저장소는 유지합니다. 이미 등록한 AX 자료와 사용자의 설치 프로그램을 자동 교체하지 않습니다.
+
+## AX Workspace 새 버전 알림
+
+AX 카드에서 파일을 다운로드하면 사번별 업데이트 알림을 자동 구독합니다. 카드에서 알림을 직접 켜거나 끌 수 있으며, 끈 뒤 다시 다운로드해도 해제 상태를 유지합니다. 관리자는 기존 카드의 **새 버전 등록**으로 같은 프로그램을 갱신합니다. 기존 ID와 이전 파일을 유지하고 동시 변경·중복 버전을 검사하며, 독립된 파일 등록은 별도 카드로 구분합니다.
+
+버전과 알림 outbox를 함께 저장하고 후속 알림 전달 실패는 재시도합니다. 웹 종 알림을 누르면 해당 AX 카드로 이동하며, 화면이 보이는 동안 약 30초마다 조회합니다. OS·CUBE 푸시나 PC 파일 자동 교체는 제공하지 않고 일반 도구의 다운로드 순위에도 합산하지 않습니다. 기존 AX 다운로드 이력은 추정할 수 없으므로 이전 사용자는 다시 받거나 카드에서 알림을 켜야 합니다. `workspace_subscriptions` 컬렉션·인덱스는 자동 준비하며 운영 설정·기존 DB·업로드 초기화는 필요하지 않습니다.
 
 ## 운영 서버 설정
 
