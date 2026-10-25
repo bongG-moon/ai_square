@@ -27,7 +27,7 @@ const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
           window.requests.push(m);
           let result = {};
           if (m.action === 'status') result = status;
-          if (m.action === 'connect') { status = { ...status, configured: true, baseUrl: m.payload.url }; result = status; }
+          if (m.action === 'connect') { status = { ...status, configured: true, baseUrl: m.payload.url || status.baseUrl }; result = status; }
           if (m.action === 'options') result = { organizations: [] };
           if (m.action === 'catalog') result = { items: [], total: 0 };
           window.postMessage({ type: 'ax-extension-response', channel: m.channel, requestId: m.requestId, ok: true, result }, '*');
@@ -81,7 +81,16 @@ const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
     assert.equal(await page.locator('#server-url').isEditable(), true);
     assert.equal(await page.locator('#change-server').isVisible(), false);
     assert.match(await page.locator('#server-help').innerText(), /직접 입력/);
+    await fixture({ configured: false, baseUrl: 'https://saved.example.test', existingConnectionAvailable: true });
+    await page.getByRole('button',{name:'저장된 플랫폼 연결 사용',exact:true}).waitFor();
+    assert.match(await page.locator('#reuse-help').innerText(), /MCP를 새로 설치하거나 실행하지 않습니다/);
+    await page.getByRole('button',{name:'저장된 플랫폼 연결 사용',exact:true}).click();
+    await page.locator('#catalog-view').waitFor({state:'visible'});
+    assert.deepEqual(await page.evaluate(()=>requests.find(r=>r.action==='connect').payload),{reuseExisting:true});
     assert.deepEqual(errors, []);
     console.log('PASS: preset KEY-only form, HTTP consent, manual switch clears KEY, saved connection precedence, invalid-preset fallback.');
-  } finally { await browser.close(); await server.close(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+  } finally {
+    if(process.platform==='win32')require('node:child_process').spawnSync('taskkill.exe',['/PID',String(server.process().pid),'/T','/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
+    await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,3000))]);
+  }
+})().then(()=>process.exit(0),error=>{console.error(error);process.exit(1);});

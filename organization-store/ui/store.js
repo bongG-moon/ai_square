@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; };
   const button = (text, cls, fn) => { const n = el('button', cls, text); n.type = 'button'; n.addEventListener('click', () => busy(n, fn)); return n; };
-  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null };
+  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null };
   function feedback(message, error = false) {
     for (const id of ['feedback', ...($('detail-dialog').open ? ['detail-feedback'] : [])]) { $(id).textContent = message || ''; $(id).hidden = !message; $(id).classList.toggle('error', error); }
     if (error) document.querySelectorAll('.loading').forEach(n => { n.textContent = '불러오지 못했어요. 연결 설정을 확인하거나 다시 시도해 주세요.'; });
@@ -24,7 +24,7 @@
     if (event.source !== parent || !event.data || typeof event.data !== 'object') return;
     const message = event.data;
     if (message.type === 'ax-extension-init' && !state.channel && typeof message.channel === 'string') {
-      state.channel = message.channel; state.context = message.context || {};
+      state.channel = message.channel; state.context = message.context || {}; state.hostFeatures = Array.isArray(message.hostFeatures) ? message.hostFeatures : [];
       document.documentElement.dataset.theme = message.theme === 'dark' ? 'dark' : 'light';
       $('workspace-context').textContent = state.context.workspace ? `현재 업무: ${state.context.title || state.context.workspace}` : '전체 공간(내 계정) 또는 선택한 폴더에 설치할 수 있어요.';
       initialize().catch(e => { connectionView(); feedback(e.message, true); }); return;
@@ -57,9 +57,9 @@
     httpConsent();
   }
   async function initialize() {
-    const result = await rpc('status'); state.connected = result.configured; state.baseUrl = result.baseUrl || '';
-    connectionFields(result); $('reuse-connection').hidden = !result.existingConnectionAvailable;
-    $('connection-button').hidden = !state.connected;
+    publication.loaded=false; const result = await rpc('status'); state.connected = result.configured; state.baseUrl = result.baseUrl || '';
+    connectionFields(result); $('reuse-connection').hidden = !result.existingConnectionAvailable; $('reuse-help').hidden = !result.existingConnectionAvailable;
+    $('connection-button').hidden = !state.connected; $('publish-open').hidden = !state.connected;
     if (!state.connected) return connectionView();
     $('connection-label').textContent = new URL(state.baseUrl).hostname;
     $('connection-button').title = '연결 설정 · ' + state.baseUrl;
@@ -84,7 +84,7 @@
   $('connection-form').addEventListener('submit', event => event.preventDefault());
   $('connection-form').addEventListener('keydown', event => { if (event.key === 'Enter' && event.target.matches('input:not([type=checkbox])')) connect(event); });
   $('key-guide').addEventListener('click', () => busy($('key-guide'), async () => rpc('host.openExternal', { url: normalUrl() + '/local-access' })));
-  $('reuse-connection').addEventListener('click', () => busy($('reuse-connection'), async () => { await rpc('connect', { reuseExisting: true }); feedback('기존 플랫폼 연결을 사용합니다. 기존 MCP 설정은 유지됩니다.'); await initialize(); }));
+  $('reuse-connection').addEventListener('click', () => busy($('reuse-connection'), async () => { await rpc('connect', { reuseExisting: true }); feedback('저장된 주소와 KEY로 플랫폼에 연결했어요. MCP를 새로 설치하거나 실행하지 않았습니다.'); await initialize(); }));
   $('connection-button').addEventListener('click', connectionView);
   $('connection-cancel').addEventListener('click', () => loadTab(state.tab).catch(e => feedback(e.message, true)));
   $('disconnect').addEventListener('click', () => busy($('disconnect'), async () => {
@@ -95,7 +95,7 @@
     return new Promise(resolve => {
       const dialog = $('confirm-dialog'); $('confirm-title').textContent = title; $('confirm-content').replaceChildren(...nodes); $('confirm-yes').textContent = label;
       const validate = () => { $('confirm-yes').disabled = !ready(); };
-      const finish = value => { dialog.close(); $('confirm-yes').onclick = null; $('confirm-no').onclick = null; dialog.oncancel = null; dialog.onchange = null; $('confirm-yes').disabled = false; resolve(value); };
+      const finish = value => { openFilter?.close(false); dialog.close(); $('confirm-yes').onclick = null; $('confirm-no').onclick = null; dialog.oncancel = null; dialog.onchange = null; $('confirm-yes').disabled = false; resolve(value); };
       $('confirm-yes').onclick = () => { if (ready()) finish(true); }; $('confirm-no').onclick = () => finish(false); dialog.oncancel = event => { event.preventDefault(); finish(false); }; dialog.onchange=validate; validate(); dialog.showModal(); $('confirm-no').focus();
     });
   }
@@ -251,8 +251,8 @@
       if (gated) panel.append(section('사용 권한 확인',item.access==='pending'?'사용 신청을 검토 중입니다. 웹에서 신청 상태를 확인해 주세요.':'이 기능은 사용 승인이 필요합니다. 웹에서 담당자에게 사용 권한을 신청해 주세요.'));
       if (item.environment || item.platform) panel.append(section('실행 환경',item.environment || item.platform));
       const actions=el('div','detail-actions');
-      if (!gated && result.canInstall) actions.append(button('설치하기','primary',()=>prepare(item.id)));
-      if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드',result.canInstall?'secondary':'primary',()=>downloadDetail(result)));
+      if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(button(result.canInstall?'앱에서 설치':'ZIP 설치 내용 확인','primary',()=>prepare(item.id)));
+      if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드',result.canInstall||result.canInspectInstall?'secondary':'primary',()=>downloadDetail(result)));
       if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기 ↗','text-button',()=>rpc('host.openExternal',{url:result.webUrl})));
       panel.append(actions,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
       if (item.guide) panel.append(section('등록자가 제공한 안내',item.guide));
@@ -315,28 +315,63 @@
   async function prepare(toolId) {
     const choices = el('div', 'scope-choices');
     const scopes = state.detail?.manifest?.installProfile?.scopes || ['project','user'];
-    let directory = null;
-    for (const [value, title, description] of [['user', '전체 공간(내 계정)', '내 Windows 계정에서 여는 여러 업무에 공통으로 적용합니다. 다른 사용자 계정에는 설치하지 않습니다.'], ['project', '현재 업무 폴더', state.context.workspace || '선택된 업무 폴더가 없습니다. 아래에서 다른 폴더를 선택할 수 있어요.'], ['directory','특정 폴더 선택','선택한 폴더의 업무에만 적용합니다. 앱의 현재 업무 폴더는 바뀌지 않습니다.']]) {
-      const supported = scopes.includes(value==='directory'?'project':value);
-      const option=el('div','scope-option'),label = el('label', 'scope-choice'); const input = el('input'); input.type = 'radio'; input.name = 'install-scope'; input.value = value; input.disabled = !supported || value === 'project' && !state.context.workspace;
-      const text = el('span'); text.append(el('strong', '', title), el('small', 'muted', supported ? description : '이 기능은 해당 설치 범위를 지원하지 않습니다.')); label.append(input, text); option.append(label);
-      if (value==='directory' && supported) {
-        const path=el('p','selected-directory','아직 선택한 폴더가 없습니다.'),pick=button('폴더 선택','secondary directory-pick',async()=>{
-          const selected=await rpc('host.pickDirectory'); if(selected.cancelled)return;
-          directory=selected;input.checked=true;path.textContent=selected.path;path.title=selected.path;choices.dispatchEvent(new Event('change',{bubbles:true}));
-        });option.append(pick,path);
-      }
-      choices.append(option);
+    let directory = null, works = [], workError = '';
+    if (scopes.includes('project') && state.hostFeatures.includes('workspaces')) {
+      try {
+        const result = await rpc('host.listWorkspaces');
+        works = Array.isArray(result.items) ? result.items : [];
+      } catch (error) { workError = error.message || '업무 목록을 불러오지 못했어요. 다시 시도하거나 폴더를 직접 선택하세요.'; }
     }
-    if (!await confirm('어디에서 사용할까요?', [choices, el('p', 'muted', '설치할 공간을 선택하세요. 다음 화면에서 실제 파일·설정 변경 경로를 확인합니다.')], '설치 내용 확인', () => {const scope=choices.querySelector('input:checked')?.value;return !!scope&&(scope!=='directory'||!!directory?.directoryToken);})) return;
-    const scope = choices.querySelector('input:checked')?.value; if (!scope) { feedback('설치 위치를 선택한 뒤 다시 진행해 주세요.', true); return; }
+    function scopeOption(value, title, description, supported) {
+      const option = el('div','scope-option'), label = el('label','scope-choice'), input = el('input');
+      input.type='radio'; input.name='install-scope'; input.value=value; input.disabled=!supported;
+      const text=el('span'); text.append(el('strong','',title),el('small','muted',description));label.append(input,text);option.append(label);return {option,input};
+    }
+    const common=scopeOption('user','공통으로 사용 (내 계정)',scopes.includes('user') ? '내 Windows 계정의 모든 업무에서 사용합니다. 다른 사용자 계정에는 설치하지 않습니다.' : '이 기능은 공통 설치를 지원하지 않습니다.',scopes.includes('user'));
+    choices.append(common.option);
+    const canChooseWork=scopes.includes('project')&&works.length>0;
+    const workDescription=!scopes.includes('project') ? '이 기능은 업무별 설치를 지원하지 않습니다.' : !state.hostFeatures.includes('workspaces') ? '업무 목록에서 선택하려면 AX Workspace를 업데이트해 주세요. 아래에서 폴더를 직접 선택할 수도 있어요.' : workError || (works.length ? '선택한 업무의 폴더에 설치합니다. 현재 대화와 작성 중인 내용은 유지됩니다.' : '등록된 업무가 없습니다. 새 업무를 만들거나 아래에서 폴더를 직접 선택하세요.');
+    const work=scopeOption('work','업무를 선택해 사용',workDescription,canChooseWork);
+    let workSelect;
+    if (canChooseWork) {
+      workSelect=el('select');workSelect.id='install-workspace';workSelect.setAttribute('aria-label','설치할 업무');
+      for(const item of works){const option=new Option(item.title || '이름 없는 업무',item.id);option.dataset.description=item.workspace;workSelect.append(option);}
+      const current=works.find(item=>item.workspace===state.context.workspace);if(current)workSelect.value=current.id;
+      const selectedPath=el('p','selected-directory');
+      const updateWork=()=>{const selected=works.find(item=>item.id===workSelect.value);selectedPath.textContent=selected?.workspace||'';selectedPath.title=selected?.workspace||'';};
+      workSelect.addEventListener('change',()=>{work.input.checked=true;updateWork();choices.dispatchEvent(new Event('change',{bubbles:true}));});
+      work.option.append(workSelect,selectedPath);filterSelect(workSelect);updateWork();
+    }
+    choices.append(work.option);
+    if(scopes.includes('project')){
+      const more=el('details','scope-more'),summary=el('summary','','목록에 없는 폴더에 설치');
+      const other=scopeOption('directory','다른 폴더 선택','선택한 폴더에만 적용합니다. 앱의 업무 목록이나 현재 폴더를 바꾸지 않습니다.',true);
+      const path=el('p','selected-directory','아직 선택한 폴더가 없습니다.');
+      const pick=button('폴더 선택','secondary directory-pick',async()=>{
+        const selected=await rpc('host.pickDirectory');if(selected.cancelled)return;
+        directory=selected;other.input.checked=true;path.textContent=selected.path;path.title=selected.path;choices.dispatchEvent(new Event('change',{bubbles:true}));
+      });
+      other.option.append(pick,path);more.append(summary,other.option);choices.append(more);
+    }
+    const ready=()=>{const value=choices.querySelector('input:checked')?.value;return value==='user'||value==='work'&&!!workSelect?.value||value==='directory'&&!!directory?.directoryToken;};
+    if (!await confirm('어디에서 사용할까요?', [choices, el('p', 'muted', '설치할 공간을 선택하세요. 다음 화면에서 실제 파일·설정 변경 경로를 확인합니다.')], '설치 내용 확인', ready)) return;
+    const choice=choices.querySelector('input:checked')?.value;
+    let targetLabel='공통 (내 계정)';
+    if(choice==='work'){
+      directory=await rpc('host.selectWorkspace',{sessionId:workSelect.value});
+      if(directory.cancelled || !directory.directoryToken)throw Error('설치할 업무를 다시 선택해 주세요.');
+      targetLabel=directory.title || works.find(item=>item.id===workSelect.value)?.title || '선택한 업무';
+    }else if(choice==='directory'){targetLabel='선택한 폴더';}
+    const scope=choice==='user'?'user':'directory';
     const directoryFields=scope==='directory'?{directoryToken:directory.directoryToken}:{};
     feedback('설치할 파일과 변경 위치를 확인하고 있어요…');
     const plan = await rpc('prepareInstall', { toolId, scope, ...directoryFields }); if (!plan.canInstall) { feedback(plan.reason || plan.notice || '자동 설치를 지원하지 않는 항목입니다. 웹의 설치 안내를 확인해 주세요.', true); return; }
-    const details = el('dl', 'plan-summary'); for (const [name, value] of [['설치 범위', {user:'전체 공간(내 계정)',project:'현재 업무 폴더',directory:'선택한 특정 폴더'}[scope]], ['설치 위치', plan.destination || plan.scopeDir], ['설치 버전', plan.release || plan.releaseId || '플랫폼의 현재 배포 버전']]) { details.append(el('dt', '', name), el('dd', '', value)); }
+    const details = el('dl', 'plan-summary'); for (const [name, value] of [['설치 대상', targetLabel], ['설치 위치', plan.destination || plan.scopeDir], ['설치 버전', plan.release || plan.releaseId || '플랫폼의 현재 배포 버전']]) { details.append(el('dt', '', name), el('dd', '', value)); }
     if (plan.configurationFile) details.append(el('dt', '', '변경할 설정'), el('dd', '', plan.configurationFile));
     if (Array.isArray(plan.command)) details.append(el('dt', '', '다음 Claude 연결에서 실행할 명령'), el('dd', '', plan.command.join(' ')));
-    if (!await confirm('이 내용으로 설치할까요?', [details, el('p', 'muted', '파일과 설정을 설치합니다. 진행 중인 대화는 유지하며, Claude 연결은 자동으로 재시작하지 않습니다.')], '설치하기')) { feedback('설치를 취소했어요.'); return; }
+    const notes=[details];if(plan.detectionNotice)notes.push(el('p','detail-callout',plan.detectionNotice));
+    notes.push(el('p', 'muted', '파일과 설정을 설치합니다. 진행 중인 대화는 유지하며, Claude 연결은 자동으로 재시작하지 않습니다.'));
+    if (!await confirm('이 내용으로 설치할까요?', notes, '설치하기')) { feedback('설치를 취소했어요.'); return; }
     feedback('설치 중입니다. 완료 결과가 나올 때까지 기다려 주세요.');
     const installed = await rpc('install', { planId: plan.planId, approvalDigest: plan.approvalDigest, confirmed: true, ...directoryFields });
     feedback(installed.notice || (installed.status === 'configured' ? 'MCP 연결 설정을 저장했어요. 작업이 끝난 뒤 Claude를 다시 연결해 실제 동작을 확인하세요.' : '설치가 완료됐어요. 작업이 끝난 뒤 해당 업무의 Claude 연결을 다시 시작하면 기능을 확인할 수 있어요.')); await loadTab('installed');
@@ -348,15 +383,35 @@
     const wrap = el('div', 'filter-select'), trigger = el('button', 'filter-trigger'); trigger.type = 'button';
     trigger.setAttribute('aria-label', select.getAttribute('aria-label')); trigger.setAttribute('aria-haspopup','listbox'); trigger.setAttribute('aria-expanded','false');
     const menu = el('div','filter-menu'); menu.id=select.id+'-menu'; menu.setAttribute('role','listbox'); menu.setAttribute('aria-label',select.getAttribute('aria-label')); menu.hidden=true; trigger.setAttribute('aria-controls',menu.id);
-    const update = () => { trigger.textContent = select.selectedOptions[0]?.textContent || ''; };
+    const update = () => { trigger.textContent = select.selectedOptions[0]?.textContent || ''; trigger.disabled = select.disabled; };
     const close = focus => { menu.hidden=true; trigger.setAttribute('aria-expanded','false'); if(openFilter?.wrap===wrap) openFilter=null; if(focus) trigger.focus(); };
+    const focusOption = option => {
+      if(!option)return;option.focus({preventScroll:true});
+      if(option.offsetTop<menu.scrollTop)menu.scrollTop=option.offsetTop;
+      else if(option.offsetTop+option.offsetHeight>menu.scrollTop+menu.clientHeight)menu.scrollTop=option.offsetTop+option.offsetHeight-menu.clientHeight;
+    };
     const open = () => {
       openFilter?.close(false); menu.replaceChildren();
       for(const option of select.options) {
         const item=el('button','filter-option',option.textContent); item.type='button'; item.disabled=option.disabled; item.setAttribute('role','option'); item.setAttribute('aria-selected',String(option.selected)); item.tabIndex=-1;
+        if(option.dataset.description) {item.classList.add('filter-option-description');item.append(el('small','',option.dataset.description));}
         item.onclick=()=>{select.value=option.value; update(); close(true); select.dispatchEvent(new Event('change',{bubbles:true}));}; menu.append(item);
       }
-      menu.hidden=false; trigger.setAttribute('aria-expanded','true'); openFilter={wrap,close}; (menu.querySelector('[aria-selected=true]')||menu.firstElementChild)?.focus();
+      menu.hidden=false;
+      // Fit the list inside the nearest scrolling dialog/page. This keeps the
+      // last option reachable without putting the menu behind a sticky footer.
+      let top=8,bottom=innerHeight-8;
+      for(let parent=wrap.parentElement;parent&&parent!==document.body;parent=parent.parentElement){
+        const style=getComputedStyle(parent);
+        if(/auto|scroll|hidden|clip/.test(style.overflowY)){
+          const rect=parent.getBoundingClientRect();top=Math.max(top,rect.top+4);bottom=Math.min(bottom,rect.bottom-4);
+        }
+      }
+      const rect=trigger.getBoundingClientRect(),below=Math.max(0,bottom-rect.bottom-7),above=Math.max(0,rect.top-top-7);
+      const desired=Math.min(250,menu.scrollHeight),flip=below<desired&&above>below;
+      menu.style.top=flip?'auto':'calc(100% + 6px)';menu.style.bottom=flip?'calc(100% + 6px)':'auto';
+      menu.style.maxHeight=Math.max(40,Math.min(250,flip?above:below))+'px';
+      trigger.setAttribute('aria-expanded','true'); openFilter={wrap,close}; focusOption(menu.querySelector('[aria-selected=true]')||menu.firstElementChild);
     };
     trigger.onclick=()=>menu.hidden?open():close(true);
     trigger.onkeydown=event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();open();}};
@@ -365,11 +420,203 @@
       if(event.key==='Tab'){close(false);return;}
       const options=[...menu.querySelectorAll('button:not(:disabled)')]; const index=options.indexOf(document.activeElement);
       const moves={ArrowDown:(index+1)%options.length,ArrowUp:(index-1+options.length)%options.length,Home:0,End:options.length-1};
-      if(event.key in moves){event.preventDefault();options[moves[event.key]]?.focus();}
+      if(event.key in moves){event.preventDefault();focusOption(options[moves[event.key]]);}
     };
     select.addEventListener('change',update); select.addEventListener('optionschanged',update); update(); wrap.append(trigger,menu); select.after(wrap);
   }
-  for(const id of ['type-filter','org-filter','sort']) filterSelect($(id));
+  // Registration reuses the platform's immutable draft + human web-review flow.
+  // No automatic approval, upload retry, background polling or command execution.
+  const publication = { loaded: false, allowed: false, busy: false, file: null, draft: null, requestId: null, extra: {}, existingExtra: {}, fileExtra: {}, opener: null, origin: '' };
+  const publishFields = {name:'publish-name',desc:'publish-desc',platform:'publish-platform',type:'publish-type',guide:'publish-guide',orgId:'publish-org',categoryId:'publish-category',changes:'publish-changes',url:'publish-url',commandProject:'publish-command-project',commandUser:'publish-command-user'};
+  const publishSelects = ['publish-target','publish-existing','publish-mode','publish-platform','publish-type','publish-org','publish-category'];
+  const publishActionIds = ['publish-pick-file','publish-prepare','publish-status','publish-review-open','publish-commit','publish-edit','publish-target-find'];
+  function publishMessage(text, error = false) { $('publish-message').textContent=text; $('publish-message').classList.toggle('error',error); }
+  function publishChanged() { publication.requestId=null; publication.draft=null; }
+  function publishControls() {
+    const draft=publication.draft, committed=draft?.status==='committed';
+    $('publish-form').hidden=!!draft; $('publish-form').inert=publication.busy||!publication.allowed;
+    $('publish-review').hidden=!draft; $('publish-prepare').hidden=!!draft; $('publish-commit').hidden=!draft||committed;
+    for(const id of publishActionIds) $(id).disabled=publication.busy||!publication.allowed;
+    $('publish-commit').disabled=publication.busy||!publication.allowed||!['approved','committing'].includes(draft?.status);
+    $('publish-pick-file').disabled=publication.busy||!publication.allowed||!state.hostFeatures.includes('publishFiles');
+    $('publish-status').hidden=committed; $('publish-review-open').hidden=committed; $('publish-edit').textContent=committed?'다른 도구 등록':'내용 수정';
+    $('publish-dialog').setAttribute('aria-busy',String(publication.busy));
+  }
+  async function publishAction(fn) {
+    if(publication.busy)return;
+    publication.busy=true;publishControls();
+    try{await fn();}catch(error){publishMessage(error.message||'등록 상태를 확인하지 못했어요. 같은 내용으로 다시 확인해 주세요.',true);}
+    finally{publication.busy=false;publishControls();}
+  }
+  function publishOptions(select, rows, placeholder) {
+    const value=select.value;select.replaceChildren(new Option(placeholder,''));
+    for(const item of rows||[])select.append(new Option(item.name||item.title||String(item.id),String(item.id)));
+    if([...select.options].some(option=>option.value===value))select.value=value;
+    select.dispatchEvent(new Event('optionschanged'));
+  }
+  function publishMode() {
+    const mode=$('publish-mode').value;
+    $('publish-file-panel').hidden=mode!=='file';$('publish-url-field').hidden=mode!=='url';$('publish-command-fields').hidden=mode!=='command';
+    $('publish-existing-field').hidden=$('publish-target').value!=='update';$('publish-install-info').hidden=mode!=='file'||!publication.extra.installProfile;
+    if(mode==='file'&&!state.hostFeatures.includes('publishFiles')) $('publish-file-help').textContent='파일을 선택하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.';
+  }
+  function publishInstallInfo() {
+    const profile=publication.extra.installProfile;
+    $('publish-install-info').hidden=!profile;
+    if(!profile)return;
+    const scopes=(profile.scopes||[]).map(value=>({user:'공통',project:'업무 폴더'})[value]||value).join(' · ');
+    $('publish-install-summary').textContent=[profile.kind,profile.host,scopes,profile.entrypoint].filter(Boolean).join(' / ');
+    $('publish-keep-install').checked=true;
+  }
+  function fillPublishMetadata(metadata, replace=false) {
+    if(!metadata||typeof metadata!=='object')return;
+    if(replace)publication.extra={};
+    for(const key of ['packageId','workTags','environment','workflow','installProfile']){
+      if(Object.prototype.hasOwnProperty.call(metadata,key))publication.extra[key]=metadata[key];
+    }
+    for(const [key,id] of Object.entries(publishFields)) {
+      if(typeof metadata[key]!=='string')continue;
+      const field=$(id);
+      if(field.tagName==='SELECT'&&metadata[key]&&![...field.options].some(option=>option.value===metadata[key])) field.append(new Option(metadata[key],metadata[key]));
+      field.value=metadata[key];if(field.tagName==='SELECT')field.dispatchEvent(new Event('optionschanged'));
+    }
+    if(typeOfBoolean(metadata.approval))document.querySelector(`input[name="publish-visibility"][value="${metadata.approval?'approval':'public'}"]`).checked=true;
+    if(['file','url','command'].includes(metadata.mode)){$('publish-mode').value=metadata.mode;$('publish-mode').dispatchEvent(new Event('optionschanged'));}
+    publishInstallInfo();publishMode();
+  }
+  function typeOfBoolean(value){return typeof value==='boolean';}
+  function resetPublish() {
+    $('publish-form').reset();publication.file=null;publication.draft=null;publication.requestId=null;publication.extra={};publication.existingExtra={};publication.fileExtra={};
+    $('publish-file-name').textContent='배포할 파일을 선택하세요';$('publish-file-help').textContent='ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB';
+    for(const id of publishSelects)$(id).dispatchEvent(new Event('optionschanged'));
+    publishInstallInfo();publishMode();
+  }
+  $('publish-open').addEventListener('click',()=>{
+    publication.opener=document.activeElement;
+    if(publication.origin!==state.baseUrl){resetPublish();publication.loaded=false;publication.origin=state.baseUrl;}
+    $('publish-dialog').showModal();$('publish-close').focus();
+    if(publication.loaded){publishControls();return;}
+    publishAction(async()=>{
+      publishMessage('등록 권한과 분류를 확인하고 있어요…');
+      const result=await rpc('publishOptions');publication.allowed=result.canPublish===true;publication.loaded=true;
+      publishOptions($('publish-org'),result.options?.organizations,'조직 선택');publishOptions($('publish-category'),result.options?.categories,'업무 분류 선택');
+      publishOptions($('publish-existing'),result.candidates,'기존 도구 선택');
+      $('publish-access').hidden=publication.allowed;
+      $('publish-access').replaceChildren();
+      if(!publication.allowed){
+        $('publish-access').append(el('p','',result.notice||'도구 등록에는 업로드 권한이 포함된 연결 KEY가 필요합니다.'),button('웹에서 연결 KEY 확인','text-button',()=>rpc('host.openExternal',{url:state.baseUrl+'/local-access'})));
+        publishMessage('연결 설정에서 업로드 권한이 포함된 KEY로 연결한 뒤 다시 열어 주세요.');publication.loaded=false;
+      }else publishMessage('창을 닫아도 이 화면에서 작성 중인 내용은 유지됩니다.');
+      publishMode();
+    });
+  });
+  function closePublish(){openFilter?.close(false);$('publish-dialog').close();publication.opener?.focus();}
+  $('publish-close').addEventListener('click',closePublish);
+  $('publish-dialog').addEventListener('cancel',event=>{event.preventDefault();closePublish();});
+  $('publish-form').addEventListener('submit',event=>event.preventDefault());
+  $('publish-form').addEventListener('input',publishChanged);
+  $('publish-form').addEventListener('change',publishChanged);
+  $('publish-target').addEventListener('change',()=>{publishMode();if($('publish-target').value==='new'){publication.existingExtra={};publication.extra={...publication.fileExtra};publishInstallInfo();$('publish-existing').value='';$('publish-existing').dispatchEvent(new Event('optionschanged'));}});
+  $('publish-mode').addEventListener('change',publishMode);
+  $('publish-target-find').addEventListener('click',()=>publishAction(async()=>{
+    const result=await rpc('publishOptions',{q:$('publish-target-search').value.trim()});
+    publishOptions($('publish-existing'),result.candidates,'기존 도구 선택');publishChanged();
+    publishMessage(result.candidates?.length?'검색한 도구 중 새 버전을 등록할 대상을 선택하세요.':'해당하는 내 도구가 없어요. 검색어를 바꿔 보세요.');
+  }));
+  $('publish-existing').addEventListener('change',()=>publishAction(async()=>{
+    if(!$('publish-existing').value)return;
+    const result=await rpc('publishOptions',{toolId:Number($('publish-existing').value)});
+    fillPublishMetadata(result.existing?.metadata,true);publication.existingExtra={...publication.extra};publication.extra={...publication.existingExtra,...publication.fileExtra};publishInstallInfo();
+    if(publication.file)$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
+    publishMessage('기존 도구의 설정을 불러왔어요. 새 자료·변경 내용과 공개 범위를 확인하세요.');
+  }));
+  $('publish-pick-file').addEventListener('click',()=>publishAction(async()=>{
+    const selected=await rpc('host.pickFile');if(selected.cancelled)return;
+    // A new picker choice revokes the old capability. Preserve all written
+    // metadata, but never keep a now-unusable file selection after inspection fails.
+    publication.file=null;publication.fileExtra={};publication.extra={...publication.existingExtra};publishInstallInfo();publishChanged();
+    $('publish-file-name').textContent='선택한 파일을 확인하고 있어요…';
+    let inspected;
+    try{inspected=await rpc('inspectPublishSource',{fileToken:selected.fileToken});}
+    catch(error){$('publish-file-name').textContent='배포할 파일을 다시 선택하세요';$('publish-file-help').textContent='작성한 설명은 유지됩니다. 파일을 다시 확인해 주세요.';throw error;}
+    publication.file=selected;publishChanged();
+    $('publish-file-name').textContent=inspected.source?.name||selected.name;
+    const bytes=inspected.source?.bytes??selected.size;
+    const size=Number.isFinite(bytes)?(bytes<1024?`${bytes} B`:bytes<1024*1024?`${(bytes/1024).toFixed(1)} KB`:`${(bytes/1024/1024).toFixed(2)} MB`):'';
+    $('publish-file-help').textContent=size?`${size} · 파일 내용은 등록 준비 시 업로드합니다.`:'파일 내용은 등록 준비 시 업로드합니다.';
+    fillPublishMetadata(inspected.metadata);publication.fileExtra=Object.fromEntries(['packageId','workTags','environment','workflow','installProfile'].filter(key=>Object.prototype.hasOwnProperty.call(inspected.metadata||{},key)).map(key=>[key,inspected.metadata[key]]));$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
+    if(inspected.options){publishOptions($('publish-org'),inspected.options.organizations,'조직 선택');publishOptions($('publish-category'),inspected.options.categories,'업무 분류 선택');}
+    if(inspected.candidates)publishOptions($('publish-existing'),inspected.candidates,'기존 도구 선택');
+    publishMessage(inspected.packageWarning||'파일을 확인했어요. 이름·설명·분류와 등록 방식을 확인해 주세요.',!!inspected.packageWarning);
+  }));
+  function publishPayload() {
+    const target=$('publish-target').value, mode=$('publish-mode').value;
+    if(!target)throw Error('새 도구인지, 기존 도구의 새 버전인지 선택해 주세요.');
+    if(target==='update'&&!$('publish-existing').value)throw Error('새 버전을 등록할 기존 도구를 선택해 주세요.');
+    if(mode==='file'&&!publication.file)throw Error('배포할 파일을 선택해 주세요.');
+    const metadata={...publication.extra,mode};
+    for(const [key,id] of Object.entries(publishFields))metadata[key]=$(id).value.trim();
+    for(const [key,label] of [['name','도구 이름'],['desc','설명'],['platform','사용 프로그램'],['type','기능 유형'],['guide','설치·사용 안내'],['orgId','조직'],['categoryId','업무 분류']])if(!metadata[key])throw Error(`${label}을(를) 입력하거나 선택해 주세요.`);
+    const visibility=document.querySelector('input[name="publish-visibility"]:checked');if(!visibility)throw Error('상세 내용과 파일의 공개 범위를 선택해 주세요.');
+    metadata.approval=visibility.value==='approval';
+    if(publication.extra.installProfile&&!$('publish-keep-install').checked)delete metadata.installProfile;
+    if(mode==='url'){
+      let url;try{url=new URL(metadata.url);}catch{throw Error('연결할 웹 주소를 확인해 주세요.');}
+      if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('아이디·비밀번호가 포함되지 않은 HTTP 또는 HTTPS 주소를 입력하세요.');
+    }
+    if(mode==='command'&&!metadata.commandProject&&!metadata.commandUser)throw Error('지원하는 설치 명령어를 한 개 이상 입력해 주세요.');
+    if(mode!=='file')delete metadata.installProfile;
+    if(mode!=='url')delete metadata.url;
+    if(mode!=='command'){delete metadata.commandProject;delete metadata.commandUser;}
+    if(!publication.requestId)publication.requestId=crypto.randomUUID();
+    return {requestId:publication.requestId,target,metadata,...(target==='update'?{toolId:Number($('publish-existing').value)}:{}),...(mode==='file'?{fileToken:publication.file.fileToken}:{})};
+  }
+  function reviewUrl(draft) {
+    const url=new URL(draft.reviewUrl||'',state.baseUrl);
+    if(url.origin!==new URL(state.baseUrl).origin||!/^\/publish-review\/[a-f0-9-]{16,64}$/.test(url.pathname)||url.search||url.hash)throw Error('웹 확인 주소를 검증하지 못했어요. 등록 상태를 다시 확인해 주세요.');
+    return url.href;
+  }
+  function showPublishDraft(draft) {
+    publication.draft=draft;const status=draft.status,committed=status==='committed';
+    const labels={pending:'웹 확인 대기',approved:'승인 완료',committing:'등록 결과 확인 필요',committed:'등록 완료',expired:'확인 기한 만료'};
+    $('publish-review-label').textContent=labels[status]||'등록 상태 확인 필요';
+    $('publish-review-title').textContent=committed?'플랫폼에 등록했어요.':status==='approved'?'웹에서 내용을 승인했어요.':status==='expired'?'새 등록 내용을 준비해 주세요.':'등록 내용이 준비됐어요.';
+    $('publish-review-text').textContent=committed?'웹과 앱에서 같은 도구를 확인할 수 있어요.':status==='approved'?'아래 등록 완료하기를 눌러 게시하세요.':status==='expired'?'내용 수정을 누른 뒤 다시 확인하면 새 검토 링크를 만들 수 있어요.':'웹에서 파일·내용·공개 범위를 확인하고 승인한 뒤, 이 창에서 등록을 완료하세요.';
+    const metadata=draft.metadata||{},summary=$('publish-summary');summary.replaceChildren();
+    for(const [label,value]of[['도구 이름',metadata.name||$('publish-name').value],['등록 대상',draft.toolId?`기존 도구 #${draft.toolId} · 새 버전`:'새 도구'],['배포 자료',draft.artifact?.name||metadata.url||(metadata.mode==='command'?'설치 명령어 안내':publication.file?.name)],['공개 범위',metadata.approval===true?'조회 승인 필요':metadata.approval===false?'전체 사용자':undefined],['등록 결과',committed&&draft.result?`도구 #${draft.result.id} · 버전 ${draft.result.version}`:undefined]])if(value)summary.append(el('dt','',label),el('dd','',value));
+    publishControls();$('publish-review').scrollIntoView({block:'start'});
+  }
+  $('publish-prepare').addEventListener('click',()=>publishAction(async()=>{
+    const payload=publishPayload();publishMessage('등록 자료와 내용을 준비하고 있어요…');
+    const result=await rpc('preparePublish',payload);
+    if(result.ready===false)throw Error('필수 내용을 확인해 주세요: '+(result.missing||[]).join(', '));
+    if(!result.id)throw Error('등록 초안 번호를 확인하지 못했어요. 같은 내용으로 다시 확인해 주세요.');
+    showPublishDraft(result);publishMessage('아직 게시되지 않았습니다. 웹에서 승인 후 등록을 완료하세요.');
+  }));
+  $('publish-review-open').addEventListener('click',()=>publishAction(()=>rpc('host.openExternal',{url:reviewUrl(publication.draft)})));
+  $('publish-status').addEventListener('click',()=>publishAction(async()=>{
+    const result=await rpc('publishStatus',{draftId:publication.draft.id});showPublishDraft({...publication.draft,...result});
+    publishMessage(result.status==='approved'?'승인을 확인했어요. 등록 완료하기를 눌러 주세요.':result.status==='committed'?'등록 완료 상태를 확인했어요.':result.status==='expired'?'검토 기한이 지났어요. 내용을 다시 준비해 주세요.':'웹에서 승인 후 다시 확인해 주세요. 자동으로 반복 조회하지 않습니다.');
+  }));
+  $('publish-commit').addEventListener('click',()=>publishAction(async()=>{
+    if(!['approved','committing'].includes(publication.draft?.status))return;
+    publishMessage('등록 결과를 확인하고 있어요…');
+    const result=await rpc('publish',{draftId:publication.draft.id});
+    if(result.published!==true||result.status!=='committed'){
+      showPublishDraft({...publication.draft,...result});
+      publishMessage(result.notice||'등록이 완료되지 않았어요. 웹 승인 상태를 다시 확인하세요.',true);return;
+    }
+    showPublishDraft({...publication.draft,status:'committed',result});
+    publishMessage(result.pending?'등록됐어요. 일부 후속 처리는 플랫폼에서 확인해 주세요.':'플랫폼에 등록했어요. 목록을 새로고침하면 확인할 수 있습니다.');
+  }));
+  $('publish-edit').addEventListener('click',()=>{
+    if(publication.busy)return;
+    if(publication.draft?.status==='committed')resetPublish();else publishChanged();
+    publishControls();publishMessage('내용을 변경하면 새 검토가 필요합니다. 이전 초안은 자동으로 게시되지 않습니다.');$('publish-target').nextElementSibling?.querySelector('button')?.focus();
+  });
+  for(const id of ['type-filter','org-filter','sort',...publishSelects]) filterSelect($(id));
   document.addEventListener('pointerdown',event=>{if(openFilter&&!openFilter.wrap.contains(event.target))openFilter.close(false);});
+  for(const type of ['wheel','touchmove'])document.addEventListener(type,event=>{if(openFilter&&!openFilter.wrap.contains(event.target))openFilter.close(false);},{capture:true,passive:true});
+  window.addEventListener('resize',()=>openFilter?.close(false));
   parent.postMessage({ type: 'ax-extension-ready' }, '*');
 })();

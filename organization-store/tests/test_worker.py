@@ -77,6 +77,54 @@ def configured(tmp_path):
     return store, client, project, home
 
 
+@pytest.mark.parametrize('profile', [None, {}, {'schemaVersion': 99}, {'kind': 'skill'}])
+def test_missing_or_invalid_install_metadata_is_explained_and_download_only(configured, profile):
+    store, client, project, home = configured
+    manifest = client.manifest(1)
+    manifest['installProfile'] = profile
+    client.manifest = lambda _: manifest
+    detail = store.dispatch('detail', {'toolId': 1})
+    assert detail['canInstall'] is False
+    assert '등록자가 앱 설치 정보(지원 범위·설치 방식)를 등록해야' in detail['installNotice']
+    prepared = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
+    assert prepared['canInstall'] is False and prepared['installed'] is False
+    assert not client.downloads
+    assert not (project/'.claude').exists() and not (home/'.claude').exists()
+    assert store.dispatch('download', {'toolId': 1})['installed'] is False
+
+
+@pytest.mark.parametrize('scope', ['user', 'project'])
+def test_single_declared_scope_installs_only_in_supported_location(configured, scope):
+    store, client, project, home = configured
+    manifest = client.manifest(1)
+    manifest['installProfile']['scopes'] = [scope]
+    client.manifest = lambda _: manifest
+    assert store.dispatch('detail', {'toolId': 1})['canInstall'] is True
+    other_scope = 'project' if scope == 'user' else 'user'
+    with pytest.raises(worker.SquareError, match='범위를 지원하지'):
+        store.dispatch('prepareInstall', {'toolId': 1, 'scope': other_scope})
+    plan = store.dispatch('prepareInstall', {'toolId': 1, 'scope': scope})
+    result = store.dispatch('install', dict(plan, confirmed=True))
+    expected, untouched = (home, project) if scope == 'user' else (project, home)
+    assert result['installed'] is True
+    assert (expected/'.claude/skills/fixture-store/SKILL.md').read_bytes() == client.content
+    assert not (untouched/'.claude').exists()
+
+
+@pytest.mark.parametrize('suffix', ['.EXE', '.msi', '.ps1'])
+def test_external_file_cannot_claim_to_be_a_directly_installable_skill(configured, suffix, monkeypatch):
+    store, client, project, _ = configured
+    manifest = client.manifest(1)
+    manifest['filename'] = 'setup' + suffix
+    client.manifest = lambda _: manifest
+    monkeypatch.setattr(worker.Installer, 'install', lambda *a: pytest.fail('external file installed'))
+    detail = store.dispatch('detail', {'toolId': 1})
+    assert detail['canInstall'] is False
+    assert '별도 설치 프로그램' in detail['installNotice']
+    assert store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})['canInstall'] is False
+    assert not client.downloads and not (project/'.claude').exists()
+
+
 def test_status_disconnected_does_not_load_personal_config_or_network(tmp_path):
     def fail(_):
         pytest.fail('status must never contact server')

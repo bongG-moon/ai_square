@@ -36,6 +36,7 @@ class PackageTests(unittest.TestCase):
         cls.source.mkdir()
         shutil.copy2(HERE / 'extension.template.json', cls.source)
         shutil.copy2(HERE / 'worker.py', cls.source)
+        shutil.copy2(HERE / 'zip_install.py', cls.source)
         shutil.copytree(HERE / 'ui', cls.source / 'ui')
         cls.first = builder.build(cls.base / 'v1', source=cls.source, make_exe=False)
         with (cls.source / 'ui/store.css').open('a', encoding='utf-8') as target:

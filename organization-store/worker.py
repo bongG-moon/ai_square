@@ -6,12 +6,17 @@ vendors those exact sources into vendor/. Personal KEYs never enter host state.
 from __future__ import annotations
 
 import json
+import importlib.util
 import re
 import sys
 import time
 import uuid
+import hashlib
+import tempfile
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -37,17 +42,33 @@ from pt_square_mcp.client import Client, positive
 from pt_square_mcp.config import (DEFAULT_CONFIG, Settings, SquareError, TOKEN_RE,
                                  atomic_json, no_links, normalize_url, operation_lock,
                                  read_json, save_config)
-from pt_square_mcp.install import Installer, tree_digest, check_directory_identity
+from pt_square_mcp.install import Installer, tree_digest, check_directory_identity, digest
 from pt_square_mcp.profiles import validate_profile
 from pt_square_mcp.runtime import Runtime
+from pt_square_mcp.files import validate_publish_archive, sha256, SECRET_PATTERN
+from pt_square_mcp._vendor.package_contract import read_package, registration_fields
+
+# -I excludes the script directory from module search. Load only this verified
+# extension's adjacent helper, never a same-named module in the user's folder.
+_zip_spec = importlib.util.spec_from_file_location('ax_store_zip_install', import_root(HERE / 'zip_install.py'))
+zip_install = importlib.util.module_from_spec(_zip_spec)
+_zip_spec.loader.exec_module(zip_install)
 
 VERSION = '0.1.0'
 ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail',
                      'like', 'download', 'prepareInstall', 'install', 'installations',
-                     'checkUpdates', 'verify', 'rollback'})
+                     'checkUpdates', 'verify', 'rollback', 'publishOptions',
+                     'inspectPublishSource', 'preparePublish', 'publishStatus', 'publish'})
+PUBLISH_FIELDS = frozenset({'name', 'desc', 'owner', 'platform', 'type', 'guide', 'orgId',
+                           'categoryId', 'approval', 'workTags', 'environment', 'changes',
+                           'mode', 'url', 'commandProject', 'commandUser', 'packageId',
+                           'workflow', 'installProfile'})
+MAX_PUBLISH_BYTES = 64 * 1024 * 1024
+PUBLISH_SUFFIXES = {'.zip', '.md', '.axextension', '.exe', '.msi', '.ps1'}
 MAX_INPUT = 128 * 1024
 MAX_OUTPUT = 2 * 1024 * 1024
 MANUAL_NOTICE = '이 항목은 파일을 내려받은 뒤 웹의 설치 안내에 따라 직접 설치하세요. 다운로드만으로 설치되지는 않습니다.'
+INSTALL_METADATA_NOTICE = '등록자가 앱 설치 정보(지원 범위·설치 방식)를 등록해야 앱에서 바로 설치할 수 있어요. 현재는 파일 다운로드와 등록자의 설치 안내를 이용해 주세요.'
 
 
 class StoreClient(Client):
@@ -213,13 +234,18 @@ class Store:
 
     @staticmethod
     def install_support(manifest):
-        if Path(str(manifest.get('filename', ''))).suffix.lower() == '.axextension':
+        suffix = Path(str(manifest.get('filename', ''))).suffix.lower()
+        if suffix == '.axextension':
             return False, 'AX Workspace 확장 파일입니다. 파일을 다운로드한 뒤 더블클릭해 설치하세요.'
+        if suffix in {'.exe', '.msi', '.ps1'}:
+            return False, '별도 설치 프로그램입니다. 파일을 내려받아 실행하고 등록자의 안내에 따라 설치하세요. 이 화면에서는 자동 실행하지 않습니다.'
         try:
             profile = validate_profile(manifest.get('installProfile'))
         except SquareError:
-            return False, '설치 선언을 확인하지 못했습니다. 파일 다운로드와 웹의 설치 안내를 이용하세요.'
-        can = bool(profile and profile.get('kind') in {'skill', 'mcp'}
+            return False, INSTALL_METADATA_NOTICE
+        if profile is None:
+            return False, INSTALL_METADATA_NOTICE
+        can = bool(profile.get('kind') in {'skill', 'mcp'}
                    and profile.get('host') == 'claude' and manifest.get('downloadUrl'))
         return can, ('설치 범위를 선택하면 변경할 파일과 경로를 먼저 확인할 수 있습니다.' if can else MANUAL_NOTICE)
 
@@ -236,7 +262,8 @@ class Store:
         tool_id = positive(payload.get('toolId'))
         manifest = runtime.client.manifest(tool_id)
         supported, notice = self.install_support(manifest)
-        if not supported:
+        inspect_zip = zip_install.can_inspect(manifest)
+        if not supported and not inspect_zip:
             return dict(canInstall=False, installed=False, toolId=tool_id, reason=notice)
         scope = payload.get('scope')
         if scope not in {'project', 'directory', 'user'}:
@@ -244,7 +271,13 @@ class Store:
         workspace = self.selected_directory() if scope == 'directory' else self.project() if scope == 'project' else None
         if workspace is not None:
             runtime.settings.roots = [*runtime.settings.roots, workspace]
-        plan = runtime.installer.prepare(tool_id, 'project' if scope == 'directory' else scope, str(workspace or ''))
+        if inspect_zip:
+            update = any(record.get('toolId') == tool_id for record in self.records(runtime).values())
+            runtime.installer.client = zip_install.ZipSkillClient(runtime.client, runtime.settings, digest(manifest), update=update)
+        try:
+            plan = runtime.installer.prepare(tool_id, 'project' if scope == 'directory' else scope, str(workspace or ''))
+        except zip_install.ZipInstallUnsupported as error:
+            return dict(canInstall=False, installed=False, toolId=tool_id, reason=str(error))
         if scope == 'directory':
             self.selected_directory()
         if plan.get('canInstall'):
@@ -255,7 +288,10 @@ class Store:
                 'origin': runtime.settings.url, 'config': str(runtime.settings.path),
                 'scope': scope, 'scopeDir': plan['scopeDir'], 'created': time.time(),
                 'directoryToken': self.context.get('directoryToken') if scope == 'directory' else None,
+                'zipDetection': prepared['manifest'].get(zip_install.DETECTION_KEY) if inspect_zip else None,
                 'approvalDigest': plan['approvalDigest']})
+            if inspect_zip:
+                plan['detectionNotice'] = zip_install.DETECTED_NOTICE
         return plan
 
     def install(self, runtime, payload):
@@ -276,6 +312,15 @@ class Store:
                 raise SquareError('설치를 준비한 업무 폴더와 현재 업무 폴더가 다릅니다. 다시 준비하세요.')
             runtime.settings.roots = [*runtime.settings.roots, workspace]
         plan = read_json(runtime.settings.state / 'plans' / (payload['planId'] + '.json'))
+        detection = receipt.get('zipDetection')
+        if detection is not None:
+            if (not isinstance(detection, dict) or detection != plan['manifest'].get(zip_install.DETECTION_KEY)
+                    or not isinstance(detection.get('sourceManifestDigest'), str)
+                    or not re.fullmatch('[0-9a-f]{64}', detection['sourceManifestDigest'])):
+                raise SquareError('ZIP 설치 준비 내용이 변경되었습니다. 다시 확인해 주세요.')
+            runtime.installer.client = zip_install.ZipSkillClient(runtime.client, runtime.settings,
+                                                                detection['sourceManifestDigest'],
+                                                                update=bool(plan.get('existingRecordDigest')))
         supported, _ = self.install_support(plan['manifest'])
         if not supported or plan.get('profile', {}).get('kind') not in {'skill', 'mcp'}:
             raise SquareError(MANUAL_NOTICE)
@@ -287,6 +332,209 @@ class Store:
         except OSError:
             pass
         return result
+
+    @staticmethod
+    def publish_identity(runtime, required=True):
+        identity = runtime.client.json('/api/integration/me')
+        capable = identity.get('capabilities', {}).get('publishDraft') is True
+        user, key = identity.get('user') or {}, identity.get('key') or {}
+        if required and (not capable or not isinstance(user.get('id'), str)
+                         or not isinstance(key.get('id'), str) or not key['id']):
+            raise SquareError('웹의 KEY 화면에서 업로드 포함 권한을 확인하고 해당 KEY로 연결하세요.')
+        return identity, {'origin': runtime.settings.url, 'config': str(runtime.settings.path),
+                          'userId': user.get('id'), 'keyId': key.get('id')}
+
+    def publish_options(self, runtime, payload):
+        identity, _ = self.publish_identity(runtime, required=False)
+        query = payload.get('q', '')
+        if not isinstance(query, str) or len(query) > 200:
+            raise SquareError('기존 도구 검색어는 200자 이내로 입력하세요.')
+        can_publish = identity.get('capabilities', {}).get('publishDraft') is True
+        result = dict(canPublish=can_publish, user=identity.get('user', {}),
+                      options=runtime.client.json('/api/catalog/options'),
+                      candidates=runtime.client.json('/api/publish-targets?' + urlencode({'q': query})).get('items', []) if can_publish else [],
+                      keyGuideUrl=runtime.settings.url + '/local-access')
+        if payload.get('toolId') is not None:
+            self.publish_identity(runtime)
+            item = runtime.get_item(positive(payload['toolId']))
+            if item.get('ownerId') != identity.get('user', {}).get('id'):
+                raise SquareError('본인이 등록한 도구만 새 버전으로 등록할 수 있습니다.')
+            metadata = {key: item[key] for key in PUBLISH_FIELDS if key in item}
+            current = next((row for row in item.get('versions', []) if row.get('n') == item.get('active')), {})
+            metadata['installProfile'] = current.get('installProfile')
+            metadata['mode'] = {'zip': 'file', 'server': 'url', 'command': 'command'}.get(item.get('mode'), 'file')
+            commands = current.get('commands') or {}
+            metadata.update(commandProject=commands.get('project', ''), commandUser=commands.get('user', ''))
+            result['existing'] = dict(toolId=item['id'], revision=item.get('revision'), metadata=metadata)
+        return result
+
+    def selected_file(self):
+        # Only the common host may grant a native file picker selection. A path
+        # or token in the iframe's payload is never a filesystem capability.
+        raw = self.context.get('selectedFile')
+        identity = self.context.get('selectedFileIdentity')
+        if (not isinstance(raw, str) or not Path(raw).is_absolute()
+                or not isinstance(identity, list) or len(identity) != 4
+                or any(type(part) is not int for part in identity)):
+            raise SquareError('등록할 배포 파일을 선택 창에서 다시 선택하세요.')
+        path = no_links(raw)
+        info = path.stat()
+        if (not path.is_file() or path.suffix.lower() not in PUBLISH_SUFFIXES
+                or not 0 < info.st_size <= MAX_PUBLISH_BYTES
+                or [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns] != identity):
+            raise SquareError('선택한 파일이 변경되었거나 지원 범위를 벗어났습니다. 64 MiB 이하의 배포 파일을 다시 선택하세요.')
+        return path
+
+    @staticmethod
+    def scan_publish_file(path, destination=None):
+        """Bounded streaming scan also covers large single MD/PS1/binary files."""
+        hasher, total, previous = hashlib.sha256(), 0, b''
+        with path.open('rb') as original:
+            while chunk := original.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_PUBLISH_BYTES:
+                    raise SquareError('등록 파일은 64 MiB 이하여야 합니다.')
+                content = previous + chunk
+                if SECRET_PATTERN.search(content):
+                    raise SquareError('파일에 인증정보로 보이는 내용이 있습니다. 배포에서 제거하세요.')
+                previous = content[-4096:]
+                hasher.update(chunk)
+                if destination is not None:
+                    destination.write(chunk)
+        return hasher.hexdigest()
+
+    def inspect_publish_source(self, runtime, payload):
+        self.publish_identity(runtime)
+        path = self.selected_file()
+        # Canonical inspection rejects credential/private configuration names.
+        runtime.settings.roots = [path]
+        source = runtime.inspect_source(str(path))
+        metadata, warning = {}, ''
+        if path.suffix.lower() in {'.zip', '.axextension'}:
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    validate_publish_archive(archive)
+                    try:
+                        declaration = read_package(archive)
+                    except ValueError as error:
+                        declaration, warning = None, str(error)
+                    if declaration:
+                        metadata = dict(registration_fields(declaration), packageId=declaration['packageId'])
+            except zipfile.BadZipFile:
+                raise SquareError('ZIP 파일 형식을 읽지 못했습니다. 올바른 배포 ZIP을 선택하세요.') from None
+        elif path.suffix.lower() == '.md':
+            # A single MD is not rewritten into a ZIP; do not infer compatibility.
+            metadata['type'] = 'Skill'
+        file_hash = self.scan_publish_file(path)
+        self.selected_file()
+        query = {'packageId': metadata['packageId']} if metadata.get('packageId') else {'q': metadata.get('name', '')}
+        candidates = runtime.client.json('/api/publish-targets?' + urlencode(query)).get('items', [])
+        return dict(source=dict(name=path.name, bytes=path.stat().st_size, sha256=file_hash),
+                    metadata=metadata, packageWarning=warning, options=source['options'], candidates=candidates)
+
+    def publish_receipt(self, draft_id):
+        Runtime._draft_id(draft_id)
+        return no_links(self.directory / 'store-publish' / 'drafts' / (draft_id + '.json'))
+
+    @staticmethod
+    def publish_result(runtime, result):
+        result = dict(result)
+        draft_id = Runtime._draft_id(result.get('id'))
+        # The external link is reconstructed from a validated draft ID + the
+        # configured origin, never trusted from arbitrary server response data.
+        result['reviewUrl'] = runtime.settings.url + '/publish-review/' + draft_id
+        result.pop('preparedFile', None)
+        result.pop('localPreparationId', None)
+        return result
+
+    def prepare_publish(self, runtime, payload):
+        _, identity = self.publish_identity(runtime)
+        metadata = payload.get('metadata')
+        if not isinstance(metadata, dict) or set(metadata) - PUBLISH_FIELDS:
+            raise SquareError('지원하는 등록 정보만 입력하세요.')
+        values = dict(metadata)
+        target = payload.get('target')
+        if target not in {'new', 'update'}:
+            raise SquareError('새 도구 등록 또는 기존 도구 새 버전을 직접 선택하세요.')
+        tool_id = payload.get('toolId')
+        if target == 'update':
+            positive(tool_id)
+        elif tool_id is not None:
+            raise SquareError('새 도구에는 기존 도구 ID를 지정하지 않습니다.')
+        if type(values.get('approval')) is not bool:
+            raise SquareError('전체 사용자가 상세 조회 가능 또는 조회 승인 필요를 선택하세요.')
+        mode = values.get('mode')
+        if mode not in {'file', 'url', 'command'}:
+            raise SquareError('파일·URL·명령어 중 등록 방식을 선택하세요.')
+        path = self.selected_file() if mode == 'file' else None
+        source_hash = sha256(path) if path else None
+        if path:
+            self.selected_file()
+        binding = digest(dict(identity=identity, target=target, toolId=tool_id,
+                              metadata=values, sourceSha256=source_hash))
+        request_id = payload.get('requestId')
+        if request_id is None:
+            request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, binding))
+        try:
+            request_id = str(uuid.UUID(request_id))
+        except (ValueError, TypeError, AttributeError):
+            raise SquareError('등록 준비 요청 번호를 확인하세요.') from None
+        request_path = no_links(self.directory / 'store-publish' / 'requests' / (request_id + '.json'))
+        with operation_lock(self.directory / 'store-publish'):
+            request_record = read_json(request_path) if request_path.exists() else None
+            if request_record:
+                if request_record.get('binding') != binding or time.time() - request_record.get('created', 0) > 86400:
+                    raise SquareError('등록 내용이나 연결이 변경되었거나 확인 기간이 지났습니다. 새 등록 준비를 시작하세요.')
+                if request_record.get('draftId'):
+                    return self.publish_result(runtime, runtime.get_publish_status(request_record['draftId']))
+            else:
+                request_record = dict(binding=binding, created=time.time())
+                atomic_json(request_path, request_record)
+            values['clientRequestId'] = request_id
+            # Snapshot only the selected file into a private temporary folder.
+            # Canonical packaging revalidates it; no installed files/config are
+            # changed and no original artifact or executable is ever run.
+            staging_root = no_links(self.directory / 'publish-staging')
+            staging_root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix='request-', dir=staging_root) as staging:
+                staging = no_links(staging)
+                snapshot = None
+                if path:
+                    snapshot = staging / path.name
+                    self.selected_file()
+                    with snapshot.open('xb') as destination:
+                        copied_hash = self.scan_publish_file(path, destination)
+                    self.selected_file()
+                    if copied_hash != source_hash:
+                        raise SquareError('등록 자료가 바뀌었습니다. 파일을 다시 선택하세요.')
+                runtime.settings.roots = [staging]
+                runtime.settings.state = staging / 'state'
+                result = runtime.prepare_publish(values, str(snapshot or ''), target=target, tool_id=tool_id)
+            if result.get('ready') is False:
+                return result
+            result = self.publish_result(runtime, result)
+            result['notice'] = ('웹 검토 화면에서 파일·등록 내용·공개 범위를 확인하고 승인하세요. '
+                                '앱으로 돌아와 등록 완료를 누르면 동일한 초안으로 게시합니다.')
+            draft_id = result['id']
+            atomic_json(self.publish_receipt(draft_id), dict(identity, created=time.time(), requestId=request_id))
+            atomic_json(request_path, dict(request_record, draftId=draft_id))
+            return result
+
+    def publish_status_or_commit(self, runtime, payload, *, commit=False):
+        _, identity = self.publish_identity(runtime)
+        draft_id = payload.get('draftId')
+        receipt = read_json(self.publish_receipt(draft_id))
+        if any(receipt.get(key) != value for key, value in identity.items()):
+            raise SquareError('이 앱에서 현재 연결로 준비한 등록 초안만 사용할 수 있습니다. 다시 준비하세요.')
+        status = self.publish_result(runtime, runtime.get_publish_status(draft_id))
+        if not commit:
+            return status
+        if status.get('status') not in {'approved', 'committing', 'committed'}:
+            return dict(status, published=False, notice='웹 검토 화면에서 승인한 뒤 등록 완료를 눌러 주세요.')
+        # The server independently checks owner, KEY, digest, revision and human
+        # browser approval. Client booleans cannot grant or substitute approval.
+        result = runtime.publish_item(draft_id)
+        return dict(result, published=True, status='committed')
 
     def dispatch(self, action, payload=None):
         if action not in ACTIONS or not isinstance(payload, (dict, type(None))):
@@ -303,6 +551,14 @@ class Store:
         settings = self.settings()
         client = self.client_factory(settings)
         runtime = Runtime(settings, client=client, home=self.home)
+        if action == 'publishOptions':
+            return self.publish_options(runtime, payload)
+        if action == 'inspectPublishSource':
+            return self.inspect_publish_source(runtime, payload)
+        if action == 'preparePublish':
+            return self.prepare_publish(runtime, payload)
+        if action in {'publishStatus', 'publish'}:
+            return self.publish_status_or_commit(runtime, payload, commit=action == 'publish')
         if action == 'options':
             return client.json('/api/catalog/options')
         if action == 'catalog':
@@ -325,7 +581,10 @@ class Store:
                 except SquareError:
                     pass  # Older servers or accounting errors cannot hide details.
             supported, notice = self.install_support(manifest)
+            inspect_zip = zip_install.can_inspect(manifest)
             return dict(item=item, manifest=manifest, canInstall=supported, installNotice=notice,
+                        canInspectInstall=inspect_zip,
+                        inspectionNotice=zip_install.INSPECTION_NOTICE if inspect_zip else None,
                         webUrl=settings.url + '/')
         if action == 'like':
             if type(payload.get('liked')) is not bool:

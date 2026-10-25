@@ -7,7 +7,7 @@
 <main id="store">
   <header class="store-header">
     <div><p class="eyebrow">우리 조직의 AI 기능</p><h1>P&amp;T AI Square</h1><p class="subtitle">업무에 필요한 기능을 찾아보고, 사용할 공간에 설치하세요.</p></div>
-    <button id="connection-button" class="connection" type="button" hidden><span class="status-dot"></span><span id="connection-label">연결 설정</span><span aria-hidden="true">›</span></button>
+    <div class="header-actions"><button id="publish-open" class="secondary" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>도구 등록</button><button id="connection-button" class="connection" type="button" hidden><span class="status-dot"></span><span id="connection-label">연결 설정</span><span aria-hidden="true">›</span></button></div>
   </header>
   <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
   <section id="connection-view" class="connection-view" aria-labelledby="connection-title" hidden>
@@ -19,9 +19,10 @@
       <div class="field-heading"><label for="connection-key">개인 연결 KEY</label><button id="key-guide" type="button" class="text-button">웹에서 KEY 확인 ↗</button></div>
       <input id="connection-key" type="password" placeholder="ptsq_…" autocomplete="off" spellcheck="false" maxlength="80" required>
       <p class="field-help">현재 Windows 계정에 암호화해 보관합니다. 대화나 로그에는 남기지 않습니다.</p>
-      <label id="http-warning" class="check-row" hidden><input id="allow-http" type="checkbox"><span>이 사내 HTTP 주소로 KEY가 암호화되지 않고 전송되는 것을 확인했습니다.</span></label>
+      <label id="http-warning" class="check-row" hidden><input id="allow-http" type="checkbox"><span>이 서버는 HTTP를 사용해 연결 KEY와 통신 내용이 암호화되지 않습니다. 위 서버 주소를 확인했으며 이 연결을 사용하겠습니다.</span></label>
       <button id="connect-submit" class="primary" type="button">연결하기</button>
-      <button id="reuse-connection" class="secondary" type="button" hidden>기존 플랫폼 MCP 연결 사용</button>
+      <button id="reuse-connection" class="secondary" type="button" aria-describedby="reuse-help" hidden>저장된 플랫폼(MCP) 연결 사용</button>
+      <p id="reuse-help" class="field-help" hidden>이 PC의 플랫폼 MCP에 저장된 주소와 KEY를 사용합니다. MCP를 새로 설치하거나 실행하지 않습니다.</p>
       <button id="connection-cancel" class="text-button" type="button" hidden>목록으로 돌아가기</button>
       <button id="disconnect" class="text-button danger-text" type="button" hidden>P&amp;T AI Square 연결 해제</button>
     </form>
@@ -38,6 +39,35 @@
     <div id="detail-view" class="detail-view"></div><p id="detail-feedback" class="detail-feedback" role="status" aria-live="polite" hidden></p>
   </dialog>
   <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="confirm-body"><h2 id="confirm-title"></h2><div id="confirm-content"></div><div class="confirm-actions"><button id="confirm-no" class="secondary" type="button">취소</button><button id="confirm-yes" class="primary" type="button">확인</button></div></div></dialog>
+  <dialog id="publish-dialog" class="publish-dialog" aria-labelledby="publish-title">
+    <header class="detail-dialog-head"><div><p class="detail-kicker">P&amp;T AI Square</p><h2 id="publish-title">도구 등록</h2><p class="muted publish-intro">파일과 안내를 준비하고, 웹에서 최종 내용을 확인해 등록하세요.</p></div><button id="publish-close" class="icon-button" type="button" aria-label="등록 창 닫기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+    <div class="publish-scroll">
+      <p id="publish-access" class="publish-callout" hidden></p>
+      <form id="publish-form" novalidate>
+        <section class="publish-section"><h3><span>1</span>등록할 자료</h3>
+          <div class="publish-grid"><label class="publish-field">등록 방식<select id="publish-target" aria-label="등록 방식"><option value="">등록 방식을 선택하세요</option><option value="new">새 도구 등록</option><option value="update">내 도구의 새 버전 등록</option></select></label><label id="publish-existing-field" class="publish-field" hidden>기존 도구<div class="publish-target-search"><input id="publish-target-search" type="search" maxlength="200" placeholder="내가 등록한 도구 검색" aria-label="내 도구 검색"><button id="publish-target-find" class="secondary" type="button">찾기</button></div><select id="publish-existing" aria-label="기존 도구"><option value="">기존 도구 선택</option></select></label></div>
+          <label class="publish-field publish-mode-field">배포 방법<select id="publish-mode" aria-label="배포 방법"><option value="file">배포 파일</option><option value="url">웹 주소 · 원격 연결 안내</option><option value="command">설치 명령어 안내</option></select></label>
+          <div id="publish-file-panel" class="publish-file"><div><strong id="publish-file-name">배포할 파일을 선택하세요</strong><p id="publish-file-help">ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB</p></div><button id="publish-pick-file" class="secondary" type="button">파일 선택</button></div>
+          <label id="publish-url-field" class="publish-field" hidden>연결 주소<input id="publish-url" type="url" placeholder="https://…" maxlength="2000"><small>주소와 연결 안내를 등록합니다. 원격 MCP에 자동으로 연결하지 않습니다.</small></label>
+          <div id="publish-command-fields" class="publish-grid" hidden><label class="publish-field">업무 폴더용 명령어<textarea id="publish-command-project" rows="3" maxlength="12000" placeholder="지원하는 경우에만 입력하세요"></textarea></label><label class="publish-field">사용자 공통 명령어<textarea id="publish-command-user" rows="3" maxlength="12000" placeholder="지원하는 경우에만 입력하세요"></textarea></label></div>
+        </section>
+        <section class="publish-section"><h3><span>2</span>기능과 사용 방법</h3>
+          <label class="publish-field">도구 이름<input id="publish-name" maxlength="160" required placeholder="어떤 기능인지 알 수 있는 이름"></label>
+          <label class="publish-field">설명<textarea id="publish-desc" rows="3" maxlength="4000" required placeholder="어떤 업무에서 무엇을 할 수 있는지 설명해 주세요."></textarea></label>
+          <div class="publish-grid"><label class="publish-field">사용 프로그램<select id="publish-platform" aria-label="사용 프로그램"><option value="">프로그램 선택</option><option>Claude</option><option>ChatGPT</option><option>기타</option></select></label><label class="publish-field">기능 유형<select id="publish-type" aria-label="등록할 기능 유형"><option value="">유형 선택</option><option>Skill</option><option>MCP/Tool</option><option>플러그인/하네스</option></select></label></div>
+          <label class="publish-field">설치·사용 안내<textarea id="publish-guide" rows="4" maxlength="30000" required placeholder="준비 사항, 설치 또는 연결 방법, 첫 사용 방법을 적어 주세요."></textarea></label>
+          <div id="publish-install-info" class="publish-callout" hidden><strong>앱 직접 설치 정보</strong><p id="publish-install-summary"></p><label class="publish-keep"><input id="publish-keep-install" type="checkbox">이 설치 정보를 이번 배포에도 포함</label><small>설치 방식과 시작 파일이 새 자료에도 맞는지 확인하세요. 해제하면 등록된 자동 설치 정보를 제외합니다. 파일과 안내는 계속 제공됩니다.</small></div>
+          <label class="publish-field">이번 변경 내용 <span class="optional">선택</span><textarea id="publish-changes" rows="2" maxlength="4000" placeholder="새 버전에 달라진 내용을 적어 주세요."></textarea></label>
+        </section>
+        <section class="publish-section"><h3><span>3</span>분류와 공개 범위</h3>
+          <div class="publish-grid"><label class="publish-field">조직<select id="publish-org" aria-label="등록 조직"><option value="">조직 선택</option></select></label><label class="publish-field">업무 분류<select id="publish-category" aria-label="업무 분류"><option value="">업무 분류 선택</option></select></label></div>
+          <fieldset class="publish-visibility"><legend>누가 상세 내용과 파일을 볼 수 있나요?</legend><label><input type="radio" name="publish-visibility" value="public"><span><strong>전체 사용자</strong><small>플랫폼의 모든 사용자가 조회·다운로드할 수 있어요.</small></span></label><label><input type="radio" name="publish-visibility" value="approval"><span><strong>조회 승인 필요</strong><small>목록은 보이며, 상세 조회·다운로드에는 승인이 필요해요.</small></span></label></fieldset>
+        </section>
+      </form>
+      <section id="publish-review" class="publish-review" hidden><span id="publish-review-label" class="badge accent">웹 확인 대기</span><h3 id="publish-review-title">등록 내용이 준비됐어요.</h3><p id="publish-review-text">웹에서 파일·내용·공개 범위를 확인하고 승인한 뒤, 이 창에서 등록을 완료하세요.</p><dl id="publish-summary" class="plan-summary"></dl><div class="publish-review-actions"><button id="publish-review-open" class="secondary" type="button">웹에서 확인·승인</button><button id="publish-status" class="secondary" type="button">승인 상태 확인</button></div><button id="publish-edit" class="text-button" type="button">내용 수정</button></section>
+    </div>
+    <footer class="publish-footer"><p id="publish-message" class="publish-message" role="status" aria-live="polite">창을 닫아도 이 화면에서 작성 중인 내용은 유지됩니다.</p><button id="publish-prepare" class="primary" type="button">등록 내용 확인</button><button id="publish-commit" class="primary" type="button" hidden disabled>등록 완료하기</button></footer>
+  </dialog>
   <footer class="store-footer"><span id="workspace-context">전체 공간 또는 선택한 폴더에 설치할 수 있습니다.</span><span>P&amp;T AI Square · 0.1.0</span></footer>
 </main>
 <!--STORE_SCRIPT-->

@@ -6,5 +6,5 @@
   "hostApi": 1,
   "entrypoint": "worker.py",
   "ui": "ui.html",
-  "actions": ["status", "connect", "disconnect", "options", "catalog", "detail", "like", "download", "prepareInstall", "install", "installations", "checkUpdates", "verify", "rollback"]
+  "actions": ["status", "connect", "disconnect", "options", "catalog", "detail", "like", "download", "prepareInstall", "install", "installations", "checkUpdates", "verify", "rollback", "publishOptions", "inspectPublishSource", "preparePublish", "publishStatus", "publish"]
 }

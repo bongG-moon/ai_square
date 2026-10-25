@@ -72,7 +72,8 @@ def package(output, *, source=HERE, vendor=CANONICAL):
         raise ValueError('Inline UI source contains an unexpected closing element')
     html = html.replace('<!--STORE_STYLE-->', '<style>\n' + css + '\n</style>')
     html = html.replace('<!--STORE_SCRIPT-->', '<script>\n' + script + '\n</script>')
-    files = {'worker.py': source_bytes(source / 'worker.py'), 'ui.html': html.encode('utf-8'),
+    files = {'worker.py': source_bytes(source / 'worker.py'),
+             'zip_install.py': source_bytes(source / 'zip_install.py'), 'ui.html': html.encode('utf-8'),
              'package-meta.json': encoded({'format': 1, 'extension': template})}
     for path in sorted(vendor.rglob('*.py')):
         if '__pycache__' not in path.parts:

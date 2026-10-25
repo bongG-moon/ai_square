@@ -23,6 +23,7 @@ if not out.is_relative_to(ROOT/'outputs'):
  raise SystemExit('Use an isolated outputs subdirectory')
 out.mkdir(parents=True, exist_ok=True)
 work = out/'sample-work'; work.mkdir(exist_ok=True)
+other_work = out/'other-work'; other_work.mkdir(exist_ok=True)
 selected = out/'selected-folder'; selected.mkdir(exist_ok=True)
 if not args.without_extension:
  package = out/'extensions/pt-ai-square.store'; package.mkdir(parents=True, exist_ok=True)
@@ -41,8 +42,10 @@ def fixture_pick(kind, initial_directory=None):
 app.pick = fixture_pick
 sid = app.create(str(work), True)['id']
 app.sessions[sid]['title'] = '스토어 기능 검증 · 예시 업무'
+other_sid = app.create(str(other_work), True)['id']
+app.sessions[other_sid]['title'] = '품질 개선 보고서'
 server = Server(app, 0)
-(out/'runtime.json').write_text(json.dumps({'url': server.origin+'/#token='+app.token, 'origin': server.origin, 'session': sid}), encoding='utf-8')
+(out/'runtime.json').write_text(json.dumps({'url': server.origin+'/#token='+app.token, 'origin': server.origin, 'session': sid, 'otherSession': other_sid}), encoding='utf-8')
 print('Fixture ready', flush=True)
 # Explicitly bounded test-only service, never a persistent app/service.
 timer = threading.Timer(1200, server.shutdown); timer.daemon = True; timer.start()

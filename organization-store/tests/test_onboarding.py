@@ -130,6 +130,7 @@ def test_packaged_worker_imports_vendor_beyond_legacy_windows_path_limit(tmp_pat
     native.mkdir(parents=True)
     script = installed / 'worker.py'
     shutil.copyfile(Path(worker.__file__), script)
+    shutil.copyfile(Path(worker.__file__).with_name('zip_install.py'), native / 'zip_install.py')
     shutil.copytree(worker.PACKAGE_ROOT / 'pt_square_mcp', native / 'vendor' / 'pt_square_mcp',
                     ignore=shutil.ignore_patterns('__pycache__'))
     nested = native / 'vendor' / 'pt_square_mcp' / '_vendor' / 'package_contract.py'
