@@ -75,16 +75,16 @@ def test_reissued_key_keeps_download_counts_and_lifetime_ranking(app):
     assert c.get('/api/catalog', headers=a2).status_code == 200
 
 
-def test_legacy_keys_remain_read_only_and_failed_access_not_counted(app):
+def test_legacy_keys_require_web_review_and_failed_access_is_not_counted(app):
     owner, h = ready(app)
     publish(owner, h, approval=True)
     member, mh = ready(app, 'member')
     t, auth = issue(member, mh)
     with app.app_context():
         db().local_tokens.update_one({'id':t['id']}, {'$unset':{'scope':''}})
-    assert publish(app.test_client(), auth).status_code == 403
+    assert publish(app.test_client(), auth).status_code == 409
     assert app.test_client().get('/download/1/1', headers=auth).status_code == 403
     assert member.get('/api/local-tokens').json['usage'] == {'uploads':0,'downloads':0}
-    assert member.get('/api/local-tokens').json['tokens'][0]['scope'] == 'read'
+    assert member.get('/api/local-tokens').json['tokens'][0]['scope'] == 'publish'
     for scope in ['admin', ['publish'], True, None]:
         assert owner.post('/api/local-tokens', headers=h, json={'scope':scope}).status_code == 400

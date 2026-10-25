@@ -35,8 +35,9 @@ def test_token_lifecycle_permissions_and_no_cookie_fallback(app):
     assert client.get('/api/catalog?q=점검', headers=auth).json['items'][0]['access'] == 'permission_required'
     for path in ['/api/tools/1', '/api/tools/1/manifest', '/download/1/1', '/api/tools/1/version-check?release=1']:
         assert client.get(path, headers=auth).status_code == 403
-    # Cookies and CSRF cannot broaden a read token's powers.
-    for method, path in [('post', '/api/tools'), ('post', '/api/local-tokens'), ('delete', '/api/tools/1'), ('get', '/api/bootstrap'), ('get', '/api/users')]:
+    # Cookies and CSRF cannot broaden the personal KEY's API allowlist.
+    assert owner.post('/api/tools', headers={**h, **auth}).status_code == 409
+    for method, path in [('post', '/api/local-tokens'), ('delete', '/api/tools/1'), ('get', '/api/bootstrap'), ('get', '/api/users')]:
         assert getattr(owner, method)(path, headers={**h, **auth}).status_code == 403
     with app.app_context():
         db().access.insert_one({'tool': 1, 'user': 'member', 'granted': True})

@@ -573,7 +573,11 @@ def test_stdio_initialize_list_and_call_actual_sdk(settings,api_server):
                 assert {'connection_status','search_items','download_item','prepare_install','install_item','prepare_publish','publish_item','get_publish_status','rollback_install',
                         'list_install_locations','get_workspace_selection','cancel_workspace_selection'}<=names
                 for tool in listing.tools:
-                    assert 'token' not in tool.inputSchema.get('properties',{}) and 'key' not in tool.inputSchema.get('properties',{})
+                    assert 'token' not in tool.inputSchema.get('properties',{})
+                    if tool.name in {'connect_account', 'reconnect_key'}:
+                        assert set(tool.inputSchema.get('properties',{})) == {'key', 'accept_http_origin'}
+                    else:
+                        assert 'key' not in tool.inputSchema.get('properties',{})
                     assert not {'ctx','project_roots'} & set(tool.inputSchema.get('properties',{}))
                 download=next(t for t in listing.tools if t.name=='download_item')
                 assert download.inputSchema['required']==['tool_id']

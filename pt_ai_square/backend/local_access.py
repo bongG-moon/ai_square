@@ -1,4 +1,4 @@
-"""Employee-bound API credentials with explicit read/publish permissions."""
+"""Personal API credentials: catalog use and browser-reviewed, owner-only publishing."""
 import hashlib
 import math
 import re
@@ -16,6 +16,17 @@ READ_ENDPOINTS = {
     'api.deployment_info', 'api.download', 'local_access.options', 'local_access.publish_targets',
     'local_access.integration_me', 'publish_drafts.details',
 }
+
+
+def effective_connection_scope(row):
+    """One personal KEY supports publishing; known legacy scopes need no rotation.
+
+    Missing scopes were historically read-only keys. Keep that legacy format,
+    but never interpret an unknown or malformed explicit scope as a permission.
+    Stored rows remain intact for audit and existing KEY attribution.
+    """
+    scope = row.get('scope', 'read')
+    return 'publish' if isinstance(scope, str) and scope in {'read', 'publish'} else None
 
 
 def expiry_status(row, now=None):
@@ -46,7 +57,8 @@ def current_connection_key(uid):
         # Explicit scalar validation avoids Mongo's null/missing equivalence and
         # array matching. Malformed recent records must not hide a valid legacy key.
         candidates = db().local_tokens.find({'user': uid, 'revoked': False}).sort([('created', -1), ('id', -1)])
-        candidate = next((row for row in candidates if expiry_status(row, now) == 'active'), None)
+        candidate = next((row for row in candidates if expiry_status(row, now) == 'active'
+                          and effective_connection_scope(row)), None)
         db().users.update_one({'_id': uid, 'activeConnectionKeyId': {'$exists': False}},
                               {'$set': {'activeConnectionKeyId': candidate['id'] if candidate else None,
                                         'connectionKeyUpdatedAt': time.time()}})
@@ -61,14 +73,15 @@ def token_user():
         raise Unauthorized('API 인증키가 올바르지 않습니다.')
     digest = hashlib.sha256(value[7:].encode()).hexdigest()
     row = db().local_tokens.find_one({'_id': digest, 'revoked': False})
-    if row and expiry_status(row) != 'active':
+    if row and (expiry_status(row) != 'active' or not effective_connection_scope(row)):
         row = None
     user = db().users.find_one({'_id': row['user']}) if row else None
     if (not user or not user.get('enabled', True)
             or current_connection_key(row['user']) != row['id']):
         raise Unauthorized('인증키가 만료·취소되었거나 사용자가 비활성 상태입니다.')
     read = request.method in {'GET', 'HEAD'} and request.endpoint in READ_ENDPOINTS
-    publish = (row.get('scope', 'read') == 'publish' and request.method == 'POST'
+    scope = effective_connection_scope(row)
+    publish = (scope == 'publish' and request.method == 'POST'
                and request.endpoint in {'api.publish', 'api.inspect_package', 'publish_drafts.create', 'publish_drafts.commit'})
     # Desired-state PUT reuses the web's idempotent per-employee like accounting.
     # Explicit detail views use the same bounded employee/tool counter. No
@@ -78,7 +91,7 @@ def token_user():
     if not (read or publish or like or view):
         raise Forbidden('이 인증키에 허용되지 않은 작업입니다.')
     g.api_token_id = row['id']
-    g.api_token_scope = row.get('scope', 'read')
+    g.api_token_scope = scope
     return public_user(user)
 
 
@@ -135,8 +148,10 @@ def tokens():
     download_counts = {x['_id']: x['count'] for x in downloads}
     for row in rows:
         expiration = expiry_status(row)
-        row.update(scope=row.get('scope', 'read'),
+        scope = effective_connection_scope(row)
+        row.update(scope=scope,
                    status=('replaced' if row.get('replacedBy') else 'revoked' if row.get('revoked')
+                           else 'invalid' if scope is None
                            else expiration if expiration != 'active'
                            else 'active' if row['id'] == current_id else 'replaced'),
                    uploads=upload_counts.get(row['id'], 0), downloads=download_counts.get(row['id'], 0))
@@ -166,15 +181,18 @@ def tokens():
 def issue():
     raw = request.get_json(silent=True)
     if not isinstance(raw, dict):
-        raise BadRequest('KEY 이름과 권한을 확인하세요.')
+        raise BadRequest('KEY 이름을 확인하세요.')
     if 'days' in raw:
         raise BadRequest('KEY는 유효기간 없이 발급됩니다. 화면을 새로고침하고 유효기간 항목 없이 다시 발급하세요.')
     name = raw.get('name', '내 연결 KEY')
-    scope = raw.get('scope', 'read')
+    requested_scope = raw.get('scope', 'publish')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60:
         raise BadRequest('KEY 이름은 1~60자입니다.')
-    if not isinstance(scope, str) or scope not in {'read', 'publish'}:
-        raise BadRequest('조회·다운로드·좋아요 또는 업로드 포함 권한을 선택하세요.')
+    if not isinstance(requested_scope, str) or requested_scope not in {'read', 'publish'}:
+        raise BadRequest('개인 KEY 요청 형식이 올바르지 않습니다. 화면을 새로고침하고 다시 발급하세요.')
+    # Cached clients may still submit the old read option. Every new personal
+    # KEY now has the same owner-bound API capabilities, including draft upload.
+    scope = 'publish'
     previous_id = current_connection_key(g.user['id'])
     token = 'ptsq_' + secrets.token_urlsafe(32)
     now = time.time()
@@ -185,7 +203,7 @@ def issue():
     # previous pointer so a simultaneous rotation cannot annotate the wrong key.
     # A failed write is never blindly replayed; only an acknowledged CAS miss is.
     for _ in range(5):
-        event = audit_event('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드·좋아요'))
+        event = audit_event('개인 연결 KEY 발급·교체: 조회·다운로드·좋아요·본인 도구 등록 및 업데이트')
         if previous_id:
             event['tokenUpdate'] = {'user': row['user'], 'id': previous_id,
                                     'fields': {'revoked': True, 'revokedAt': now, 'replacedBy': row['id']}}

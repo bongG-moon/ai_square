@@ -93,6 +93,56 @@ def test_name_tag_description_search_synonyms_and_exact_match(search_app):
     assert c.get('/api/catalog?q=.*').json['total'] == 0
 
 
+def test_registrant_name_and_contact_search_preserve_identity_and_access(search_app):
+    seed(search_app, 1, '회의 정리', data={'approval': True, 'owner': '지원 담당',
+                                      'desc': '회의 기록', 'workTags': []})
+    seed(search_app, 2, '일정 정리', owner='other', data={'owner': '김하늘',
+                                                    'desc': '일정 기록', 'workTags': []})
+    seed(search_app, 3, '삭제 도구', deleted=True)
+    seed(search_app, 4, '삭제 중 도구', purge={'requested': True})
+    with search_app.app_context():
+        db().users.update_one({'_id': 'owner'}, {'$set': {'name': '김하늘'}})
+        db().users.update_one({'_id': 'other'}, {'$set': {'name': 'Lee (AX)'}})
+    c, h = client(search_app)
+    issued = c.post('/api/local-tokens', headers=h, json={'name': '검색 연결'})
+    auth = {'Authorization': 'Bearer ' + issued.json['token']}
+    api = search_app.test_client()
+    for caller, headers in [(c, {}), (api, auth)]:
+        result = caller.get('/api/catalog', query_string={'q': '김하늘'}, headers=headers)
+        assert result.status_code == 200
+        assert result.json['total'] == 2
+        first, second = result.json['items']
+        assert [first['id'], second['id']] == [1, 2]
+        assert first['registrantName'] == '김하늘' and first['owner'] == '지원 담당'
+        assert first['access'] == 'permission_required'
+        assert any('등록자 이름' in reason for reason in first['reasons'])
+        assert second['registrantName'] == 'Lee (AX)' and second['owner'] == '김하늘'
+        assert any('담당자 이름' in reason for reason in second['reasons'])
+        assert 'PRIVATE' not in json.dumps(result.json)
+        assert caller.get('/api/tools/1', headers=headers).status_code == 403
+        assert caller.get('/api/catalog?q=.*', headers=headers).json['total'] == 0
+    assert c.get('/api/catalog?q=lee').json['items'][0]['id'] == 2
+    assert c.get('/api/catalog?q=하늘').json['items'][0]['id'] == 1
+    with search_app.app_context():
+        db().users.update_one({'_id': 'owner'}, {'$set': {'name': '김새봄'}})
+    assert c.get('/api/catalog?q=김새봄').json['items'][0]['id'] == 1
+    assert [row['id'] for row in c.get('/api/catalog?q=김하늘').json['items']] == [2]
+
+
+def test_registrant_relevance_is_applied_before_candidate_cap(search_app, monkeypatch):
+    for tid in range(1, 5):
+        seed(search_app, tid, '참고 도구', owner='other',
+             data={'desc': '김하늘 관련 자료', 'workTags': []})
+    seed(search_app, 99, '회의 정리', data={'desc': '기록', 'workTags': []})
+    with search_app.app_context():
+        db().users.update_one({'_id': 'owner'}, {'$set': {'name': '김하늘'}})
+    monkeypatch.setattr(catalog, 'CANDIDATE_LIMIT', 1)
+    c, _ = client(search_app)
+    result = c.get('/api/catalog?q=김하늘').json
+    assert result['total'] == 5 and result['complete'] is False
+    assert [row['id'] for row in result['items']] == [99]
+
+
 def test_team_preference_only_breaks_relevance_ties(search_app):
     seed(search_app, 1, '메일 조회 A')
     seed(search_app, 2, '메일 조회 B')

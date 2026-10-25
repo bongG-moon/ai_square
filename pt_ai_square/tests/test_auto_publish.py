@@ -298,7 +298,7 @@ def test_key_missing_opens_safe_auth_page(app, server, tmp_path, monkeypatch, ca
     assert 'authUrl' in capsys.readouterr().err
 
 
-def test_mock_cli_requires_publish_key_and_explicit_web_review(app, server, tmp_path):
+def test_mock_cli_requires_personal_key_and_explicit_web_review(app, server, tmp_path):
     app.config.update(AUTH_MODE='mock', MOCK_USER='owner')
     client=publisher.Client(server)
     md=tmp_path/'SKILL.md'; md.write_text('# local',encoding='utf-8')
@@ -309,17 +309,14 @@ def test_mock_cli_requires_publish_key_and_explicit_web_review(app, server, tmp_
     with pytest.raises(publisher.ClientError):
         publisher.publish(client,plan,'public')
     owner,h=ready(app)
-    read_key,_=issue(owner,h,scope='read')
-    reader=publisher.Client(server,read_key['token'])
-    with pytest.raises(publisher.ClientError):
-        publisher.publish(reader,plan,'public')
+    personal_key,_=issue(owner,h,scope='read')
     with app.app_context():
-        assert db().publish_drafts.count_documents({})==0
-        assert db().tools.count_documents({})==0
-    publish_key,_=issue(owner,h)
-    writer=publisher.Client(server,publish_key['token'])
+        # A valid pre-upgrade read KEY now has the same reviewed publishing flow.
+        db().local_tokens.update_one({'id':personal_key['id']},{'$set':{'scope':'read'}})
+    writer=publisher.Client(server,personal_key['token'])
     pending=publisher.publish(writer,plan,'public')
     with app.app_context():
+        assert db().publish_drafts.count_documents({})==1
         assert db().tools.count_documents({})==0
     approve_pending(owner,h,pending,False)
     assert publisher.publish(writer,plan,'public')['version']==1

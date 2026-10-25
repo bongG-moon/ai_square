@@ -138,7 +138,7 @@ def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatc
         assert token.encode() not in response.data and 'Content-Disposition' not in response.headers
 
 
-def test_key_page_shows_extension_then_mcp_without_expanding_details(package_app):
+def test_key_page_keeps_downloads_visible_with_collapsed_connection_steps(package_app):
     app, _ = package_app
     response = app.test_client().get('/local-access')
     assert response.status_code == 200
@@ -150,8 +150,19 @@ def test_key_page_shows_extension_then_mcp_without_expanding_details(package_app
     assert html.index('id="extension-title"') < html.index('id="mcp-title"')
     visible_html = re.sub(r'<details\b[^>]*>.*?</details>', '', html, flags=re.DOTALL)
     assert 'href="/local-access/mcp.zip"' in visible_html
-    assert 'Connect.cmd' in visible_html
-    assert '처음 한 번, AI에 MCP 등록하기' in visible_html
+    assert 'Connect.cmd' not in visible_html
+    assert '처음 한 번, AI에 MCP 등록하기' not in visible_html
+    procedures = re.findall(r'<details\b([^>]*)>(.*?)</details>', html, flags=re.DOTALL)
+    procedures = [(attrs, body) for attrs, body in procedures if 'local-procedure' in attrs]
+    assert len(procedures) == 2
+    assert all(not re.search(r'\bopen\b', attrs) for attrs, _ in procedures)
+    assert 'local-app-steps' in procedures[0][1]
+    assert 'local-mcp-steps' in procedures[1][1]
+    assert '채팅에서 연결 요청하기' in procedures[1][1]
+    assert '같은 채팅에서 개인 KEY 입력하기' in procedures[1][1]
+    assert 'id="token-scope"' not in html
+    assert '신규 등록·내 도구 업데이트' in html
+    assert 'href="/?view=ax"' in visible_html
     assert 'href="/static/guides/MCP_LOCAL_GUIDE.html"' in visible_html
     assert 'Skill로 연결하기' not in html
     assert 'pt-square-receiver.zip' not in html

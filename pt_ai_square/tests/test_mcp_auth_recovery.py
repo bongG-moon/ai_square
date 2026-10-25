@@ -58,7 +58,7 @@ def test_auth_recovery_is_normalized_clickable_and_contains_no_credential(missin
     assert isinstance(error, SquareError)
     assert error.auth_url == ORIGIN + '/local-access'
     assert '[연결 KEY 발급·관리](<' + error.auth_url + '>)' in str(error)
-    assert '재발급' in str(error) and '숨김 입력창' in str(error) and '채팅' in str(error)
+    assert '재발급' in str(error) and 'connect_account' in str(error) and '기록' in str(error)
     assert error.recovery() == {
         'authRequired': True, 'errorCode': 'KEY_AUTH_REQUIRED', 'authUrl': error.auth_url,
         'message': str(error), 'reconnectTool': 'reconnect_key',
@@ -219,22 +219,20 @@ def tool_payload(result):
     return json.loads(''.join(block.text for block in result if hasattr(block, 'text')))
 
 
-def test_reconnect_mcp_tool_cancel_does_not_authenticate_or_repeat_work(settings, monkeypatch):
+def test_reconnect_mcp_tool_without_key_only_prompts_and_never_opens_window(settings, monkeypatch):
     pytest.importorskip('mcp')
     from pt_square_mcp.server import make_server
     before = settings.path.read_bytes()
     seen = []
-    def cancel(path):
-        seen.append(path)
-        return {'reconnected': False, 'baseUrl': ORIGIN, 'authUrl': ORIGIN + '/local-access'}
     def unexpected(*args, **kwargs):
         pytest.fail('Cancelling reconnection must not call the server or repeat a pending operation')
-    monkeypatch.setattr(connection_ui, 'reconnect_key', cancel)
+    monkeypatch.setattr(connection_ui, 'reconnect_key', unexpected)
     monkeypatch.setattr(Client, 'json', unexpected)
     monkeypatch.setattr(Runtime, 'connection_status', unexpected)
     result = tool_payload(asyncio.run(make_server(settings.path).call_tool('reconnect_key', {})))
     assert result['reconnected'] is False
-    assert seen == [settings.path] and settings.path.read_bytes() == before
+    assert result['keyRequired'] is True
+    assert seen == [] and settings.path.read_bytes() == before
 
 
 @pytest.mark.parametrize('status_result', ['connected', 'auth_failed', 'network_failed'])
@@ -242,24 +240,24 @@ def test_reconnect_mcp_tool_checks_new_key_and_does_not_replay_mutations(setting
     pytest.importorskip('mcp')
     from pt_square_mcp.server import make_server
     checked = []
-    def save_new_key(path):
-        save_config(path, ORIGIN, settings.roots, NEW_KEY, download_directory=settings.downloads)
-        return {'reconnected': True, 'baseUrl': ORIGIN, 'authUrl': ORIGIN + '/local-access'}
-    def status(runtime):
-        checked.append(runtime.settings.token())
+    def save_new_key(path, url, token, **kwargs):
+        checked.append(token)
         if status_result == 'auth_failed':
-            return dict(connected=False, **AuthenticationRequired(ORIGIN).recovery())
+            raise AuthenticationRequired(ORIGIN)
         if status_result == 'network_failed':
-            return {'connected': False, 'authRequired': False, 'message': 'Network unavailable'}
-        return {'connected': True, 'user': {'id': 'E1'}, 'key': {'id': 'new-key', 'scope': 'read'}}
+            raise SquareError('Network unavailable')
+        save_config(path, url, settings.roots, token, download_directory=settings.downloads)
+        return {'connected': True, 'user': {'id': 'E1', 'name': 'Test', 'dept': '', 'dept_cd': ''},
+                'key': {'id': 'new-key', 'scope': 'read'}, 'downloadDirectory': str(settings.downloads),
+                'credentialStored': 'windows-dpapi', 'encryptedTransport': True}
     def unexpected(*args, **kwargs):
         pytest.fail('Reconnection must not upload, download or install automatically')
-    monkeypatch.setattr(connection_ui, 'reconnect_key', save_new_key)
-    monkeypatch.setattr(Runtime, 'connection_status', status)
+    monkeypatch.setattr(onboarding, 'connect', save_new_key)
+    monkeypatch.setattr(Runtime, 'connection_status', unexpected)
     monkeypatch.setattr(Client, 'open', unexpected)
-    result = tool_payload(asyncio.run(make_server(settings.path).call_tool('reconnect_key', {})))
+    result = tool_payload(asyncio.run(make_server(settings.path).call_tool('reconnect_key', {'key': NEW_KEY})))
     assert checked == [NEW_KEY]
-    assert result['keySaved'] is True
+    assert bool(result.get('keySaved')) is (status_result == 'connected')
     assert result['reconnected'] is (status_result == 'connected')
     assert KEY not in json.dumps(result) and NEW_KEY not in json.dumps(result)
 
@@ -315,7 +313,7 @@ def test_actual_stdio_error_links_and_live_reconnection_pick_up_new_private_key(
                 await session.initialize()
                 tools = await session.list_tools()
                 reconnect = next(tool for tool in tools.tools if tool.name == 'reconnect_key')
-                assert not reconnect.inputSchema.get('properties')
+                assert set(reconnect.inputSchema['properties']) == {'key', 'accept_http_origin'}
                 failed = await session.call_tool('search_items', {'query': 'fixture'})
                 text = '\n'.join(block.text for block in failed.content if hasattr(block, 'text'))
                 assert failed.isError

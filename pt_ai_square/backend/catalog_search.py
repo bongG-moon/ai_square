@@ -19,8 +19,8 @@ CANDIDATE_LIMIT = 5000
 DEPARTMENT_MEMBER_LIMIT = 10000
 MIN_DEPARTMENT_USERS = 5
 DEPARTMENT_DAYS = 90
-QUERY_FIELDS = ('name', 'workTags', 'desc', 'category')
-FIELD_WEIGHTS = {'name': 8, 'workTags': 6, 'desc': 2, 'category': 4}
+QUERY_FIELDS = ('name', 'workTags', 'desc', 'category', 'owner')
+FIELD_WEIGHTS = {'name': 8, 'workTags': 6, 'desc': 2, 'category': 4, 'owner': 4, 'registrant': 5}
 SYNONYM_GROUPS = (
     ('메일', '이메일', 'email', 'e-mail', 'mail'),
     ('회의록', '회의메모', 'meeting minutes'),
@@ -58,11 +58,12 @@ def query_groups(query):
     return (groups or [(normalize(query),)]) if query else []
 
 
-def relevance(row, query, groups):
+def relevance(row, query, groups, registrant_name=''):
     data = row['data']
     values = {key: [normalize(x) for x in data.get(key, [])]
               if isinstance(data.get(key), list) else [normalize(data.get(key, ''))]
               for key in QUERY_FIELDS}
+    values['registrant'] = [normalize(registrant_name)]
     exact = bool(query and (normalize(data.get('name')) == normalize(query)
                            or str(row['_id']) == query.strip()))
     matched, weight, fields = 0, 0, set()
@@ -169,7 +170,7 @@ def _department_signals(ids, now):
     return signals, meta
 
 
-def _candidates(query, projection, q, groups):
+def _candidates(query, projection, q, groups, registrant_matches):
     if not q:
         return list(db().tools.find(query, projection).sort('_id', 1).limit(CANDIDATE_LIMIT))
     # Select the best lexical matches before applying the candidate cap. An
@@ -184,6 +185,11 @@ def _candidates(query, projection, q, groups):
         pattern = '|'.join(re.escape(word) for word in variants)
         hits = {key: {'$regexMatch': {'input': {'$ifNull': [value, '']}, 'regex': pattern, 'options': 'i'}}
                 for key, value in text_fields.items()}
+        # Actual registering account names are resolved once, separate from the
+        # editable contact label in data.owner. Only owner IDs enter the pipeline.
+        matching_ids = [uid for uid, name in registrant_matches.items()
+                        if any(variant in normalize(name) for variant in variants)]
+        hits['registrant'] = {'$in': ['$owner', {'$literal': matching_ids}]}
         group_hits.append({'$cond': [{'$or': list(hits.values())}, 1, 0]})
         group_weights.append({'$max': [{'$cond': [hit, FIELD_WEIGHTS[key], 0]} for key, hit in hits.items()]})
     return list(db().tools.aggregate([
@@ -217,9 +223,17 @@ def search_catalog():
         raise BadRequest('정렬은 recommended, realtime, cumulative, newest 중 선택하세요.')
     query = {'deleted': {'$ne': True}, 'purge': {'$exists': False}}
     groups = query_groups(q)
+    registrant_matches = {}
     if q:
         patterns = list(dict.fromkeys(re.escape(word) for group in groups for word in group))
-        alternatives = [{'data.' + field: {'$regex': '|'.join(patterns), '$options': 'i'}} for field in QUERY_FIELDS]
+        pattern = '|'.join(patterns)
+        # A single account-name lookup also lets registrant-only matches enter
+        # the lexical candidate cap. Never accept a caller's asserted owner.
+        registrant_matches = {user['_id']: user['name'] for user in db().users.find(
+            {'name': {'$regex': pattern, '$options': 'i'}}, {'name': 1}, max_time_ms=5000)}
+        alternatives = [{'data.' + field: {'$regex': pattern, '$options': 'i'}} for field in QUERY_FIELDS]
+        if registrant_matches:
+            alternatives.append({'owner': {'$in': list(registrant_matches)}})
         if q.isascii() and q.isdigit():
             alternatives.append({'_id': int(q)})
         query['$or'] = alternatives
@@ -240,7 +254,7 @@ def search_catalog():
     projection = {('data.' + k): 1 for k in (*QUERY_FIELDS, 'type', 'platform', 'org', 'orgId', 'categoryId', 'approval', 'owner')}
     projection.update(owner=1, created=1, departmentGrants=1)
     total = db().tools.count_documents(query, maxTimeMS=5000)
-    rows = _candidates(query, projection, q, groups)
+    rows = _candidates(query, projection, q, groups, registrant_matches)
     # Resolve actual registering accounts in one query, not a user lookup per
     # result. data.owner is an editable contact label, not the registrar.
     registrants = {user['_id']: user.get('name', '') for user in db().users.find(
@@ -270,10 +284,11 @@ def search_catalog():
     liked = {r['tool'] for r in db().activity_state.find(
         {'user': g.user['id'], 'tool': {'$in': ids}, 'kind': 'like', 'liked': True}, {'tool': 1})}
     prepared = []
-    labels = {'name': '이름', 'workTags': '관련 업무 태그', 'desc': '설명', 'category': '업무 분류'}
+    labels = {'name': '이름', 'workTags': '관련 업무 태그', 'desc': '설명', 'category': '업무 분류',
+              'owner': '담당자 이름', 'registrant': '등록자 이름'}
     for row in rows:
         tid, data = row['_id'], row['data']
-        exact, matches, weight, fields = relevance(row, q, groups)
+        exact, matches, weight, fields = relevance(row, q, groups, registrants.get(row.get('owner'), ''))
         signal = signals.get(tid)
         metric = stats[tid]
         recent = mode == 'realtime'

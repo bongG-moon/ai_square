@@ -1,6 +1,7 @@
 """Explicit server origin / workspace configuration and Windows DPAPI credentials."""
 import base64
 import ctypes
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from urllib.parse import urlsplit
 DEFAULT_CONFIG = Path.home() / '.pt-ai-square' / 'mcp' / 'config.json'
 TOKEN_RE = re.compile(r'ptsq_[A-Za-z0-9_-]{43}')
 CREDENTIAL_FILE_RE = re.compile(r'credential(?:\.[a-f0-9]{32})?\.dpapi\.json')
+UNSET_CONNECTION_STATE = object()
 
 
 def default_download_directory():
@@ -21,6 +23,14 @@ def default_download_directory():
 
 class SquareError(ValueError):
     """User-facing error that never contains a credential or raw server body."""
+
+
+class ConnectionCancelled(SquareError):
+    """Connection was cancelled before the credential cutover."""
+
+
+class ConnectionChanged(SquareError):
+    """Another process changed the selected connection during authentication."""
 
 
 def normalize_url(value):
@@ -48,8 +58,8 @@ class AuthenticationRequired(SquareError):
                   '연결 KEY를 인증할 수 없습니다. 만료되었거나 취소·재발급된 KEY일 수 있습니다.')
         super().__init__(reason + '\n\n'
                          + f'[연결 KEY 발급·관리](<{self.auth_url}>)에서 로그인 후 KEY를 발급·재발급하세요. '
-                         '그다음 MCP에 KEY를 다시 입력하겠다고 요청하면 reconnect_key가 숨김 입력창을 엽니다. '
-                         '새 KEY는 그 창에만 입력하고 채팅이나 도구 인자로 전달하지 마세요. '
+                         '그다음 AI에게 "AI SQUARE 연결해줘"라고 요청하고 본인의 새 KEY를 전달하면 connect_account로 연결합니다. 기존 reconnect_key도 사용할 수 있습니다. '
+                         '채팅에 입력한 KEY는 대화·도구 호출 기록에 남을 수 있습니다. '
                          '웹에서도 이용할 수 없다면 운영자에게 계정 상태를 확인해 주세요. '
                          '재연결만으로 업로드·설치를 다시 실행하지 않습니다. '
                          '재발급 전 게시 초안은 새 KEY로 다시 준비하고 웹에서 승인해야 합니다.')
@@ -135,6 +145,16 @@ def read_json(path):
     return value
 
 
+def connection_fingerprint(path):
+    """Compare connection generations without returning settings or credentials."""
+    try:
+        data = read_json(path)
+    except FileNotFoundError:
+        return None
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False,
+                                     separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
 def protect(data, decrypt=False):
     if os.name != 'nt':
         raise SquareError('영구 KEY 저장은 Windows DPAPI만 지원합니다. 다른 OS에서는 PTAI_API_TOKEN 환경변수를 사용하세요.')
@@ -159,7 +179,7 @@ def protect(data, decrypt=False):
 
 
 def save_config(path, url, roots, token=None, allow_http=False, *, download_directory=None,
-                credential_name='credential.dpapi.json'):
+                credential_name='credential.dpapi.json', before_commit=None):
     url = normalize_url(url)
     if url.startswith('http:') and not allow_http:
         raise SquareError('HTTP의 KEY·파일 전송이 암호화되지 않음을 확인하고 정확한 주소를 승인해야 합니다.')
@@ -183,6 +203,8 @@ def save_config(path, url, roots, token=None, allow_http=False, *, download_dire
         secret = protect(json.dumps(dict(origin=url, token=token)).encode())
         atomic_json(path.parent / credential_name, {'encrypted': base64.b64encode(secret).decode()})
         data['credentialRef'] = 'windows-dpapi:' + credential_name
+    if before_commit is not None:
+        before_commit()
     atomic_json(path, data)
     return data
 
@@ -193,7 +215,7 @@ class Settings:
         self.data = read_json(self.path)
         self.url = normalize_url(self.data.get('baseUrl'))
         if self.url.startswith('http:') and self.data.get('acceptedHttpOrigin') != self.url:
-            raise SquareError('현재 HTTP 주소에 대한 사용자 확인이 없습니다. setup을 다시 실행하세요.')
+            raise SquareError('현재 HTTP 주소에 대한 사용자 확인이 없습니다. 연결 설정을 확인하고 connect_account에서 정확한 HTTP 주소의 연결에 동의하세요.')
         self.roots = [no_links(p) for p in self.data.get('trustedRoots', [])]
         if not self.roots or any(not p.is_dir() or p == Path(p.anchor) for p in self.roots):
             raise SquareError('허용된 작업 폴더 설정을 확인하세요.')
@@ -210,10 +232,10 @@ class Settings:
                 raw = read_json(self.path.parent / ref.split(':', 1)[1])['encrypted']
                 secret = json.loads(protect(base64.b64decode(raw, validate=True), decrypt=True))
                 if secret.get('origin') != self.url:
-                    raise SquareError('KEY가 연결된 서버와 설정 주소가 다릅니다. setup을 다시 실행하세요.')
+                    raise SquareError('KEY가 연결된 서버와 설정 주소가 다릅니다. connect_account로 개인 KEY를 다시 연결하세요.')
                 token = secret['token']
             except (KeyError, ValueError, UnicodeError):
-                raise SquareError('KEY 보관함을 읽지 못했습니다. setup을 다시 실행하세요.') from None
+                raise SquareError('KEY 보관함을 읽지 못했습니다. connect_account로 개인 KEY를 다시 연결하세요.') from None
         else:
             raise SquareError('알 수 없는 KEY 보관 방식입니다.')
         if not TOKEN_RE.fullmatch(token):

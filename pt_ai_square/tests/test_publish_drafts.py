@@ -32,10 +32,19 @@ def commit(api, auth, draft):
     return api.post('/api/publish-drafts/' + draft['id'] + '/commit', headers=auth, json={})
 
 
-def test_draft_review_commit_update_and_idempotency(app):
+@pytest.mark.parametrize('stored_scope', ['new', 'read', 'missing', 'publish'])
+def test_draft_review_commit_update_and_idempotency(app, stored_scope):
     owner, csrf = ready(app)
     token, auth = issue(owner, csrf)
+    if stored_scope != 'new':
+        with app.app_context():
+            update = {'$unset': {'scope': ''}} if stored_scope == 'missing' else {'$set': {'scope': stored_scope}}
+            db().local_tokens.update_one({'id': token['id']}, update)
     api = app.test_client()
+    connection = api.get('/api/integration/me', headers=auth).json
+    assert connection['key']['scope'] == 'publish'
+    assert connection['capabilities']['publishDraft'] is True
+    assert owner.get('/api/local-tokens').json['connectionKey']['scope'] == 'publish'
     response = create_draft(api, auth)
     assert response.status_code == 201, response.json
     first = response.json
@@ -61,17 +70,31 @@ def test_draft_review_commit_update_and_idempotency(app):
         assert db().tools.count_documents({}) == 1
         assert len(db().tools.find_one({'_id': 1})['versions']) == 2
         assert db().tools.find_one({'_id': 1})['versions'][1]['apiUsage']['tokenId'] == token['id']
+        saved_key = db().local_tokens.find_one({'id': token['id']})
+        if stored_scope == 'missing':
+            assert 'scope' not in saved_key
+        else:
+            assert saved_key['scope'] == ('publish' if stored_scope == 'new' else stored_scope)
 
 
-def test_direct_key_publish_requires_browser_review_and_admin_owner_only(app):
+@pytest.mark.parametrize('stored_scope', ['read', 'missing', 'publish'])
+def test_direct_key_publish_requires_browser_review_and_admin_owner_only(app, stored_scope):
     owner, csrf = ready(app)
     assert publish(owner, csrf).status_code == 201
     admin, acsrf = ready(app, 'admin')
-    _, auth = issue(admin, acsrf)
+    token, auth = issue(admin, acsrf)
+    with app.app_context():
+        update = {'$unset': {'scope': ''}} if stored_scope == 'missing' else {'$set': {'scope': stored_scope}}
+        db().local_tokens.update_one({'id': token['id']}, update)
     api = app.test_client()
     assert publish(api, auth, tid=1, revision=1).status_code == 409
     assert api.post('/api/tools', headers=auth, json={'confirmed': True}).json['code'] == 'publish_draft_required'
     assert create_draft(api, auth, toolId=1, expectedRevision=1).status_code == 403
+    for method, path in [('delete', '/api/tools/1'), ('patch', '/api/tools/1'),
+                         ('post', '/api/tools/1/grants'), ('post', '/api/tools/1/grants/departments'),
+                         ('put', '/api/admins/other'), ('put', '/api/storage/limits')]:
+        # Even the matching admin cookie/CSRF cannot elevate a bearer request.
+        assert getattr(admin, method)(path, headers={**acsrf, **auth}, json={}).status_code == 403
     # Browser administrator workflows remain intact.
     assert publish(admin, acsrf, tid=1, revision=1).status_code == 201
 
@@ -119,16 +142,42 @@ def test_invalid_web_publish_request_id_cleans_staged_file(app):
         assert not list(artifact_path('x').parent.glob('*'))
 
 
-def test_read_key_and_no_key_cannot_prepare_or_approve(app):
+def test_cached_read_key_request_supports_drafts_but_cookie_only_cannot_prepare(app):
     owner, csrf = ready(app)
     _, auth = issue(owner, csrf, 'read')
     api = app.test_client()
-    assert create_draft(api, auth).status_code == 403
+    assert create_draft(api, auth).status_code == 201
     assert create_draft(owner, csrf).status_code == 403
     info = api.get('/api/integration/me', headers=auth).json
-    assert info['user']['id'] == 'owner' and info['key']['scope'] == 'read'
-    assert info['capabilities']['publishDraft'] is False
+    assert info['user']['id'] == 'owner' and info['key']['scope'] == 'publish'
+    assert info['capabilities']['publishDraft'] is True
     assert 'token' not in json.dumps(info)
+
+
+@pytest.mark.parametrize('invalidated', ['revoked', 'expired', 'disabled', 'unknown-scope', 'null-scope'])
+def test_legacy_key_invalidated_after_review_cannot_create_approve_or_commit(app, invalidated):
+    owner, csrf = ready(app)
+    token, auth = issue(owner, csrf)
+    with app.app_context():
+        db().local_tokens.update_one({'id': token['id']}, {'$set': {'scope': 'read'}})
+    api = app.test_client()
+    draft = create_draft(api, auth).json
+    pending = create_draft(api, auth).json
+    assert approve(owner, csrf, draft).status_code == 200
+    with app.app_context():
+        if invalidated == 'disabled':
+            db().users.update_one({'_id': 'owner'}, {'$set': {'enabled': False}})
+        else:
+            changes = {'revoked': {'revoked': True}, 'expired': {'expires': time.time() - 1},
+                       'unknown-scope': {'scope': ['publish']}, 'null-scope': {'scope': None}}
+            db().local_tokens.update_one({'id': token['id']}, {'$set': changes[invalidated]})
+    assert create_draft(api, auth).status_code == 401
+    assert commit(api, auth, draft).status_code == 401
+    # A browser session cannot complete a stale KEY's draft either.
+    assert approve(owner, csrf, pending).status_code in {401, 403}
+    assert commit(owner, csrf, draft).status_code in {401, 403}
+    with app.app_context():
+        assert db().tools.count_documents({}) == 0
 
 
 def test_review_requires_same_owner_session_csrf_digest_and_explicit_visibility(app):

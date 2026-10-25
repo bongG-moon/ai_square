@@ -9,7 +9,7 @@ const Core={
  normalizeSearch:value=>String(value??'').normalize('NFKC').toLowerCase().replace(/\s+/g,''),
  normalizeTags:value=>{const seen=new Set();return (Array.isArray(value)?value:String(value??'').split(/[,，\n]/)).map(t=>String(t).trim().replace(/\s+/g,' ')).filter(t=>{const key=Core.normalizeSearch(t);if(!key||seen.has(key))return false;seen.add(key);return true;});},
  tagError:value=>{const tags=Core.normalizeTags(value);return tags.length>8?'관련 업무는 최대 8개까지 입력해 주세요.':tags.some(t=>t.length>30)?'관련 업무 하나는 30자 이내로 입력해 주세요.':'';},
- filter:(items,f)=>items.filter(x=>!x.hidden&&(f.platform==='전체'||x.platform===f.platform)&&(f.org==='전체 조직'||x.org===f.org)&&(f.type==='전체'||x.type===f.type)&&(f.category==='모든 업무'||x.category===f.category)&&(!f.query||[x.name,x.desc,x.org,x.type,x.category,...(x.workTags||[])].some(value=>Core.normalizeSearch(value).includes(Core.normalizeSearch(f.query))))),
+ filter:(items,f)=>items.filter(x=>!x.hidden&&(f.platform==='전체'||x.platform===f.platform)&&(f.org==='전체 조직'||x.org===f.org)&&(f.type==='전체'||x.type===f.type)&&(f.category==='모든 업무'||x.category===f.category)&&(!f.query||[x.name,x.desc,x.registrantName,x.owner,x.org,x.type,x.category,...(x.workTags||[])].some(value=>Core.normalizeSearch(value).includes(Core.normalizeSearch(f.query))))),
  sort:(items,order)=>[...items].sort((a,b)=>order==='downloads'?b.downloads-a.downloads:order==='recent'?b.created-a.created:order==='name'?a.name.localeCompare(b.name,'ko'):a.editorial-b.editorial),
  pages:(length,page,size)=>({page:Math.max(0,Math.min(page,Math.max(0,Math.ceil(length/size)-1))),count:Math.max(1,Math.ceil(length/size))}),
  canDelete:(item,v)=>!v.deleted&&v.n!==item.active&&v.n!==item.fallback&&!v.refs,

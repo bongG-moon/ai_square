@@ -66,7 +66,7 @@ def test_rotation_invalidates_previous_key_and_keeps_employee_history(app):
     assert accepted(app, first['token']) == 401
 
 
-def test_legacy_latest_key_selected_once_without_escalating_scope(app):
+def test_legacy_latest_key_selected_once_with_personal_publish_capability(app):
     now = time.time()
     old, old_token = legacy(app, 'owner', now-30)
     latest, new_token = legacy(app, 'owner', now-10)
@@ -77,10 +77,10 @@ def test_legacy_latest_key_selected_once_without_escalating_scope(app):
     owner, headers = ready(app)
     data = owner.get('/api/local-tokens').json
     assert data['currentKeyId'] == latest['id']
-    assert data['connectionKey']['scope'] == 'read'
+    assert data['connectionKey']['scope'] == 'publish'
     assert data['connectionKey']['status'] == 'active'
     assert next(r for r in data['tokens'] if r['id'] == old['id'])['status'] == 'replaced'
-    assert app.test_client().post('/api/tools', headers={'Authorization': 'Bearer '+new_token}).status_code == 403
+    assert app.test_client().post('/api/tools', headers={'Authorization': 'Bearer '+new_token}).status_code == 409
     owner.delete('/api/local-tokens/' + latest['id'], headers=headers)
     assert accepted(app, new_token) == 401
     assert accepted(app, old_token) == 401
@@ -140,7 +140,8 @@ def test_key_page_explains_rotation_without_promising_future_integrations(app):
     assert response.status_code == 200
     assert '연결 KEY 발급' in text and '한 개의 KEY' in text
     assert '로컬 MCP 받기' in text
-    assert 'CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤' in text
+    assert '신규 등록·내 도구 업데이트' in text
+    assert 'id="token-scope"' not in text
     assert 'autocomplete="off"' in text
 
 
@@ -209,6 +210,47 @@ def test_legacy_selection_skips_invalid_records_and_accepts_explicit_null(app):
     assert accepted(app, token) == 200
     owner, _ = ready(app)
     assert owner.get('/api/local-tokens').json['currentKeyId'] == permanent['id']
+
+
+@pytest.mark.parametrize('request_scope', ['missing', 'read', 'publish'])
+def test_new_personal_key_has_uniform_publish_capability(app, request_scope):
+    owner, csrf = ready(app)
+    payload = {'name': '내 연결 KEY'}
+    if request_scope != 'missing':
+        payload['scope'] = request_scope
+    response = owner.post('/api/local-tokens', headers=csrf, json=payload)
+    assert response.status_code == 201
+    issued = response.json
+    assert issued['scope'] == 'publish'
+    with app.app_context():
+        assert db().local_tokens.find_one({'id': issued['id']})['scope'] == 'publish'
+    info = app.test_client().get('/api/integration/me', headers={
+        'Authorization': 'Bearer ' + issued['token']}).json
+    assert info['key'] == {'id': issued['id'], 'scope': 'publish'}
+    assert info['capabilities']['publishDraft'] is True
+    assert info['capabilities']['approvalRequired'] is True
+    assert owner.get('/api/local-tokens').json['connectionKey']['scope'] == 'publish'
+
+
+@pytest.mark.parametrize('scope', [None, '', 'admin', 'READ', ['read'], ['publish'], {}, True])
+def test_unknown_explicit_key_scope_fails_closed_and_lists_safely(app, scope):
+    issued = issue(app).json
+    with app.app_context():
+        db().local_tokens.update_one({'id': issued['id']}, {'$set': {'scope': scope}})
+    assert accepted(app, issued['token']) == 401
+    owner, _ = ready(app)
+    current = owner.get('/api/local-tokens').json['connectionKey']
+    assert current['status'] == 'invalid' and current['scope'] is None
+
+
+def test_legacy_pointer_migration_skips_unknown_scopes(app):
+    now = time.time()
+    valid, token = legacy(app, 'owner', now, scope='read')
+    _, malformed_token = legacy(app, 'owner', now + 1, scope=['publish'])
+    assert accepted(app, malformed_token) == 401
+    assert accepted(app, token) == 200
+    owner, _ = ready(app)
+    assert owner.get('/api/local-tokens').json['currentKeyId'] == valid['id']
 
 
 @pytest.mark.parametrize('days', [1, 7, 30, None])

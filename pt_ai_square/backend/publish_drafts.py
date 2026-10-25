@@ -11,7 +11,7 @@ from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Gone, NotFound
 from .storage import db, artifact_path, next_id
 from .post_commit import followup_pending
 from .package_identity import fixed_package_id, identity_fields
-from .local_access import current_connection_key, expiry_status
+from .local_access import current_connection_key, effective_connection_scope, expiry_status
 from .mongo_api import (publication_request, publication_artifact, publication_data,
                         publish_prepared, tool, check_revision, payload)
 
@@ -46,7 +46,7 @@ def own_draft(draft_id):
 def active_key(row):
     key = db().local_tokens.find_one({'id': row['keyId'], 'user': row['user'], 'revoked': False})
     user = db().users.find_one({'_id': row['user'], 'enabled': {'$ne': False}})
-    if (not key or not user or key.get('scope', 'read') != 'publish'
+    if (not key or not user or effective_connection_scope(key) != 'publish'
             or expiry_status(key) != 'active'
             or current_connection_key(row['user']) != row['keyId']):
         raise Forbidden('초안을 준비한 연결 KEY가 취소·교체되었습니다. 새 KEY로 다시 준비하세요.')
@@ -161,7 +161,7 @@ def saved_result(row):
 @publish_drafts.post('/api/publish-drafts')
 def create():
     if getattr(g, 'api_token_scope', None) != 'publish':
-        raise Forbidden('업로드 권한이 있는 연결 KEY로 초안을 준비하세요.')
+        raise Forbidden('본인의 개인 연결 KEY로 초안을 준비하세요.')
     raw = publication_request()
     tid = raw.pop('toolId', None)
     if tid is not None and (type(tid) is not int or tid <= 0):

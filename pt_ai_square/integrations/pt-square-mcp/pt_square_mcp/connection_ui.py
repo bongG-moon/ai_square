@@ -5,8 +5,19 @@ import threading
 import webbrowser
 
 from .config import (DEFAULT_CONFIG, AuthenticationRequired, SquareError, Settings, atomic_json,
+                     UNSET_CONNECTION_STATE, connection_fingerprint,
                      default_download_directory, no_links, normalize_url, operation_lock)
 from .onboarding import connect, resolve_connection
+
+
+_active_connections = set()
+_connection_guard = threading.Lock()
+
+
+def connection_origin(config_path=DEFAULT_CONFIG):
+    """Keep an existing connection's origin; use the package only for first use."""
+    path = no_links(config_path)
+    return Settings(path).url if path.exists() else resolve_connection(path)
 
 
 def _tk():
@@ -19,9 +30,13 @@ def _tk():
 
 
 class ConnectionWindow:
-    def __init__(self, root, config_path=DEFAULT_CONFIG, *, url=None):
+    def __init__(self, root, config_path=DEFAULT_CONFIG, *, url=None,
+                 expected_state=UNSET_CONNECTION_STATE, cancel_event=None):
         tk, ttk, _ = _tk()
         self.root, self.config_path = root, config_path
+        self.expected_state = (connection_fingerprint(config_path)
+                               if expected_state is UNSET_CONNECTION_STATE else expected_state)
+        self.cancel_event = cancel_event
         self.url = normalize_url(url) if url is not None else resolve_connection(config_path)
         self.busy = False
         self.completed = False
@@ -67,6 +82,10 @@ class ConnectionWindow:
         self.entry.focus_set()
 
     def start_connect(self):
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            self.key.set('')
+            self.close()
+            return
         if self.completed:
             self.close()
             return
@@ -88,7 +107,8 @@ class ConnectionWindow:
 
         def worker():
             try:
-                result = connect(self.config_path, self.url, token, allow_http=accepted)
+                result = connect(self.config_path, self.url, token, allow_http=accepted,
+                                 expected_state=self.expected_state, cancel_event=self.cancel_event)
                 self.results.put((True, result))
             except AuthenticationRequired:
                 self.results.put((False, 'KEY가 만료되었거나 취소·재발급되었을 수 있습니다. 아래 KEY 사이트 버튼에서 확인한 후 새 KEY를 입력하세요. 웹도 이용할 수 없다면 운영자에게 계정 상태를 확인해 주세요.'))
@@ -128,14 +148,32 @@ class ConnectionWindow:
         self.root.destroy()
 
 
-def _show_connection(config_path, url):
+    def watch_cancellation(self):
+        """Tk work stays on its owning thread; the MCP thread only sets an event."""
+        if self.cancel_event is None:
+            return
+        if self.cancel_event.is_set():
+            self.key.set('')
+            if not self.busy:
+                self.root.destroy()
+                return
+            self.status.set('연결 요청을 취소하고 있습니다. 확인 중인 응답이 끝나면 창을 닫습니다.')
+        self.root.after(80, self.watch_cancellation)
+
+
+def _show_connection(config_path, url, *, expected_state=UNSET_CONNECTION_STATE, cancel_event=None):
+    if cancel_event is not None and cancel_event.is_set():
+        return False
     url = normalize_url(url)
     from .workspace_ui import enable_dpi_awareness
     enable_dpi_awareness()
     tk, _, _ = _tk()
     root = tk.Tk()
     try:
-        window = ConnectionWindow(root, config_path, url=url)
+        window = ConnectionWindow(root, config_path, url=url,
+                                  expected_state=expected_state, cancel_event=cancel_event)
+        if cancel_event is not None:
+            root.after(80, window.watch_cancellation)
         root.mainloop()
         return window.completed
     finally:
@@ -150,12 +188,31 @@ def open_connection(config_path=DEFAULT_CONFIG):
     return 0
 
 
-def reconnect_key(config_path=DEFAULT_CONFIG, *, show_dialog=None):
+def reconnect_key(config_path=DEFAULT_CONFIG, *, show_dialog=None, cancel_event=None):
     # Renew the failing connection, even if the ZIP was originally downloaded
     # from a different server. No KEY or user-supplied URL is an MCP argument.
-    url = Settings(config_path).url
-    completed = (show_dialog or _show_connection)(config_path, url)
-    return {'reconnected': bool(completed), 'baseUrl': url, 'authUrl': url+'/local-access'}
+    path = no_links(config_path)
+    expected_state = connection_fingerprint(path)
+    url = connection_origin(path)
+    if connection_fingerprint(path) != expected_state:
+        raise SquareError('연결 설정이 변경되었습니다. 연결 상태를 확인한 뒤 다시 요청하세요.')
+    if cancel_event is not None and cancel_event.is_set():
+        return {'reconnected': False, 'baseUrl': url, 'authUrl': url+'/local-access'}
+    binding = str(path).casefold()
+    with _connection_guard:
+        if binding in _active_connections:
+            return {'reconnected': False, 'baseUrl': url, 'authUrl': url+'/local-access',
+                    'waitingForUser': True,
+                    'notice': '개인 KEY 입력창이 이미 열려 있습니다. 기존 창에서 입력을 완료하거나 취소해 주세요.'}
+        _active_connections.add(binding)
+    try:
+        completed = (show_dialog(config_path, url) if show_dialog is not None else
+                     _show_connection(config_path, url, expected_state=expected_state,
+                                      cancel_event=cancel_event))
+        return {'reconnected': bool(completed), 'baseUrl': url, 'authUrl': url+'/local-access'}
+    finally:
+        with _connection_guard:
+            _active_connections.discard(binding)
 
 
 def choose_workspace(config_path=DEFAULT_CONFIG, purpose='publish', *, chooser=None):

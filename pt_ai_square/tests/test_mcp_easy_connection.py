@@ -244,7 +244,9 @@ def test_key_form_success_requires_verified_account_and_clears_input(window, mon
     assert window.busy and not window.completed
     assert window.key.get() == ''
     assert window.entry.options['state'] == 'disabled'
-    assert calls[0][0][2] == KEY and calls[0][1] == {'allow_http': True}
+    assert calls[0][0][2] == KEY and calls[0][1]['allow_http'] is True
+    assert calls[0][1]['expected_state'] == ui.connection_fingerprint(window.config_path)
+    assert calls[0][1]['cancel_event'] is None
     window.poll()
     assert window.completed and not window.busy
     assert '홍길동 · 융합기술' in window.status.get()

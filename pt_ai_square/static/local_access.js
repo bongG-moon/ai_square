@@ -3,7 +3,7 @@
   const api = 'api/local-tokens';
   const $ = selector => document.querySelector(selector);
   const status = $('#status');
-  const scopeName = scope => scope === 'publish' ? '업로드 포함' : '조회·다운로드·좋아요';
+  const scopeName = scope => scope === 'publish' ? '조회·다운로드·신규 등록·내 도구 업데이트' : '조회·다운로드·좋아요';
   const date = value => new Date(value * 1000).toLocaleString('ko-KR', {year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'});
   const lifetime = key => key.status === 'invalid' ? '재발급 필요' : (key.expires === null ? '유효기간 제한 없음' : (typeof key.expires === 'number' && Number.isFinite(key.expires) && key.expires > 0 ? `${date(key.expires)}까지` : '재발급 필요'));
   const stateName = state => ({active:'사용 중', expired:'만료됨', revoked:'사용 취소됨', replaced:'교체됨', invalid:'재발급 필요'}[state] || '발급 전');
@@ -27,10 +27,10 @@
     $('#key-issue').textContent = data.tokens.length ? 'KEY 재발급' : '연결 KEY 발급';
     $('#key-issue').disabled = false;
     $('#key-revoke').hidden = key?.status !== 'active';
-    $('#key-rule').textContent = data.tokens.length ? '재발급하면 기존 KEY는 즉시 사용할 수 없습니다. 연결한 프로그램에도 새 KEY를 입력하세요. 기존 이용 이력은 유지됩니다.' : '본인 사번에만 연결됩니다. 업로드 포함 권한도 도구 삭제·권한 변경은 허용하지 않습니다.';
+    $('#key-rule').textContent = data.tokens.length ? '재발급하면 기존 KEY는 즉시 사용할 수 없습니다. 연결한 프로그램에도 새 KEY를 입력하세요. 기존 이용 이력은 유지됩니다.' : '본인 사번에 연결된 KEY로 조회·다운로드·좋아요와 신규 등록·내 도구 업데이트를 사용할 수 있습니다.';
     if (key && typeof key.expires === 'number') $('#key-rule').textContent += ' 이전에 발급한 KEY의 유효기간은 유지되며, 재발급하면 기간 제한이 없어집니다.';
     if (!loaded && key) {
-      $('#token-name').value=key.name; $('#token-scope').value=key.scope;
+      $('#token-name').value=key.name;
     }
     loaded = true;
     if (issuedKeyId && (issuedKeyId !== currentKeyId || key?.status !== 'active')) clearIssued();
@@ -64,7 +64,7 @@
     e.preventDefault();const button=$('#key-issue');if(button.disabled)return;button.disabled=true;
     clearIssued(); status.textContent='연결 KEY를 발급하고 있습니다.';
     try {
-      const result=await call(api,{method:'POST',body:JSON.stringify({name:$('#token-name').value,scope:$('#token-scope').value})});
+      const result=await call(api,{method:'POST',body:JSON.stringify({name:$('#token-name').value})});
       $('#secret').value=result.token;$('#issued').hidden=false;issuedKeyId=result.id;
       await refresh();
       status.textContent=issuedKeyId ? '발급했습니다. KEY를 복사해 연결할 프로그램에 입력하세요.' : '다른 화면에서 KEY가 변경되었습니다. 최신 KEY를 다시 확인하세요.';
