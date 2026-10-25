@@ -257,6 +257,7 @@
 #square-app .ws-ax-symbol svg{width:28px;height:28px;stroke-width:1.65}
 #square-app .ws-ax-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}
 #square-app .ws-ax-grid>.ws-empty{grid-column:1/-1}
+#square-app .ws-ax-grid>.ws-empty>[data-lucide]{--icon-size:28px;display:flex;align-items:center;justify-content:center;width:28px;height:28px;margin:0 auto 17px!important}
 #square-app .ws-ax-card{display:flex;flex-direction:column;min-width:0;padding:20px;background:#ffffffce;border:1px solid #fff;border-radius:20px;box-shadow:0 8px 24px #22223a08;backdrop-filter:blur(18px);transition:transform .25s,box-shadow .25s}
 #square-app .ws-ax-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 #square-app .ws-ax-card h2{font-size:18px;line-height:1.4;font-weight:600;margin:0 0 8px;overflow-wrap:anywhere}
@@ -275,7 +276,7 @@
 #square-app .ws-ax-filters button{white-space:nowrap;flex-shrink:0}
 @media(hover:hover) and (prefers-reduced-motion:no-preference){#square-app .ws-ax-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px #22223a12}}
 @media(max-width:1100px){#square-app .ws-ax-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){#square-app .ws-ax-grid{grid-template-columns:1fr}#square-app .ws-ax-intro{flex-wrap:wrap;padding:18px;gap:12px}#square-app .ws-ax-intro h2{font-size:18px}#square-app .ws-ax-intro p{font-size:12px}#square-app .ws-ax-intro>.sq-primary{margin-left:auto}#square-app .ws-ax-card{padding:18px}#square-app .ws-ax-count{display:none}}
+@media(max-width:700px){#square-app .ws-ax-grid{grid-template-columns:1fr}#square-app .ws-ax-intro{display:grid;grid-template-columns:44px minmax(0,1fr);padding:18px;gap:12px}#square-app .ws-ax-intro h2{font-size:18px}#square-app .ws-ax-intro p{font-size:12px}#square-app .ws-ax-intro>.sq-primary{grid-column:2;justify-self:end;margin-left:0}#square-app .ws-ax-card{padding:18px}#square-app .ws-ax-count{display:none}}
 
 /* Compact management surfaces. The direct summary is present only in manage/admin;
    dialogs, the catalog, requests and AX Workspace retain their existing styles. */

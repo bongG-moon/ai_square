@@ -4,7 +4,7 @@ import math
 import re
 import secrets
 import time
-from flask import Blueprint, g, jsonify, render_template, request, session
+from flask import Blueprint, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Unauthorized
 from .storage import db, public_user, audit_event, deliver_notifications
 from .post_commit import followup_pending
@@ -98,10 +98,12 @@ def mcp_download():
 @local_access.get('/static/guides/ax-workspace-extension-setup.exe')
 @local_access.get('/local-access/workspace-extension.zip')
 def workspace_extension_download():
-    # The static source cannot bypass browser authentication or lose its origin
-    # preset. Both URLs return the same request-local ZIP, never a bare EXE.
-    from .store_package import download_package
-    return download_package()
+    # Old bookmarks now lead to administrator-published Workspace files. Keep
+    # the browser auth guard on both URLs; never serve an obsolete bundled EXE.
+    response = redirect(url_for('index', view='ax'))
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.headers['Vary'] = 'Cookie'
+    return response
 
 
 @local_access.get('/api/local-tokens')

@@ -146,9 +146,15 @@ def _deliver_event(e):
     if target.get('type') == 'idea' and deletion_started('idea', target.get('id')):
         cleanup_if_deleted('idea', target.get('id'))
         return
+    delivery_error = None
     if subscription:
         # Preserve an explicit unsubscribe even when delivery was delayed.
-        db().subscriptions.update_one(subscription, {'$setOnInsert': {'enabled': True}}, upsert=True)
+        # A comment author's automatic subscription must not hold back the
+        # owner's feedback inbox. Keep the event until every effect succeeds.
+        try:
+            db().subscriptions.update_one(subscription, {'$setOnInsert': {'enabled': True}}, upsert=True)
+        except PyMongoError as error:
+            delivery_error = error
     token_update = e.get('tokenUpdate')
     if token_update:
         fields = token_update['fields']
@@ -157,10 +163,16 @@ def _deliver_event(e):
         db().local_tokens.update_one({'id': token_update['id'], 'user': token_update['user']},
                                      {'$set': fields})
     for uid in e.get('recipients', []):
-        db().notifications.update_one(
-            {'_id': e['id'] + ':' + uid},
-            {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'],
-                              'kind': e['kind'], 'created': e['created'], 'read': False}}, upsert=True)
+        # Recipients are independent. One unavailable inbox must not prevent
+        # the others from receiving a notification about the saved comment.
+        try:
+            db().notifications.update_one(
+                {'_id': e['id'] + ':' + uid},
+                {'$setOnInsert': {'user': uid, 'title': e['title'], 'target': e['target'],
+                                  'kind': e['kind'], 'created': e['created'], 'read': False}}, upsert=True)
+        except PyMongoError as error:
+            if delivery_error is None:
+                delivery_error = error
     from .permanent_delete import cleanup_if_deleted
     if subscription:
         cleanup_if_deleted('tool', subscription['tool'])
@@ -170,6 +182,10 @@ def _deliver_event(e):
         cleanup_if_deleted('idea', target.get('id'))
     if e.get('toolCheck') is not None:
         cleanup_if_deleted('tool', e['toolCheck'])
+    if delivery_error is not None:
+        # The caller leaves the durable outbox in place. Existing inbox rows
+        # use $setOnInsert so retrying cannot duplicate or mark them unread.
+        raise delivery_error
 
 
 def deliver_notifications(collection_name=None, document_id=None):

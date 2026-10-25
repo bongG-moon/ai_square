@@ -178,6 +178,21 @@ test('a saved like distinguishes simultaneous history and aggregation delay in o
 
 function bootstrap(likes=0,revision=2){return {items:[{id:1,likes,liked:likes>0,downloads:3}],organizations:[],requests:[],policy:{},audit:[],user:{name:'User',org:'Team'},authMode:'mock',storage:{limitRevision:revision}};}
 
+test('bootstrap preserves a newer notification read while applying fresh catalog data',async()=>{
+ const h=setup(),loading=h.context.realRefresh();
+ h.context.runtime.notificationGeneration++;
+ vm.runInContext('server.unread=0;',h.context);
+ h.respond(h.requests[0],{...bootstrap(3),unread:8});await loading;
+ assert.equal(vm.runInContext('server.unread',h.context),0);assert.equal(h.items[0].likes,2);
+});
+
+test('an unchanged profile survives refresh so its existing photo is not fetched again',async()=>{
+ const h=setup(),session=h.nodes.get('#sq-session');session.textContent='existing profile';
+ h.nodes.set('#sq-session .sq-profile-name',h.element());
+ const loading=h.context.realRefresh();h.respond(h.requests[0],bootstrap());await loading;
+ assert.equal(session.textContent,'existing profile');
+});
+
 test('global bootstrap generation rejects an earlier response after a newer caller has rendered',async()=>{
  const h=setup();let rendered=0;h.context.render=()=>{rendered++;};
  const earlier=h.context.realRefresh(),latest=h.context.realRefresh();

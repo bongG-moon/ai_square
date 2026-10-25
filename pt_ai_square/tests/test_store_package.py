@@ -1,20 +1,15 @@
-"""Server-bound optional-extension downloads without profile or Mongo writes."""
+"""Legacy extension links route to the administrator-published AX Workspace catalog."""
 import hashlib
-from io import BytesIO
-import json
 from pathlib import Path
+import re
 import time
 from types import SimpleNamespace
-from zipfile import ZipFile
 
 from flask import Flask, url_for
 import pytest
 
 from pt_ai_square.backend.local_access import local_access
-from pt_ai_square.backend.store_package import (
-    INSTALLER_NAME, MANIFEST, MAX_INSTALLER_BYTES, SOURCE_NAME,
-    connection_origin, package_for_origin,
-)
+SOURCE_NAME = 'ax-workspace-extension-setup.exe'
 
 
 @pytest.fixture
@@ -31,34 +26,24 @@ def package_app(tmp_path):
     return app, source
 
 
-def unpack(response):
-    assert response.status_code == 200
-    with ZipFile(BytesIO(response.data)) as archive:
-        return {name: archive.read(name) for name in archive.namelist()}
-
-
-def test_download_binds_each_server_without_modifying_installer(package_app):
+@pytest.mark.parametrize('path', ['/local-access/workspace-extension.zip', '/static/guides/' + SOURCE_NAME])
+def test_old_links_redirect_to_workspace_without_serving_remaining_bundled_installer(package_app, path):
     app, source = package_app
     original = source.read_bytes()
-    client = app.test_client()
-    for origin in ['http://pntaisquare.company.example', 'https://other.example:8443']:
-        response = client.get('/local-access/workspace-extension.zip', base_url=origin,
-                              headers={'Authorization': 'test-secret-not-a-key', 'Cookie': 'private=never-copy'})
-        files = unpack(response)
-        assert set(files) == {INSTALLER_NAME, MANIFEST, 'README.txt'}
-        assert files[INSTALLER_NAME] == original
-        assert json.loads(files[MANIFEST]) == {'schemaVersion': 1, 'baseUrl': origin}
-        assert b'test-secret' not in b'\n'.join(files.values())
-        assert b'never-copy' not in b'\n'.join(files.values())
+    for method in ['GET', 'HEAD']:
+        response = app.test_client().open(path, method=method)
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/?view=ax'
         assert response.headers['Cache-Control'] == 'private, no-store'
         assert response.headers['Vary'] == 'Cookie'
+        assert 'Content-Disposition' not in response.headers
         assert 'ETag' not in response.headers
-        assert response.headers['Content-Type'] == 'application/zip'
-        assert 'PNT-AI-Square-AX-Extension.zip' in response.headers['Content-Disposition']
+        assert response.mimetype != 'application/zip'
+        assert original not in response.data
     assert source.read_bytes() == original
 
 
-def test_public_url_wins_behind_reverse_proxy(package_app):
+def test_redirect_does_not_use_public_url_or_reverse_proxy_headers(package_app):
     app, _ = package_app
     app.config['PUBLIC_URL'] = 'http://PntAiSquare.company.example:80/'
     response = app.test_client().get('/local-access/workspace-extension.zip?url=https://untrusted.example',
@@ -66,7 +51,9 @@ def test_public_url_wins_behind_reverse_proxy(package_app):
                                         'X-Forwarded-Host': 'untrusted.example',
                                         'X-Forwarded-Proto': 'https',
                                     })
-    assert json.loads(unpack(response)[MANIFEST])['baseUrl'] == 'http://pntaisquare.company.example'
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/?view=ax'
+    assert b'untrusted.example' not in response.data
 
 
 def test_untrusted_forwarded_headers_and_query_do_not_choose_destination(package_app):
@@ -76,54 +63,45 @@ def test_untrusted_forwarded_headers_and_query_do_not_choose_destination(package
                                         'X-Forwarded-Host': 'untrusted.example',
                                         'Forwarded': 'host=untrusted.example;proto=https',
                                     })
-    assert json.loads(unpack(response)[MANIFEST])['baseUrl'] == 'http://company.example'
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/?view=ax'
+    assert b'untrusted.example' not in response.data
 
 
-@pytest.mark.parametrize('origin', [
-    'http://0.0.0.0', 'http://[::]:5000', 'http://user:secret@example.com',
-    'https://example.com/path', 'https://example.com?key=secret',
-    'https://example.com/#secret', 'https://example.com\\redirect',
-])
-def test_invalid_or_listening_origin_cannot_be_embedded(origin, package_app):
-    with pytest.raises(ValueError):
-        connection_origin(origin)
-    app, _ = package_app
-    app.config['PUBLIC_URL'] = origin
-    response = app.test_client().get('/local-access/workspace-extension.zip')
-    assert response.status_code == 503
-    assert b'secret' not in response.data
-
-
-def test_missing_or_invalid_installer_fails_without_empty_download(package_app):
+@pytest.mark.parametrize('path', ['/local-access/workspace-extension.zip', '/static/guides/' + SOURCE_NAME])
+def test_old_links_work_without_any_bundled_installer(package_app, path):
     app, source = package_app
-    client = app.test_client()
-    for content in [b'', b'<html>not an installer</html>', b'MZ']:
-        source.write_bytes(content)
-        assert client.get('/local-access/workspace-extension.zip').status_code == 503
     source.unlink()
-    assert client.get('/local-access/workspace-extension.zip').status_code == 503
+    response = app.test_client().get(path)
+    assert response.status_code == 302
+    assert response.headers['Location'] == '/?view=ax'
+    assert 'Content-Disposition' not in response.headers
 
 
-def test_oversized_installer_is_rejected(package_app):
-    _, source = package_app
-    with source.open('wb') as stream:
-        stream.write(b'MZ')
-        stream.truncate(MAX_INSTALLER_BYTES + 1)
-    from werkzeug.exceptions import ServiceUnavailable
-    with pytest.raises(ServiceUnavailable):
-        package_for_origin(source, 'https://company.example')
+def test_existing_mcp_download_route_is_unchanged(package_app, monkeypatch):
+    from pt_ai_square.backend import mcp_package
+    app, _ = package_app
+    calls = []
+    def download():
+        calls.append(True)
+        return b'existing-mcp-package', 200, {'Content-Type': 'application/zip'}
+    monkeypatch.setattr(mcp_package, 'download_package', download)
+    for path in ['/local-access/mcp.zip', '/static/guides/pt-square-mcp.zip']:
+        response = app.test_client().get(path)
+        assert response.status_code == 200
+        assert response.data == b'existing-mcp-package'
+        assert response.mimetype == 'application/zip'
+    assert len(calls) == 2
 
 
-def test_static_source_url_returns_origin_aware_zip_too(package_app):
-    app, source = package_app
+def test_existing_endpoint_identity_is_preserved_for_old_bookmarks(package_app):
+    app, _ = package_app
     with app.test_request_context('/'):
         assert url_for('local_access.workspace_extension_download') == '/local-access/workspace-extension.zip'
-    files = unpack(app.test_client().get('/static/guides/' + SOURCE_NAME, base_url='http://company.example'))
-    assert files[INSTALLER_NAME] == source.read_bytes()
-    assert json.loads(files[MANIFEST])['baseUrl'] == 'http://company.example'
 
 
-def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatch):
+@pytest.mark.parametrize('scope', ['read', 'publish'])
+def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatch, scope):
     from pt_ai_square.backend import auth
     from pt_ai_square.backend import local_access as access_module
 
@@ -132,7 +110,7 @@ def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatc
     token = 'ptsq_' + 'A' * 43
     user = {'_id': 'employee', 'name': 'Employee', 'enabled': True, 'activeConnectionKeyId': 'key-1'}
     token_row = {'_id': hashlib.sha256(token.encode()).hexdigest(), 'id': 'key-1',
-                 'user': 'employee', 'revoked': False, 'expires': None, 'scope': 'read'}
+                 'user': 'employee', 'revoked': False, 'expires': None, 'scope': scope}
 
     class ReadOnlyRows:
         def __init__(self, row): self.row = row
@@ -151,19 +129,25 @@ def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatc
         session.update(emp_no='employee', logFlag=True,
                        _hcp_login={'employee': 'employee', 'at': time.time()})
     for path in ('/local-access/workspace-extension.zip', '/static/guides/' + SOURCE_NAME):
-        assert anonymous.get(path).status_code == 302
+        login = anonymous.get(path)
+        assert login.status_code == 302 and '/login?' in login.headers['Location']
         assert anonymous.get(path, headers={'Authorization': 'Bearer ' + token}).status_code == 403
-        files = unpack(signed.get(path))
-        assert token.encode() not in b'\n'.join(files.values())
+        assert signed.get(path, headers={'Authorization': 'Bearer ' + token}).status_code == 403
+        response = signed.get(path)
+        assert response.status_code == 302 and response.headers['Location'] == '/?view=ax'
+        assert token.encode() not in response.data and 'Content-Disposition' not in response.headers
 
 
-def test_key_page_explains_optional_extension_and_keeps_mcp_link(package_app):
+def test_key_page_routes_to_workspace_and_keeps_mcp_inside_collapsed_details(package_app):
     app, _ = package_app
     response = app.test_client().get('/local-access')
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert '/local-access/workspace-extension.zip' in html
-    assert '/local-access/mcp.zip' in html
-    assert 'P&T AI Square 확장 받기' in html
-    assert 'connection.json' in html
-    assert '개인 KEY만 입력' in html
+    assert 'href="/?view=ax"' in html
+    assert '/local-access/workspace-extension.zip' not in html
+    assert 'ax-workspace-extension-setup.exe' not in html
+    assert 'P&T AI Square 확장 받기' not in html
+    sections = re.findall(r'<details\b([^>]*)>(.*?)</details>', html, re.DOTALL)
+    mcp_section = next((attributes, content) for attributes, content in sections
+                       if '/local-access/mcp.zip' in content)
+    assert not re.search(r'\bopen\b', mcp_section[0])

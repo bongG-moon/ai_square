@@ -22,8 +22,7 @@ render=function(){
  originalRender();const special=['manage','admin','ideas','ax'].includes(state.route);
  workspace.hidden=!special;$('.sq-toolbar').hidden=special;$('#sq-search-form').hidden=special;
  $('#ws-admin-nav').hidden=server.user.role!=='admin';
- const unread=server.unread||0;$('#ws-unread').hidden=!unread;$('#ws-unread').textContent=unread>99?'99+':unread;
- $('.ws-bell').setAttribute('aria-label',`내 알림, 읽지 않은 알림 ${unread}개`);
+ renderUnreadCount();
  if(special){
   const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.'],ax:['AX Workspace.','업무를 연결하는 시작.']};
   setPageHeading(...labels[state.route],true);renderWorkspace();
@@ -177,9 +176,33 @@ async function ideaDetail(id){
  openModal(i.name,'기능 요청',`<div class="ws-idea-top">${badge(i.deletionPending?'삭제 처리 중':i.status)}<span>${esc(i.category)} · ${esc(i.author)} · ${dated(i.created)}</span></div><p class="ws-request-body">${esc(i.body)}</p>${attachmentLinks(i.attachments||[])}<div class="ws-assignee">${icon('user-round')}<span>${i.assigneeName?'개발 담당 · '+esc(i.assigneeName):'아직 담당자가 없습니다.'}</span>${!i.assignee&&i.status==='접수 대기'?button('idea-claim','제가 구현할게요','sq-primary',`data-id="${i.id}"`):''}</div>${i.toolName?`<button class="ws-linked-tool" data-action="detail" data-id="${i.tool}">${icon('package')}<span>연결된 기능<strong>${esc(i.toolName)}</strong></span>${icon('app-window')}</button>`:''}<div class="ws-feedback-list">${(i.replies||[]).map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)}</small><p>${esc(r.text)}</p></div>`).join('')}</div>${server.user.role==='admin'?`<div class="ws-idea-admin">${button('idea-delete',icon('trash-2')+(i.deletionPending?'삭제 다시 시도':'요청 삭제'),'sq-link ws-danger',`data-id="${i.id}"`)}<span>요청 내용·답변·첨부파일을 삭제합니다.</span></div>`:''}<form data-work-form="idea-reply"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="진행 상황이나 추가 의견을 남겨주세요."></textarea></label>${owner?`<div class="sq-form-grid"><label class="sq-field"><span>진행 상태</span><select name="status">${options(server.user.role==='admin'?['접수 대기','담당자 지정','개발 중','구현 완료','보류']:[i.status,...({'접수 대기':['보류'],'담당자 지정':['개발 중','보류','접수 대기'],'개발 중':['구현 완료','보류','접수 대기'],'보류':['접수 대기','개발 중'],'구현 완료':['개발 중']}[i.status]||[])],i.status)}</select></label><label class="sq-field"><span>구현 완료 시 연결할 기능</span><select name="tool"><option value="">기능 선택</option>${items.filter(x=>!x.deleted&&x.access==='approved').map(x=>`<option value="${x.id}" ${i.tool===x.id?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label></div>`:''}<div class="sq-actions"><button class="sq-primary">${owner?'답변·상태 저장':'답변 등록'}</button></div></form>`);
 }
 
+function renderUnreadCount(){
+ const unread=server.unread||0;$('#ws-unread').hidden=!unread;$('#ws-unread').textContent=unread>99?'99+':unread;
+ $('.ws-bell').setAttribute('aria-label',`내 알림, 읽지 않은 알림 ${unread}개`);
+}
+let notificationCheck=null,notificationCheckedAt=0,inboxGeneration=0;
+function nextNotificationRead(){return runtime.notificationGeneration=(runtime.notificationGeneration||0)+1;}
+async function checkNotifications(){
+ if(document.hidden||runtime.requestBusy||!server.authMode)return;
+ if(notificationCheck)return notificationCheck;
+ if(Date.now()-notificationCheckedAt<5000)return;
+ const generation=nextNotificationRead();
+ notificationCheck=(async()=>{
+  const r=await requestAPI('/api/notifications?unread=true');
+  if(generation!==runtime.notificationGeneration)return;
+  server.unread=r.unread;renderUnreadCount();notificationCheckedAt=Date.now();
+ })();
+ try{await notificationCheck;}finally{notificationCheck=null;}
+}
 async function inbox(loadMore=false){
- const url='/api/notifications?unread='+work.unreadOnly+(loadMore&&work.notificationCursor?'&before='+encodeURIComponent(work.notificationCursor):'');const r=await requestAPI(url);
- work.notifications=loadMore?[...work.notifications,...r.notifications]:r.notifications;work.notificationCursor=r.nextCursor;server.unread=r.unread;render();
+ if(!loadMore)openModal('내 알림','나에게 필요한 소식',blank('bell','알림을 확인하고 있어요.','잠시만 기다려주세요.'));
+ const token=runtime.detailLoadToken,generation=nextNotificationRead(),inboxRequest=++inboxGeneration;
+ const url='/api/notifications?unread='+work.unreadOnly+(loadMore&&work.notificationCursor?'&before='+encodeURIComponent(work.notificationCursor):'');let r;
+ try{r=await requestAPI(url);}catch(error){if(token!==runtime.detailLoadToken||inboxRequest!==inboxGeneration)return;throw error;}
+ if(token!==runtime.detailLoadToken||inboxRequest!==inboxGeneration)return;
+ work.notifications=loadMore?[...work.notifications,...r.notifications]:r.notifications;work.notificationCursor=r.nextCursor;
+ if(generation===runtime.notificationGeneration){server.unread=r.unread;notificationCheckedAt=Date.now();}
+ renderUnreadCount();
  openModal('내 알림','나에게 필요한 소식',`<div class="ws-inbox-head"><div class="ws-segment">${button('inbox-filter','전체','','data-unread="false" aria-pressed="'+!work.unreadOnly+'"')}${button('inbox-filter','안읽음','','data-unread="true" aria-pressed="'+work.unreadOnly+'"')}</div>${button('read-all','모두 읽음','sq-link')}</div><div class="ws-inbox">${work.notifications.map(n=>`<button class="ws-notification ${n.read?'':'is-unread'}" data-action="notification-open" data-id="${esc(n.id)}"><span class="ws-notice-icon">${icon(({approval:'shield-check',feedback:'message-square',release:'package-check',idea:'lightbulb',admin:'settings'})[n.kind]||'bell')}</span><span><strong>${esc(n.title)}</strong><small>${dated(n.created)}</small></span><span class="ws-unread-dot" ${n.read?'hidden':''}></span></button>`).join('')||blank('bell','모두 확인했습니다.','답변, 권한 처리 결과, 새 버전 소식이 여기에 도착합니다.')}</div>${r.nextCursor?button('inbox-more','이전 알림 더 보기','sq-secondary'):''}`);
 }
 
@@ -214,8 +237,8 @@ Object.assign(actions,{
  'inbox':()=>inbox(),
  'inbox-more':()=>inbox(true),
  'inbox-filter':b=>{work.unreadOnly=b.dataset.unread==='true';return inbox();},
- 'read-all':async()=>{await requestAPI('/api/notifications/read','PUT',{all:true});await afterWorkspaceSave(()=>inbox());},
- 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id);await requestAPI('/api/notifications/read','PUT',{id:n.id});return afterWorkspaceSave(async()=>{await refresh();if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
+ 'read-all':async()=>{await requestAPI('/api/notifications/read','PUT',{all:true});nextNotificationRead();await afterWorkspaceSave(()=>inbox());},
+ 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id);await requestAPI('/api/notifications/read','PUT',{id:n.id});nextNotificationRead();return afterWorkspaceSave(async()=>{await refresh();if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
 });
 function userPicker(mode){work.userMode=mode;work.users=[];openModal(mode==='grant'?'조회 사용자 추가':'추가 관리자 지정',mode==='grant'?getItem(work.grantTool).name:'기본 관리자 전용',`<p class="sq-note">이 사이트에 로그인한 적이 있는 계정을 이름 또는 사번으로 검색하세요.</p><form data-work-form="user-search" class="ws-user-search"><input id="ws-user-search" type="search" placeholder="이름 또는 사번" aria-label="사용자 검색"><button class="sq-primary">검색</button></form><div id="ws-user-results"></div>`);}
 function renderUserChoices(){$('#ws-user-results').innerHTML=work.users.map(u=>`<div class="ws-row"><span class="ws-avatar">${esc(u.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(u.name)}</strong><p>${esc(u.id)}</p></div>${button('choose-user',work.userMode==='admin'?'관리자 지정':'조회 승인','sq-secondary',`data-user="${esc(u.id)}"`)}</div>`).join('')||blank('search','일치하는 사용자가 없습니다.','먼저 사이트에 로그인한 계정인지 확인해 주세요.');mountIcons();}
@@ -255,4 +278,6 @@ root.addEventListener('submit',event=>{
  }).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=!!form.dataset.saved);});
 },true);
 // showError keeps one accessible error in the active form/dialog or page banner.
-setInterval(()=>{if(document.hidden||runtime.requestBusy)return;requestAPI('/api/notifications?unread=true').then(r=>{server.unread=r.unread;$('#ws-unread').hidden=!r.unread;$('#ws-unread').textContent=r.unread>99?'99+':r.unread;}).catch(()=>{});},30000);
+setInterval(()=>checkNotifications().catch(()=>{}),30000);
+window.addEventListener('focus',()=>checkNotifications().catch(()=>{}));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkNotifications().catch(()=>{});});

@@ -4,11 +4,15 @@ const {test}=require('node:test');
 const source=fs.readFileSync(path.join(__dirname,'../frontend/frontend_ax_workspace.js'),'utf8');
 const shared=fs.readFileSync(path.join(__dirname,'../frontend/frontend_workspace.js'),'utf8');
 const afterSave=shared.slice(shared.indexOf('async function afterWorkspaceSave('),shared.indexOf('const originalRender='));
+const api=fs.readFileSync(path.join(__dirname,'../frontend/frontend_api.js'),'utf8');
+const bootstrapRefresh=api.slice(api.indexOf('async function refresh('),api.indexOf('async function mutate('));
+const people=fs.readFileSync(path.join(__dirname,'../frontend/frontend_people.js'),'utf8');
+const peopleRefresh=people.slice(people.indexOf('refresh=async function(){'),people.indexOf("actions['rank-mode']="));
 const tick=()=>new Promise(setImmediate);
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 const item={id:'a'.repeat(32),name:'AX Workspace 설치',description:'업무 공간을 설치합니다.',category:'workspace',version:'1.0.0',fileName:'workspace.zip',size:120,created:1,downloadUrl:'/api/ax-workspace/'+ 'a'.repeat(32)+'/download'};
 
-function setup(role='admin'){
+function setup(role='admin',{search='',route='ax'}={}){
  const requests=[],errors=[],announcements=[],opened=[],listeners={};
  const workspace={innerHTML:''},dialog={open:false},area={outerHTML:''},pageError={hidden:true,textContent:'',isConnected:true};
  let currentForm=null;
@@ -17,19 +21,21 @@ function setup(role='admin'){
   append(key,value){this.values.push([key,value]);}
   [Symbol.iterator](){return this.values[Symbol.iterator]();}
  }
- const context={runtime:{detailLoadToken:0},state:{route:'ax'},server:{user:{id:'admin',role}},workspace,FormData,
+ const session={},demo={},logout={},catalogRequests=[];
+ const context={runtime:{detailLoadToken:0},state:{route,rankMode:'recent'},server:{user:{id:'admin',role}},workspace,FormData,
+  location:{search},URLSearchParams,items:[],organizations:[],requests:catalogRequests,policy:{},audit:[],render(){},loadPeopleRanks:async()=>{},
   actions:{},root:{addEventListener:(name,fn)=>(listeners[name]??=[]).push(fn)},
-  $:selector=>selector==='#sq-dialog'?dialog:selector==='#sq-ax-form'?currentForm:selector==='[data-ax-drop]'?area:selector==='#sq-server-error'?pageError:null,
+  $:selector=>selector==='#sq-dialog'?dialog:selector==='#sq-ax-form'?currentForm:selector==='[data-ax-drop]'?area:selector==='#sq-server-error'?pageError:selector==='#sq-session'?session:selector==='.sq-demo'?demo:selector==='[data-action=logout]'?logout:null,
   $$:()=>[],esc:value=>String(value).replace(/</g,'&lt;').replace(/"/g,'&quot;'),icon:()=>'',mountIcons(){},
   button:(action,label,cls='',extra='')=>`<button data-action="${action}" ${extra}>${label}</button>`,
-  badge:value=>String(value),blank:()=>'<p>Empty</p>',dated:()=>'',fileSize:bytes=>`${bytes} bytes`,
+  badge:value=>String(value),blank:(icon,title,body)=>`<div class="ws-empty"><h3>${title}</h3><p>${body}</p></div>`,dated:()=>'',fileSize:bytes=>`${bytes} bytes`,
   openModal(title,kicker,html){context.runtime.detailLoadToken++;dialog.open=true;opened.push({title,html});},
   closeModal(){context.runtime.detailLoadToken++;dialog.open=false;},
   navigate(route){context.runtime.detailLoadToken++;context.state.route=route;},
   announce:message=>announcements.push(message),showError:error=>errors.push(error),clearErrorMessages(){},
   requestAPI:(url,method='GET',body)=>{const pending=deferred();requests.push({...pending,url,method,body});return pending.promise;},
  };
- vm.createContext(context);vm.runInContext(afterSave+'\n'+source,context,{filename:'frontend_ax_workspace.js'});
+ vm.createContext(context);vm.runInContext(bootstrapRefresh+'\nconst basePeopleRefresh=refresh;\n'+peopleRefresh+'\n'+afterSave+'\n'+source,context,{filename:'frontend_ax_workspace.js'});
  function newForm(){
   context.actions['ax-register']();
   const controls=[{disabled:false},{disabled:false}];
@@ -55,19 +61,107 @@ test('only administrators see registration controls; download data is escaped',(
  assert.ok(h.workspace.innerHTML.includes('&lt;script>'));
 });
 
-test('optional Square extension stays separate from administrator-published app files',()=>{
+test('AX catalog displays only administrator-published downloads and normal filtered empty state',()=>{
  const h=setup('member');
  vm.runInContext(`axFiles=[${JSON.stringify(item)}];`,h.context);
  h.context.renderAxWorkspace();
- assert.match(h.workspace.innerHTML,/href="\/local-access\/workspace-extension\.zip" download/);
- assert.match(h.workspace.innerHTML,/개인 KEY만 입력/);
- assert.match(h.workspace.innerHTML,/href="\/local-access">KEY와 연결 안내/);
+ assert.doesNotMatch(h.workspace.innerHTML,/workspace-extension\.zip|P&T AI Square를 AX Workspace 안에서|P&T AI Square 확장 받기/);
+ assert.match(h.workspace.innerHTML,/관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구/);
+ assert.equal((h.workspace.innerHTML.match(/ download /g)||[]).length,1);
  assert.ok(h.workspace.innerHTML.includes(item.downloadUrl));
  assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);
  h.context.actions['ax-filter']({dataset:{category:'plugin'}});
- assert.match(h.workspace.innerHTML,/P&T AI Square 확장 받기/);
+ assert.match(h.workspace.innerHTML,/이 분류에 등록된 파일이 없습니다/);
+ assert.match(h.workspace.innerHTML,/관리자가 파일을 등록하면/);
+ assert.ok(!h.workspace.innerHTML.includes(item.downloadUrl));
+ assert.doesNotMatch(h.workspace.innerHTML,/ download[ >]/);
  assert.match(h.workspace.innerHTML,/ws-ax-count">0개 파일/);
  assert.equal(h.requests.length,0);
+});
+
+test('empty catalog guides administrators to register without providing a built-in installer',()=>{
+ const h=setup();h.context.renderAxWorkspace();
+ assert.match(h.workspace.innerHTML,/아직 등록된 파일이 없습니다/);
+ assert.match(h.workspace.innerHTML,/파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요/);
+ assert.doesNotMatch(h.workspace.innerHTML,/ download[ >]|workspace-extension\.zip/);
+});
+
+const bootstrapData=(overrides={})=>({items:[],user:{id:'viewer',name:'사용자',org:'공통',role:'member'},csrf:'test-csrf',authMode:'mock',organizations:[],requests:[],policy:{},rankAsOf:123,audit:[],...overrides});
+
+test('AX deep link waits for bootstrap, loads the catalog, and is consumed once',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),first=h.context.refresh();
+ assert.equal(h.context.state.route,'home');assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,'/api/bootstrap');
+ h.requests[0].resolve(bootstrapData());await tick();
+ assert.equal(h.context.state.route,'ax');assert.equal(h.requests.length,2);assert.equal(h.requests[1].url,'/api/ax-workspace');
+ h.requests[1].resolve({files:[item]});await first;
+ assert.ok(h.workspace.innerHTML.includes(item.downloadUrl));
+ h.context.navigate('ideas');const next=h.context.refresh();h.requests[2].resolve(bootstrapData());await next;
+ assert.equal(h.context.state.route,'ideas');assert.equal(h.requests.length,3);
+});
+
+test('AX deep link also works for dummy bootstrap with an empty CSRF token',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),loading=h.context.refresh();
+ h.requests[0].resolve(bootstrapData({csrf:'',dataMode:'dummy'}));await tick();
+ assert.equal(h.context.state.route,'ax');h.requests[1].resolve({files:[]});await loading;
+ assert.match(h.workspace.innerHTML,/아직 등록된 파일이 없습니다/);
+});
+
+test('unknown, missing, and ambiguous view parameters do not change the initial route',async()=>{
+ for(const search of ['', '?view=home','?view=AX','?other=ax','?view=ax&view=home','?view=ax&view=ax']){
+  const h=setup('member',{search,route:'home'}),loading=h.context.refresh();
+  h.requests[0].resolve(bootstrapData());await loading;
+  assert.equal(h.context.state.route,'home',search);assert.equal(h.requests.length,1,search);
+ }
+});
+
+test('user navigation during bootstrap wins over the requested AX landing view',async()=>{
+ for(const returnHome of [false,true]){
+  const h=setup('member',{search:'?view=ax',route:'home'}),loading=h.context.refresh();
+  h.context.navigate('ideas');if(returnHome)h.context.navigate('home');
+  h.requests[0].resolve(bootstrapData());await loading;
+  assert.equal(h.context.state.route,returnHome?'home':'ideas');assert.equal(h.requests.length,1);
+  const next=h.context.refresh();h.requests[1].resolve(bootstrapData());await next;
+  assert.equal(h.context.state.route,returnHome?'home':'ideas');assert.equal(h.requests.length,2);
+ }
+});
+
+test('a dialog opened while bootstrap is loading is not dismissed by AX deep link',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),loading=h.context.refresh();
+ h.context.openModal('사용자가 선택한 화면','','내용');h.requests[0].resolve(bootstrapData());await loading;
+ assert.equal(h.dialog.open,true);assert.equal(h.context.state.route,'home');assert.equal(h.requests.length,1);
+});
+
+test('failed bootstrap preserves its error and waits for a successful retry before AX loading',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),failure=Error('session unavailable');
+ const first=h.context.refresh();h.requests[0].reject(failure);await assert.rejects(first,error=>error===failure);
+ assert.equal(h.requests.length,1);assert.equal(h.context.state.route,'home');
+ const retry=h.context.refresh();h.requests[1].resolve(bootstrapData());await tick();
+ assert.equal(h.requests[2].url,'/api/ax-workspace');h.requests[2].resolve({files:[item]});await retry;
+ assert.equal(h.context.state.route,'ax');
+});
+
+test('superseded bootstrap cannot activate the AX deep link before current bootstrap succeeds',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),older=h.context.refresh(),newer=h.context.refresh();
+ h.requests[0].resolve(bootstrapData());await older;
+ assert.equal(h.requests.length,2);assert.equal(h.context.state.route,'home');
+ h.requests[1].resolve(bootstrapData());await tick();assert.equal(h.requests[2].url,'/api/ax-workspace');
+ h.requests[2].resolve({files:[item]});await newer;
+ assert.equal(h.context.state.route,'ax');assert.equal(h.requests.length,3);
+});
+
+test('late AX deep-link catalog response cannot replace a later user route',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),loading=h.context.refresh();
+ h.requests[0].resolve(bootstrapData());await tick();h.context.navigate('ideas');h.workspace.innerHTML='사용자가 연 화면';
+ h.requests[1].resolve({files:[item]});await loading;
+ assert.equal(h.context.state.route,'ideas');assert.equal(h.workspace.innerHTML,'사용자가 연 화면');
+});
+
+test('catalog failure is reported once without reapplying the initial AX navigation on refresh',async()=>{
+ const h=setup('member',{search:'?view=ax',route:'home'}),loading=h.context.refresh(),failure=Error('catalog unavailable');
+ h.requests[0].resolve(bootstrapData());await tick();h.requests[1].reject(failure);
+ await assert.rejects(loading,error=>error===failure);
+ h.context.navigate('home');const next=h.context.refresh();h.requests[2].resolve(bootstrapData());await next;
+ assert.equal(h.context.state.route,'home');assert.equal(h.requests.length,3);
 });
 
 test('successful upload preserves multipart contract and shows the new file despite an earlier filter',async()=>{

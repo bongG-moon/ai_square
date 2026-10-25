@@ -27,13 +27,18 @@ async function requestAPI(url,method='GET',body,options={}){
 }
 async function refresh(){
  const token=runtime.refreshToken=(runtime.refreshToken||0)+1;let data;
+ const notificationToken=runtime.notificationGeneration=(runtime.notificationGeneration||0)+1;
  try{data=await requestAPI('/api/bootstrap');}catch(error){if(token!==runtime.refreshToken)return false;throw error;}
  // Every caller shares this generation; a slower earlier request cannot overwrite newer data.
  if(token!==runtime.refreshToken)return false;
+ // A later inbox read or a confirmed read-mark is authoritative for the badge.
+ if(notificationToken!==runtime.notificationGeneration)data={...data,unread:server.unread};
  Object.assign(server,data);items.splice(0,items.length,...data.items.map(x=>({...x,likes:x.likes-(x.liked?1:0)})));state.liked=new Set(data.items.filter(x=>x.liked).map(x=>x.id));
  if($('#sq-server-error'))$('#sq-server-error').hidden=true;
  organizations.splice(0,organizations.length,...data.organizations);requests.splice(0,requests.length,...data.requests);Object.assign(policy,data.policy);audit.splice(0,audit.length,...data.audit);
- $('#sq-session').textContent=data.user.name+' · '+data.user.org;$('.sq-demo').textContent=data.dataMode==='dummy'?'샘플 데이터 · 조회 전용':data.authMode==='mock'?'SSO 미사용':'SSO 사용';
+ // renderProfile updates identity changes; keep an unchanged photo node alive.
+ if(!$('#sq-session .sq-profile-name'))$('#sq-session').textContent=data.user.name+' · '+data.user.org;
+ $('.sq-demo').textContent=data.dataMode==='dummy'?'샘플 데이터 · 조회 전용':data.authMode==='mock'?'SSO 미사용':'SSO 사용';
  $('[data-action=logout]').hidden=data.authMode==='mock';render();return true;
 }
 async function mutate(url,method,body,after){

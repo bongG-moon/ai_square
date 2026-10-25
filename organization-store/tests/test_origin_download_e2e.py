@@ -1,6 +1,13 @@
-"""Web ZIP -> native install -> packaged worker, using isolated state and loopback."""
+"""Legacy connection preset ZIP -> native install helper -> packaged worker.
+
+The synthetic ZIP here tests compatibility with an already-prepared installer
+and connection.json; it does not prescribe the current publisher package format.
+The web no longer assembles this package. Administrator upload and original-byte
+member download are covered by pt_ai_square/tests/test_ax_workspace.py, and the
+current publisher format has test_upload_package.py. This test uses isolated
+local state and loopback, and never executes the interactive NSIS setup.
+"""
 import hashlib
-from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -8,12 +15,10 @@ import subprocess
 import sys
 from zipfile import ZipFile
 
-from flask import Flask
 import pytest
 
 from test_http_worker import service, TOKEN
 from test_package import builder, CSC
-from pt_ai_square.backend.local_access import local_access
 
 
 @pytest.mark.skipif(os.name != 'nt' or not CSC.is_file(), reason='Windows installer and DPAPI')
@@ -21,23 +26,19 @@ from pt_ai_square.backend.local_access import local_access
                     reason='Actual AX integration: set AX_WORKSPACE_SOURCE to a compatible common-app source checkout')
 @pytest.mark.skipif(not builder.nsis_compiler().is_file(),
                     reason='Actual NSIS EXE integration: set NSIS_MAKENSIS to an existing NSIS 3.12 makensis.exe')
-def test_downloaded_origin_installs_and_authenticates_with_only_key(service, tmp_path):
+def test_legacy_preset_zip_installs_and_authenticates_with_only_key(service, tmp_path):
     origin, _ = service
     build = builder.build(tmp_path / 'build')
-    guides = tmp_path / 'web' / 'static' / 'guides'
-    guides.mkdir(parents=True)
-    installer = Path(build['installerExe']).read_bytes()
-    source = guides / 'ax-workspace-extension-setup.exe'
-    source.write_bytes(installer)
-    app = Flask(__name__, static_folder=str(guides.parent))
-    app.config.update(TESTING=True, PUBLIC_URL=origin)
-    app.register_blueprint(local_access)
-    response = app.test_client().get('/local-access/workspace-extension.zip',
-                                     base_url='http://internal-proxy:5000')
-    assert response.status_code == 200
+    source = Path(build['installerExe'])
+    installer = source.read_bytes()
+    prepared = tmp_path / 'publisher' / 'PNT-AI-Square-AX-Extension.zip'
+    prepared.parent.mkdir()
+    with ZipFile(prepared, 'w') as archive:
+        archive.writestr('PNT-AI-Square-Setup.exe', installer)
+        archive.writestr('connection.json', json.dumps({'schemaVersion': 1, 'baseUrl': origin}))
     download = tmp_path / 'download'
     download.mkdir()
-    with ZipFile(BytesIO(response.data)) as archive:
+    with ZipFile(prepared) as archive:
         assert archive.read('PNT-AI-Square-Setup.exe') == installer
         preset = archive.read('connection.json')
         assert json.loads(preset) == {'schemaVersion': 1, 'baseUrl': origin}

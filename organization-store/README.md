@@ -4,9 +4,9 @@
 
 ## 사용 순서
 
-1. **확장 연결부가 포함된 AX Workspace**를 먼저 설치합니다. 이 개발본의 앱 버전은 0.23.32입니다. 기존에 배포된 동일 버전에는 연결부가 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다. 확장 설치기가 실행 파일의 실제 포함 모듈을 검사합니다.
-2. 웹에서 받은 확장 ZIP은 **모두 압축을 푼 뒤** `PNT-AI-Square-Setup.exe`를 실행합니다. 함께 받은 `connection.json`도 같은 폴더에 둡니다. 공통 앱의 파일을 교체하지 않고 사용자 계정의 확장 폴더에 설치합니다. 앱을 다시 열면 왼쪽 메뉴에 **P&T AI Square**가 나타납니다. 일반 대화와 업무 모드 모두에서 열 수 있습니다.
-3. 서버 주소는 함께 받은 파일에서 설정되므로 앱에서는 웹 `/local-access`에서 발급받은 **기존의 유효한 개인 KEY만 입력**합니다. HTTP 서버는 최초 연결 시 암호화되지 않은 전송임을 확인합니다. 주소가 없는 범용 설치 파일은 주소를 직접 입력할 수 있습니다. 새 KEY를 자동 발급하거나 교체하지 않습니다. 기존 플랫폼 MCP 연결이 있다면 **기존 플랫폼 MCP 연결 사용**을 직접 선택할 수도 있습니다.
+1. 설정에 **추가 기능 → 확장 ZIP 가져오기**가 있는 AX Workspace를 먼저 설치합니다. 이 개발본의 앱 버전은 0.23.32입니다. 기존에 배포된 동일 버전에는 가져오기 기능이 없을 수 있으므로 버전 숫자만으로 호환성을 판단하지 않습니다.
+2. 웹의 **AX Workspace** 탭에서 관리자가 등록한 `PNT-AI-Square-0.1.0-Extension.zip`을 받습니다. **압축을 풀거나 EXE를 실행하지 않고** 앱의 확장 ZIP 가져오기에서 파일을 선택합니다. 이름·버전·설치 위치·서버 주소를 확인하고 설치하면 왼쪽 메뉴에 **P&T AI Square**가 나타납니다. 현재 Windows 계정의 확장 폴더에만 설치하며 일반 대화와 업무 모드 모두에서 열 수 있습니다.
+3. 배포자가 서버 주소를 담은 `connection.json`을 포함했다면 앱에서는 웹 `/local-access`에서 발급받은 **기존의 유효한 개인 KEY만 입력**합니다. 주소 파일이 없는 범용 설치 파일은 서버 주소도 직접 입력합니다. HTTP 서버는 최초 연결 시 암호화되지 않은 전송임을 확인합니다. 새 KEY를 자동 발급하거나 교체하지 않습니다. 기존 플랫폼 MCP 연결이 있다면 **기존 플랫폼 MCP 연결 사용**을 직접 선택할 수도 있습니다.
 4. 기능을 검색하고 상세 화면에서 사용 방법을 확인합니다. **파일 다운로드**와 **설치하기**는 다른 동작입니다.
 5. 설치하려면 **전체 공간(내 계정) / 현재 업무 폴더 / 특정 폴더 선택**을 직접 선택한 뒤 실제 변경 경로를 확인합니다. 진행 중인 대화를 자동으로 끊거나 Claude를 재시작하지 않습니다.
 
@@ -35,15 +35,17 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 
 ## 웹과 연결하는 정보
 
-### 서버 주소를 포함한 웹 다운로드
+### 완성된 프로그램을 AX Workspace 탭에 등록하기
 
-웹의 **KEY 연결** 또는 **AX Workspace** 화면에서 선택 확장 ZIP을 받습니다. `/local-access/workspace-extension.zip`은 서버의 `PTAI_PUBLIC_URL`(설정된 경우) 또는 현재 접속한 기본 주소를 `connection.json`에 담습니다. 운영 환경이 리버스 프록시 뒤에 있다면 `PTAI_PUBLIC_URL = 'http://pntaisquare.company.example'`처럼 사용자가 접속하는 기본 주소를 설정하세요. 서버의 실행 주소 `0.0.0.0`이나 내부 포트를 공개 주소로 사용하지 않습니다.
+이 폴더는 선택 확장의 개발 소스입니다. 웹에 특정 확장 소개나 고정 설치 파일을 내장하지 않습니다. 프로그램을 완성한 뒤 관리자가 **AX Workspace → 파일 등록**에서 이름·설명·분류·배포 버전과 완성된 파일을 등록합니다. 이후 KEY 페이지에서 AX Workspace 탭으로 이동한 사용자가 해당 카드를 찾아 받습니다.
 
-ZIP에는 사전 빌드한 설치 EXE, 주소 파일, 설치 안내만 포함됩니다. 개인 KEY·쿠키·MongoDB 접속 정보는 포함되지 않습니다. EXE 바이트는 수정하지 않으며 다운로드마다 컴파일하지 않습니다. `connection.json`을 빼고 EXE만 옮기면 주소 자동 입력을 사용할 수 없으므로 **ZIP 전체를 전달**하세요.
+서버 주소는 **배포자**가 `package_for_upload.py --server-url <서버 기본 주소>`로 지정합니다. 확장 코드·`extension.json`·`connection.json`·설치 안내를 한 ZIP으로 만들며 별도 설치 EXE는 포함하지 않습니다. 주소 파일은 `{"schemaVersion": 1, "baseUrl": "http://pntaisquare.company.example"}` 형식입니다. 서버 실행 주소 `0.0.0.0` 대신 사용자가 접속하는 주소를 사용하고 KEY·쿠키·MongoDB 접속 정보를 넣지 않습니다. 사내 주소가 포함된 ZIP은 사내 배포용으로 관리하고 공개 Git에 올리지 않습니다. ZIP 전체를 원본 그대로 등록하세요.
 
-설치기는 주소 파일의 형식과 경로를 검사한 뒤 `extension-data/pt-ai-square.store/connection.json`에 저장합니다. 이미 인증된 연결이 있으면 기존 주소·KEY를 우선 사용하며 새 다운로드의 주소로 자동 전환하지 않습니다. 다른 서버로 바꾸려면 연결 화면의 **서버 주소 변경**에서 해당 서버의 KEY로 다시 연결합니다.
+웹은 등록한 파일을 원본 그대로 제공합니다. EXE를 ZIP에 추가하거나 `connection.json`을 만들지 않으며 `PTAI_PUBLIC_URL`도 AX 자료실 파일에 적용하지 않습니다. `PTAI_PUBLIC_URL`에 따른 주소 포함 기능은 별도의 로컬 MCP 다운로드에만 유지됩니다.
 
-운영 배포 시 `python organization-store/build.py`로 만든 최신 설치 EXE를 `pt_ai_square/static/guides/ax-workspace-extension-setup.exe`에 함께 포함해야 합니다. 서버의 다운로드 경로 변경도 배포해야 하며, 이전에 내려받은 설치 파일이 자동으로 이 기능을 갖게 되지는 않습니다.
+공통 앱은 ZIP 경로·크기·해시·대상 폴더를 검사한 뒤 사용자 확인을 받아 설치합니다. 주소 파일은 `extension-data/pt-ai-square.store/connection.json`에 저장합니다. 이미 인증된 연결이 있으면 기존 주소·KEY를 우선 사용하며 새 ZIP의 주소로 자동 전환하지 않습니다. 다른 서버로 바꾸려면 연결 화면의 **서버 주소 변경**에서 해당 서버의 KEY로 다시 연결합니다.
+
+`python organization-store/build.py`로 만든 설치 EXE를 웹의 `static/guides`에 복사하지 않습니다. 관리자가 등록할 완성된 배포 파일로 준비합니다. 이전 `/local-access/workspace-extension.zip`과 `/static/guides/ax-workspace-extension-setup.exe` 링크는 로그인 후 AX Workspace 탭(`/?view=ax`)으로 이동합니다. 이미 사용자가 설치한 프로그램이나 내려받은 파일을 자동 교체하지 않습니다.
 
 | 용도 | 기존 플랫폼 계약 |
 | --- | --- |
@@ -76,7 +78,8 @@ ZIP에는 사전 빌드한 설치 EXE, 주소 파일, 설치 안내만 포함됩
 - `ui/`: 연결, 카탈로그, 상세, 설치 범위·준비안 확인, 설치/업데이트 관리 화면.
 - `worker.py`: 공통 호스트 stdio 계약과 기존 플랫폼 설치 엔진 연결.
 - `extension.template.json`: 범용 호스트용 ID/진입점/작업 목록.
-- `build.py`, `installer/`: 별도 설치 패키지 생성. 기존 앱 실행 파일을 패치하지 않습니다.
+- `package_for_upload.py`: 수동 등록용 ZIP 생성. 서버 주소를 인자로 받고 설치 도우미를 만들거나 실행하지 않습니다.
+- `build.py`: 공통 확장 소스 패키징 함수. `installer/`는 이전 EXE 방식의 참고 소스이며 새 ZIP 경로에서는 사용하지 않습니다.
 - `tests/`: 개인 프로필 대신 격리 경로와 합성 자료를 사용하는 시험.
 - `../pt_ai_square/integrations/pt-square-mcp/pt_square_mcp`: 설치 엔진 정본. 빌드 시 정확한 소스를 vendor로 포함합니다. 복사본을 직접 편집하지 않습니다.
 
@@ -84,24 +87,23 @@ ZIP에는 사전 빌드한 설치 EXE, 주소 파일, 설치 안내만 포함됩
 
 ### 독립 Git 저장소에서 개발·검증하기
 
-이 저장소에는 `organization-store/`와 그 옆 `pt_ai_square/`가 함께 있습니다. worker는 개발 중에는 이 이웃 폴더의 MCP 정본을 읽고, 배포 패키지에서는 동봉된 `vendor/pt_square_mcp/`를 읽습니다. 별도 AX Workspace 소스나 개인 설정을 웹 저장소에 복사할 필요는 없습니다. 웹 운영 서버는 이미 포함된 EXE를 배포하므로 빌드 도구도 필요하지 않습니다.
+이 저장소에는 `organization-store/`와 그 옆 `pt_ai_square/`가 함께 있습니다. worker는 개발 중에는 이 이웃 폴더의 MCP 정본을 읽고, 배포 패키지에서는 동봉된 `vendor/pt_square_mcp/`를 읽습니다. 별도 AX Workspace 소스나 개인 설정을 웹 저장소에 복사할 필요는 없습니다. 웹 운영 서버는 관리자가 등록한 완성 파일을 전달하므로 빌드 도구가 필요하지 않습니다.
 
-Windows 개발 PC에서 패키지를 새로 만들 때는 .NET Framework C# 컴파일러가 필요합니다. EXE까지 만들 경우 기존 NSIS 3.12의 위치를 직접 지정할 수 있습니다. 아래 명령은 저장소 최상위 폴더에서 실행합니다.
-
-```powershell
-# NSIS 없이 네이티브 설치 도우미와 수동 설치 ZIP 생성
-python organization-store/build.py --without-nsis
-# EXE 생성: 설치된 NSIS 컴파일러 경로 지정 (또는 NSIS_MAKENSIS 환경변수)
-python organization-store/build.py --nsis 'C:\build-tools\nsis-3.12\makensis.exe'
-```
-
-다음 시험은 플랫폼 개발·테스트 의존성을 설치한 Python에서 실행합니다. worker·HTTP·연결 설정·패키지 무결성·설치 보호 시험은 공통 AX 소스 없이 실행됩니다. 네이티브 설치 시험은 임시 폴더에 만든 최소 호스트 선언으로 설치기를 검증하며, 실제 AX 앱 실행 검증과 구분됩니다.
+등록용 확장 ZIP은 Python만으로 생성합니다. .NET·NSIS·설치 도우미 실행이 필요하지 않습니다. 아래 예시 주소를 실제 접속 주소로 바꾸고 새 출력 폴더를 지정합니다.
 
 ```powershell
-python -m pytest organization-store/tests -q
+python organization-store/package_for_upload.py --server-url 'https://square.company.example' --output-directory outputs/square-upload
 ```
 
-실제 AX 호스트와의 패키지 검증·브라우저 시험을 추가하려면 확장 연결부가 구현된 **별도 공통 앱 소스**를 지정합니다. 이 경로가 없으면 해당 호스트 통합 시험만 사유와 함께 건너뜁니다. EXE 다운로드 전체 통합 시험에는 NSIS도 필요합니다. 다른 worker·설치 보호 시험 전체를 건너뛰지는 않습니다.
+출력 중 `PNT-AI-Square-0.1.0-Extension.zip`을 등록하고 `SHA256SUMS.txt`·등록 안내·빌드 보고서는 관리자가 보관합니다. 일반 도구 등록에서도 `ai-square.json`을 읽을 수 있습니다. ZIP 생성은 웹 업로드·게시·개인 프로필 설치를 하지 않습니다.
+
+다음 시험은 플랫폼 개발·테스트 의존성을 설치한 Python에서 실행합니다. 구형 네이티브 설치기 시험은 새 ZIP 배포 검증과 분리합니다.
+
+```powershell
+python -m pytest organization-store/tests/test_upload_package.py organization-store/tests/test_worker.py organization-store/tests/test_onboarding.py -q
+```
+
+실제 AX 호스트와의 패키지 검증·브라우저 시험을 추가하려면 확장 연결부가 구현된 **별도 공통 앱 소스**를 지정합니다. 이 경로가 없으면 해당 호스트 통합 시험만 사유와 함께 건너뜁니다. NSIS EXE를 새로 생성하는 시험에는 NSIS도 필요합니다. 다른 worker·설치 보호 시험 전체를 건너뛰지는 않습니다. 이전 서버가 확장 ZIP을 조립하던 다운로드 시험은 현재 AX 자료실의 원본 전달 정책과 구분합니다.
 
 ```powershell
 $env:AX_WORKSPACE_SOURCE = 'C:\src\AX-Workspace'

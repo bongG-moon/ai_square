@@ -1,6 +1,20 @@
 // Administrator-published downloads are kept separate from community tool rankings.
 const axCategories={workspace:'AX Workspace',plugin:'플러그인',integration:'연동 도구',other:'기타'};
 let axFiles=[],axFilter='all',axFile=null,axLoadToken=0,axUploadBusy=false,axMaxFileBytes=128*1048576-65536;
+// A KEY-page link can open this catalog after the first completed bootstrap.
+// The existing navigation/dialog generation preserves any choice made while it loads.
+const axInitialViews=new URLSearchParams(typeof location==='undefined'?'':location.search).getAll('view');
+const axInitialNavigationToken=runtime.detailLoadToken,baseAxRefresh=refresh;
+let axInitialViewPending=axInitialViews.length===1&&axInitialViews[0]==='ax';
+refresh=async function(){
+ const result=await baseAxRefresh();
+ // authMode is supplied by a completed bootstrap, including read-only dummy mode.
+ if(axInitialViewPending&&server.authMode){
+  axInitialViewPending=false;
+  if(runtime.detailLoadToken===axInitialNavigationToken)await actions['ax-workspace']();
+ }
+ return result;
+};
 async function loadAxWorkspace(){
  const token=++axLoadToken,result=await requestAPI('/api/ax-workspace');
  if(token!==axLoadToken)return false;
@@ -8,7 +22,7 @@ async function loadAxWorkspace(){
 }
 function renderAxWorkspace(){
  const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||x.category===axFilter);
- workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>AX Workspace 설치 파일과 업무에 필요한 플러그인·연동 도구를 내려받으세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><section class="sq-callout" aria-label="P&T AI Square 선택 확장"><strong>P&T AI Square를 AX Workspace 안에서</strong><p>공통 앱에 선택 설치하는 확장입니다. ZIP 전체를 풀고 EXE를 설치하면 이 사이트 주소가 자동 설정됩니다. 앱을 다시 열어 개인 KEY만 입력하세요.</p><a class="sq-secondary" href="/local-access/workspace-extension.zip" download>${icon('download')} P&T AI Square 확장 받기</a> <a class="sq-link" href="/local-access">KEY와 연결 안내</a></section><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
+ workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구를 찾아보세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
  mountIcons();
 }
 function axUploadArea(){

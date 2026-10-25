@@ -33,9 +33,16 @@
 </div>
 <section class="local-card local-connect-card" aria-labelledby="connect-title">
 <div class="local-card-head"><div><span class="local-eyebrow">CONNECT YOUR WORK</span><h2 id="connect-title">내 PC에서 시작하기</h2></div></div>
-<a class="local-download" href="{{ url_for('local_access.workspace_extension_download') }}" download><span class="local-download-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m0-14v7m-3-3 3 3 3-3"/></svg></span><div><strong>P&T AI Square 확장 받기</strong><small>AX Workspace에 선택 설치 · 이 사이트 주소 포함</small></div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>
-<p>확장 연결부를 지원하는 <strong>AX Workspace</strong>에서 사용합니다. ZIP 전체를 풀고 안의 EXE를 설치한 뒤 앱을 다시 열어 <strong>P&T AI Square</strong>에서 개인 KEY만 입력하세요. <code>connection.json</code>은 EXE와 같은 폴더에 두세요. HTTP 사이트는 연결 안내를 한 번 확인합니다.</p>
-<p class="local-path-note">공통 앱 설치 파일과 별개인 선택 확장입니다. 로컬 MCP로 연결하려면 아래 파일을 받으세요.</p>
+<p class="local-connect-intro">필요한 프로그램을 설치하고, 내 KEY로 연결하세요.</p>
+<a class="local-download local-catalog-link" href="{{ url_for('index', view='ax') }}"><span class="local-download-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></span><div><strong>AX Workspace에서 설치 파일 찾기</strong><small>관리자가 등록한 앱 · 플러그인 · 연동 도구</small></div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>
+<ol class="local-connect-steps local-app-steps">
+<li><div><strong>필요한 파일 고르기</strong><p>AX Workspace에서 등록된 설명과 버전을 확인하고 내려받으세요.</p></div></li>
+<li><div><strong>등록된 안내에 따라 설치하기</strong><p>프로그램마다 설치 방법이 다릅니다. 파일과 함께 안내된 절차를 따라주세요.</p></div></li>
+<li><div><strong>연결할 프로그램에 KEY 입력하기</strong><p>AI SQUARE 연결을 지원하는 프로그램의 KEY 입력란에 넣으면 됩니다. KEY는 채팅에 보내지 마세요.</p></div></li>
+</ol>
+<div class="local-other-connections"><h3>다른 방식으로 연결하기</h3>
+<details class="local-details local-mcp-details"><summary>AI에서 MCP로 연결하기</summary>
+<p>사용하는 AI에서 도구를 검색하고 내려받으려면 로컬 MCP를 연결하세요.</p>
 <a class="local-download" href="{{ url_for('local_access.mcp_download') }}" download><span class="local-download-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg></span><div><strong>로컬 MCP 받기</strong><small>사이트 주소와 다운로드 폴더를 자동으로 설정해요.</small></div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a>
 <ol class="local-connect-steps">
 <li><div><strong>압축을 풀고 Connect.cmd 실행</strong><p>Python 3.11 이상이 필요합니다. 서버 주소와 다운로드 위치가 자동으로 표시됩니다.</p></div></li>
@@ -43,13 +50,14 @@
 <li><div><strong>사용하는 AI에서 도구 검색·다운로드</strong><p>실제 설치할 때 프로젝트 또는 내 계정 범위를 선택합니다. 처음 MCP를 등록한다면 아래 안내를 확인하세요.</p></div></li>
 </ol>
 <p class="local-path-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg><span>받은 파일은 내 사용자 폴더의 <code>AI_SQUARE\downloads</code>에 서버·도구·버전별로 보관됩니다.</span></p>
-<details class="local-details"><summary>처음 MCP를 설치하는 경우</summary><p>Claude Code 등에 MCP를 처음 등록하는 경우 아래 명령으로 실행 환경을 준비한 뒤 ZIP 안 README의 MCP 등록 순서를 따르세요. 이미 MCP를 등록했다면 실행 경로는 유지할 수 있습니다.</p>
+<div class="local-mcp-setup"><h3>처음 MCP를 설치하는 경우</h3><p>Claude Code 등에 MCP를 처음 등록하는 경우 아래 명령으로 실행 환경을 준비한 뒤 ZIP 안 README의 MCP 등록 순서를 따르세요. 이미 MCP를 등록했다면 실행 경로는 유지할 수 있습니다.</p>
 <pre>python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe run_mcp.py connect</pre>
 <p>연결 창을 사용할 수 없는 환경에서는 <code>python run_mcp.py setup</code>을 실행하세요. 이 사이트에서 받은 ZIP은 주소를 포함하므로 서버 주소·작업 폴더를 입력하지 않습니다. KEY는 숨김 입력으로 받습니다.</p>
-<p>Windows에서는 KEY를 사용자 계정으로 암호화해 보관합니다. KEY는 채팅에 붙여넣지 마세요. Claude의 Connected 표시는 MCP 실행 상태이며 실제 계정 연결은 위 연결 창 또는 connection_status로 확인합니다. KEY 재발급 후에는 Connect.cmd에서 새 KEY로 다시 연결하세요.</p>
-<p>다른 폴더의 자료를 등록할 때는 AI에 원본 폴더 선택 창을 열어 달라고 요청하세요.</p></details>
+<p>Windows에서는 KEY를 사용자 계정으로 암호화해 보관합니다. KEY는 채팅에 붙여넣지 마세요. Claude의 Connected 표시는 MCP 실행 상태이며 실제 계정 연결은 위 연결 창 또는 connection_status로 확인합니다. KEY 재발급 후에는 AI에 “AI SQUARE KEY 다시 연결해줘”라고 요청하고 열린 숨김 입력창에 새 KEY를 입력하세요.</p>
+<p>다른 폴더의 자료를 등록할 때는 AI에 원본 폴더 선택 창을 열어 달라고 요청하세요.</p></div>
+</details>
 <details class="local-details"><summary>Skill로 연결하기</summary><p>필요한 Skill을 받아 압축을 풀고 사용하는 AI에 등록하세요. Python 3.11 이상이 필요합니다.</p>
 <div class="local-connect-grid"><a class="local-connect-item" href="{{ url_for('static', filename='guides/pt-square-receiver.zip') }}" download><strong>다운로드용 Skill <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 5v9l9 5 9-5V8M12 13v9M7.5 5.5l9 5"/></svg></strong><span>도구 검색 · 파일 받기 · 최신 버전 확인</span></a><a class="local-connect-item" href="{{ url_for('static', filename='guides/PT_AI_SQUARE_파일배포_Skill.zip') }}" download><strong>배포·자동 등록 Skill <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 5v9l9 5 9-5V8M12 13v9M7.5 5.5l9 5"/></svg></strong><span>파일 준비 · 신규 등록 · 새 버전 게시</span></a></div>
 <p>배포 Skill은 웹에서 파일·내용·공개 범위를 승인한 뒤 AI 대화에서 게시를 이어갑니다. EXE 자동 변환은 하지 않습니다. MCP의 자동 설치는 지원하는 설치 정보가 있는 항목에 한합니다.</p>
@@ -58,6 +66,7 @@
 python scripts/square_client.py --authenticate search "회의록"
 python scripts/square_client.py --authenticate download 1 --output ./downloads</pre>
 <p>KEY가 없으면 발급 화면으로 안내합니다. 재발급 후에는 연결한 프로그램들의 KEY도 새 값으로 바꿔주세요. 로컬 mock 시험은 인증키 없이도 같은 PC에서 사용할 수 있습니다.</p></details>
-<p class="local-future">CUBE 메신저·별도 앱 연결은 해당 연동이 추가된 뒤 이용할 수 있습니다.</p>
+<p class="local-future">추가 프로그램과 연동 도구는 AX Workspace에 등록된 안내를 확인하세요.</p>
+</div>
 </section>
 </div></main></body></html>

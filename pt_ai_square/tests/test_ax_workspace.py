@@ -72,6 +72,43 @@ def test_session_admin_csrf_and_member_download(app):
         assert db().activity_state.count_documents({}) == 0
 
 
+def test_catalog_lists_only_admin_uploaded_files_not_static_bundles(app, tmp_path):
+    # An old deployment may retain a bundled EXE. It must not appear as a
+    # synthetic catalog item or bypass the administrator's actual uploads.
+    static = tmp_path / 'legacy-static'
+    guides = static / 'guides'
+    guides.mkdir(parents=True)
+    (guides / 'ax-workspace-extension-setup.exe').write_bytes(b'MZlegacy-bundle')
+    app.static_folder = str(static)
+    admin, headers = ready(app, 'admin')
+    member, _ = ready(app, 'member')
+    assert member.get('/api/ax-workspace').json['files'] == []
+    uploaded = []
+    for name, category, content in [
+        ('AX Workspace 설치', 'workspace', b'MZworkspace-installer'),
+        ('P&T AI Square 연동', 'integration', b'MZregistered-integration'),
+    ]:
+        response = upload(admin, headers, name=name, category=category,
+                          file_name='installer.exe', content=content)
+        assert response.status_code == 201
+        uploaded.append((response.json['file'], content))
+    listed = member.get('/api/ax-workspace').json['files']
+    assert {row['id'] for row in listed} == {row['id'] for row, _ in uploaded}
+    assert len(listed) == 2
+    for row, content in uploaded:
+        downloaded = member.get(row['downloadUrl'])
+        assert downloaded.status_code == 200 and downloaded.data == content
+        downloaded.close()
+    for path in ['/local-access/workspace-extension.zip',
+                 '/static/guides/ax-workspace-extension-setup.exe']:
+        response = member.get(path)
+        assert response.status_code == 302 and response.headers['Location'] == '/?view=ax'
+        assert b'MZlegacy-bundle' not in response.data
+    with app.app_context():
+        assert db().workspace_files.count_documents({}) == 2
+        assert db().tools.count_documents({}) == 0
+
+
 @pytest.mark.parametrize('scope', ['read', 'publish'])
 def test_personal_key_cannot_bypass_workspace_browser_only_scope(app, scope):
     admin, headers = ready(app, 'admin')
