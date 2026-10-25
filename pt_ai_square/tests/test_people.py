@@ -12,6 +12,7 @@ from .conftest import ready, publish
 
 @pytest.fixture
 def people_app(app):
+    app.config['EMPLOYEE_PHOTO_BASE_URL'] = 'https://photos.company.example/pictures/'
     if 'people' not in app.blueprints:
         app.register_blueprint(people_module.people)
     with people_module._photo_lock:
@@ -94,7 +95,7 @@ def test_photo_is_fixed_host_current_employee_only_and_no_forwarded_credentials(
     response=client.get('/api/me/photo',headers={'Cookie':'sensitive-value'})
     assert response.status_code==200 and response.mimetype=='image/jpeg'
     assert response.data==b'\xff\xd8\xffphoto'
-    assert calls==[(people_module.PHOTO_BASE+'0012345.jpg',{'Accept':'image/jpeg,image/png,image/webp,image/gif'},3)]
+    assert calls==[(people_app.config['EMPLOYEE_PHOTO_BASE_URL']+'0012345.jpg',{'Accept':'image/jpeg,image/png,image/webp,image/gif'},3)]
     assert response.headers['Cache-Control'].startswith('private')
     assert 'no-store' in response.headers['Cache-Control']
     # Same employee uses a bounded in-memory cache.
@@ -157,7 +158,7 @@ def test_ranking_portrait_contract_and_fixed_host_without_forwarded_credentials(
     assert response.data==b'\xff\xd8\xffportrait'
     assert response.headers['Cache-Control']=='private, no-store'
     assert response.headers['X-Content-Type-Options']=='nosniff'
-    assert calls==[(people_module.PHOTO_BASE+'0012345.jpg',{'Accept':'image/jpeg,image/png,image/webp,image/gif'},3)]
+    assert calls==[(people_app.config['EMPLOYEE_PHOTO_BASE_URL']+'0012345.jpg',{'Accept':'image/jpeg,image/png,image/webp,image/gif'},3)]
     assert viewer.get(row['photoUrl']).status_code==200 and len(calls)==1
     # Cached portraits also become inaccessible when a contributor is disabled.
     with people_app.app_context():db().users.update_one({'_id':'0012345'},{'$set':{'enabled':False}})
@@ -204,4 +205,4 @@ def test_contributor_portrait_uses_existing_image_validation_and_failure_cache(p
     viewer,_=ready(people_app,'member')
     assert viewer.get('/api/people/0012345/photo').status_code==404
     assert viewer.get('/api/people/0012345/photo').status_code==404
-    assert calls==[people_module.PHOTO_BASE+'0012345.jpg']
+    assert calls==[people_app.config['EMPLOYEE_PHOTO_BASE_URL']+'0012345.jpg']

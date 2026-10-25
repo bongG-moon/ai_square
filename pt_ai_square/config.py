@@ -2,8 +2,28 @@
 import os
 import runpy
 from pathlib import Path
+from urllib.parse import urlsplit
 
 BASE = Path(__file__).resolve().parent
+
+def employee_photo_base_url(value):
+    """Validate the operator-owned image directory, never a browser input."""
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    try:
+        parsed = urlsplit(value)
+        valid = (parsed.scheme in {'http', 'https'} and bool(parsed.hostname)
+                 and parsed.username is None and parsed.password is None
+                 and not parsed.query and not parsed.fragment
+                 and not any(character.isspace() or ord(character) < 32 for character in value)
+                 and '\\' not in value)
+        parsed.port  # Also reject malformed or out-of-range port numbers.
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError('PTAI_EMPLOYEE_PHOTO_BASE_URL에는 계정·쿼리·조각이 없는 HTTP(S) 사진 폴더 주소를 입력하세요.')
+    return value.rstrip('/') + '/'
 
 def settings():
     path = BASE / 'runtime_config.py'
@@ -28,6 +48,7 @@ def settings():
     backend='mongodb'
     return dict(HOST=str(get('HOST','127.0.0.1')),PORT=int(get('PORT',5080)),ACTIVITY_BACKEND=backend,
                 PUBLIC_URL=str(get('PUBLIC_URL','')).strip(),
+                EMPLOYEE_PHOTO_BASE_URL=employee_photo_base_url(get('EMPLOYEE_PHOTO_BASE_URL','')),
                 DATA_MODE=str(get('DATA_MODE','mongodb')).strip().lower(),
                 MONGODB_URI=str(named('MONGODB_URI','')).strip(),
                 MONGODB_DATABASE=str(named('MONGODB_DATABASE','pt_ai_square')),

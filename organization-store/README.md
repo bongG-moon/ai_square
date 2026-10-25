@@ -37,7 +37,7 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 
 ### 서버 주소를 포함한 웹 다운로드
 
-웹의 **KEY 연결** 또는 **AX Workspace** 화면에서 선택 확장 ZIP을 받습니다. `/local-access/workspace-extension.zip`은 서버의 `PTAI_PUBLIC_URL`(설정된 경우) 또는 현재 접속한 기본 주소를 `connection.json`에 담습니다. 운영 환경이 리버스 프록시 뒤에 있다면 `PTAI_PUBLIC_URL = 'http://pntaisquare.skhynix.com'`처럼 사용자가 접속하는 기본 주소를 설정하세요. 서버의 실행 주소 `0.0.0.0`이나 내부 포트를 공개 주소로 사용하지 않습니다.
+웹의 **KEY 연결** 또는 **AX Workspace** 화면에서 선택 확장 ZIP을 받습니다. `/local-access/workspace-extension.zip`은 서버의 `PTAI_PUBLIC_URL`(설정된 경우) 또는 현재 접속한 기본 주소를 `connection.json`에 담습니다. 운영 환경이 리버스 프록시 뒤에 있다면 `PTAI_PUBLIC_URL = 'http://pntaisquare.company.example'`처럼 사용자가 접속하는 기본 주소를 설정하세요. 서버의 실행 주소 `0.0.0.0`이나 내부 포트를 공개 주소로 사용하지 않습니다.
 
 ZIP에는 사전 빌드한 설치 EXE, 주소 파일, 설치 안내만 포함됩니다. 개인 KEY·쿠키·MongoDB 접속 정보는 포함되지 않습니다. EXE 바이트는 수정하지 않으며 다운로드마다 컴파일하지 않습니다. `connection.json`을 빼고 EXE만 옮기면 주소 자동 입력을 사용할 수 없으므로 **ZIP 전체를 전달**하세요.
 

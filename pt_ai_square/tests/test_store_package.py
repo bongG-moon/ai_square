@@ -41,7 +41,7 @@ def test_download_binds_each_server_without_modifying_installer(package_app):
     app, source = package_app
     original = source.read_bytes()
     client = app.test_client()
-    for origin in ['http://pntaisquare.skhynix.com', 'https://other.example:8443']:
+    for origin in ['http://pntaisquare.company.example', 'https://other.example:8443']:
         response = client.get('/local-access/workspace-extension.zip', base_url=origin,
                               headers={'Authorization': 'test-secret-not-a-key', 'Cookie': 'private=never-copy'})
         files = unpack(response)
@@ -60,13 +60,13 @@ def test_download_binds_each_server_without_modifying_installer(package_app):
 
 def test_public_url_wins_behind_reverse_proxy(package_app):
     app, _ = package_app
-    app.config['PUBLIC_URL'] = 'http://PntAiSquare.SKHynix.com:80/'
+    app.config['PUBLIC_URL'] = 'http://PntAiSquare.company.example:80/'
     response = app.test_client().get('/local-access/workspace-extension.zip?url=https://untrusted.example',
                                     base_url='http://0.0.0.0:5000', headers={
                                         'X-Forwarded-Host': 'untrusted.example',
                                         'X-Forwarded-Proto': 'https',
                                     })
-    assert json.loads(unpack(response)[MANIFEST])['baseUrl'] == 'http://pntaisquare.skhynix.com'
+    assert json.loads(unpack(response)[MANIFEST])['baseUrl'] == 'http://pntaisquare.company.example'
 
 
 def test_untrusted_forwarded_headers_and_query_do_not_choose_destination(package_app):

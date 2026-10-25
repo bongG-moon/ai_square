@@ -106,10 +106,10 @@ python -m venv .venv
 
 Python 3.11 이상을 사용합니다. .venv는 이 앱에 필요한 Python 패키지를 담는 별도 폴더입니다. 활성화 명령 없이 위 실행 파일을 직접 지정해도 됩니다. 설치에 쓴 Python과 회사 실행기가 쓰는 Python이 같아야 합니다.
 
-SSO 운영에는 회사 hcputil도 필요합니다. 아래는 앞서 제공된 사내 저장소 설치 예시입니다. 회사 저장소 주소가 바뀌었다면 담당자가 안내한 주소를 사용합니다. 인터넷 공개 저장소에서 같은 이름의 패키지를 임의로 대체하지 않습니다.
+SSO 운영에는 회사 hcputil도 필요합니다. 아래 `company.example` 주소는 공개 안내용 예시입니다. 실제 설치 시 회사 담당자가 안내한 승인된 패키지 저장소 주소로 바꾸세요. 인터넷 공개 저장소에서 같은 이름의 패키지를 임의로 대체하지 않습니다.
 
 ```powershell
-& '.\.venv\Scripts\python.exe' -m pip install hcputil --index-url http://nexus.skhynix.com:8080/repository/pypi-group/simple --trusted-host nexus.skhynix.com
+& '.\.venv\Scripts\python.exe' -m pip install hcputil --index-url http://nexus.company.example:8080/repository/pypi-group/simple --trusted-host nexus.company.example
 & '.\.venv\Scripts\python.exe' -c "from flask import Flask; from pymongo import MongoClient; from hcputil.auth.sso import SSO; print('필수 모듈 확인 완료')"
 ```
 
@@ -265,7 +265,9 @@ web_main.py에는 회사 예제처럼 `app = Flask(__name__)`, `NLS_LANG='.UTF8'
 
 SSO로 로그인한 뒤 우측 상단에서 “이름 TL”, 부서명, 원형 사진을 확인합니다. TL은 요청한 화면 표기이며 SSO의 관리자 권한이나 직책 정보를 새로 만드는 값은 아닙니다.
 
-사진 원본 주소는 http://skynet.skhynix.com/portalWeb/uploadfile/pictures/사번.jpg 형식입니다. 상단 프로필에는 HTTPS 플랫폼의 /api/me/photo 주소를 보여주고, 플랫폼 서버가 현재 로그인한 사번의 사진을 회사 주소에서 읽어 전달합니다. 구성원 순위에서는 /api/people/사번/photo 주소를 사용하며, 활성 계정이고 삭제되지 않은 도구를 등록한 구성원의 사진만 로그인한 사용자에게 제공합니다. 브라우저의 SSO 쿠키나 연결 KEY를 사진 서버로 전달하지 않습니다.
+직원 사진을 사용하려면 운영 서버의 `runtime_config.py`에 `PTAI_EMPLOYEE_PHOTO_BASE_URL = 'https://photos.company.example/pictures/'` 형식으로 실제 사진 폴더 주소를 지정하세요. 같은 이름의 환경변수로도 설정할 수 있습니다. 이 예시 주소를 그대로 쓰지 말고 운영 담당자가 제공한 값으로 바꿉니다. 사내 주소는 공개 소스에 포함하지 않으며, 비워두면 사진 서버에 요청하지 않고 이름 첫 글자를 표시합니다. 값을 바꾼 뒤 플랫폼 서버를 재시작하세요.
+
+플랫폼 서버가 설정된 주소에 `사번.jpg`를 붙여 현재 로그인한 사번의 사진을 읽어 전달합니다. 상단 프로필은 플랫폼의 `/api/me/photo`, 구성원 순위는 `/api/people/사번/photo`를 사용합니다. 순위 사진은 활성 계정이고 삭제되지 않은 도구를 등록한 구성원에 한해 로그인한 사용자에게 제공합니다. 브라우저의 SSO 쿠키나 연결 KEY를 사진 서버로 전달하지 않습니다.
 
 운영자는 **플랫폼 서버에서 회사 사진 서버에 접근할 수 있는지** 확인하면 됩니다. 사진이 없거나 연결되지 않으면 이름 첫 글자로 표시하며 나머지 기능은 계속 사용할 수 있습니다. mock·dummy 시험에서는 실제 사번 사진을 외부로 요청하지 않습니다. 실제 회사 사진 표시 여부는 사내 SSO 환경에서 확인합니다.
 

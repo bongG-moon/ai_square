@@ -39,6 +39,13 @@ PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'
 # 경로(/local-access 등), 계정, KEY, 쿼리는 넣지 않습니다. 웹 실행 방식이나 포트를 바꾸지 않습니다.
 PTAI_PUBLIC_URL = ''
 
+# 선택 설정: 직원 사진을 제공하는 서버의 사진 폴더 주소입니다.
+# 운영 서버의 runtime_config.py 또는 환경변수에만 지정하세요. 사내 주소를 소스에 넣지 않습니다.
+# 예: 'https://photos.company.example/pictures/' → '<사번>.jpg'를 서버에서 조회합니다.
+# 비워두면 사진 서버에 요청하지 않고 기존 이름 이니셜을 표시합니다.
+# SSO + MongoDB 운영에서만 사용하며, 브라우저의 쿠키나 KEY를 사진 서버로 전달하지 않습니다.
+PTAI_EMPLOYEE_PHOTO_BASE_URL = ''
+
 # 한 HTTP 업로드 요청 전체의 최대 용량(MB)입니다. 128이면 약 128MB입니다.
 # 여러 파일과 입력 정보가 함께 계산됩니다. 요청 첨부에는 별도로 파일당 20MB·최대 5개 제한이 있습니다.
 PTAI_MAX_UPLOAD_MB = 128

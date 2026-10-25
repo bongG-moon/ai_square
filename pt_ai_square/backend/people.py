@@ -12,7 +12,6 @@ from flask import Blueprint, Response, current_app, g, jsonify
 from .storage import db
 
 people = Blueprint('people', __name__)
-PHOTO_BASE = 'http://skynet.skhynix.com/portalWeb/uploadfile/pictures/'
 PHOTO_MAX_BYTES = 1024 * 1024
 PHOTO_TIMEOUT = 3
 _photo_cache = OrderedDict()
@@ -39,7 +38,10 @@ def _image_type(data):
 
 
 def _fetch_photo(employee):
-    request = Request(PHOTO_BASE + employee + '.jpg', headers={'Accept': 'image/jpeg,image/png,image/webp,image/gif'})
+    base_url = current_app.config.get('EMPLOYEE_PHOTO_BASE_URL', '')
+    if not base_url:
+        return None
+    request = Request(base_url + employee + '.jpg', headers={'Accept': 'image/jpeg,image/png,image/webp,image/gif'})
     # Construct a fresh request: the browser's SSO cookie and API key are never
     # forwarded to the photo service. Only the employee number is in the path.
     with build_opener(_NoRedirect()).open(request, timeout=PHOTO_TIMEOUT) as upstream:
@@ -62,6 +64,7 @@ def _photo_enabled(employee):
     # Local/mock identities never leave this service, even if numeric.
     return (current_app.config['AUTH_MODE'] == 'sso'
             and current_app.config['DATA_MODE'] == 'mongodb'
+            and bool(current_app.config.get('EMPLOYEE_PHOTO_BASE_URL'))
             and re.fullmatch(r'[0-9]{1,20}', employee) is not None)
 
 
@@ -69,10 +72,11 @@ def _photo_response(employee):
     if not _photo_enabled(employee):
         return Response(status=404, headers={'Cache-Control': 'private, no-store'})
     now = time.monotonic()
+    cache_key = (current_app.config['EMPLOYEE_PHOTO_BASE_URL'], employee)
     with _photo_lock:
-        cached = _photo_cache.get(employee)
+        cached = _photo_cache.get(cache_key)
         if cached and cached[0] > now:
-            _photo_cache.move_to_end(employee)
+            _photo_cache.move_to_end(cache_key)
             result = cached[1]
         else:
             cached = None
@@ -82,8 +86,8 @@ def _photo_response(employee):
         except (HTTPError, URLError, OSError, TimeoutError, HTTPException, ValueError):
             result = None
         with _photo_lock:
-            _photo_cache[employee] = (now + (300 if result else 30), result)
-            _photo_cache.move_to_end(employee)
+            _photo_cache[cache_key] = (now + (300 if result else 30), result)
+            _photo_cache.move_to_end(cache_key)
             while len(_photo_cache) > 128:
                 _photo_cache.popitem(last=False)
     if not result:
@@ -93,7 +97,7 @@ def _photo_response(employee):
     data, mime = result
     # The URL is /api/me/photo for every signed-in employee. Browser caching
     # must not show a previous employee's face after an account switch; the
-    # bounded server cache above is separately keyed by employee number.
+    # bounded server cache above is keyed by the configured origin and employee.
     return Response(data, mimetype=mime, headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
 
 
