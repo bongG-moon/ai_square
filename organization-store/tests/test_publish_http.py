@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import uuid
+import zipfile
 
 import pytest
 
@@ -87,9 +88,23 @@ def service():
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows account DPAPI connection persistence')
-def test_registration_fresh_workers_native_file_context_http_browser_review(service, tmp_path):
+@pytest.mark.parametrize('source_kind', ['md', 'zip'])
+def test_registration_fresh_workers_native_file_context_http_browser_review(service, tmp_path, source_kind):
     url, state = service
-    source = tmp_path / 'SKILL.md'; source.write_text('# 메모\n요약합니다.\n', encoding='utf-8')
+    guide = '# 설치 안내\n공통 또는 업무 폴더를 선택하고 요약을 요청하세요.\n'
+    if source_kind == 'zip':
+        source = tmp_path / 'summary.zip'
+        declaration = dict(schemaVersion=1, packageId='summary-helper', name='메모 요약', desc='요약 도구',
+                           platform='Claude', type='Skill', entryPoint='SKILL.md', guideFile='GUIDE.md',
+                           requiredFiles=['SKILL.md', 'GUIDE.md'], requirements=[], workTags=['문서'],
+                           environment='Windows', changes='설치 안내 보완',
+                           workflow=dict(steps=[dict(title='요약', description='첨부한 문서를 요약합니다.')]))
+        with zipfile.ZipFile(source, 'w') as archive:
+            archive.writestr('ai-square.json', json.dumps(declaration, ensure_ascii=False))
+            archive.writestr('SKILL.md', '# 메모\n요약합니다.\n')
+            archive.writestr('GUIDE.md', guide)
+    else:
+        source = tmp_path / 'SKILL.md'; source.write_text('# 메모\n요약합니다.\n', encoding='utf-8')
     info = source.stat()
     context = dict(selectedFile=str(source), selectedFileIdentity=[info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns])
     data = tmp_path / 'data'
@@ -107,10 +122,21 @@ def test_registration_fresh_workers_native_file_context_http_browser_review(serv
     assert call('publishOptions')['canPublish']
     inspected = call('inspectPublishSource')
     assert inspected['source']['sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
-    pending = call('preparePublish', dict(target='new', requestId=str(uuid.uuid4()), metadata=dict(
+    metadata = dict(
         name='메모', desc='요약 도구', platform='Claude', type='Skill', guide='설치 안내', orgId='org', categoryId='work',
-        approval=False, mode='file')))
+        approval=False, mode='file')
+    if source_kind == 'zip':
+        assert inspected['packageWarning'] == ''
+        assert inspected['metadata']['guide'] == guide.strip()
+        assert inspected['metadata']['workflow'] == declaration['workflow']
+        assert inspected['metadata']['packageId'] == declaration['packageId']
+        assert not {'orgId', 'categoryId', 'approval'} & inspected['metadata'].keys()
+        metadata.update(inspected['metadata'])
+        metadata['desc'] = '자동 입력 후 직접 다듬은 요약 설명'
+    pending = call('preparePublish', dict(target='new', requestId=str(uuid.uuid4()), metadata=metadata))
     assert pending['status'] == 'pending' and state['uploads'] == [source.read_bytes()]
+    for key, value in metadata.items():
+        assert pending['metadata'][key] == value
     assert call('publish', {'draftId': pending['id'], 'confirmed': True}, selected=False)['published'] is False
     assert state['commits'] == 0
     state['drafts'][pending['id']]['status'] = 'approved'  # Browser-side fixture approval only.

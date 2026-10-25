@@ -67,6 +67,16 @@
     return loadTab('catalog');
   }
   function normalUrl() { const url = new URL($('server-url').value.trim()); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('플랫폼의 기본 주소를 입력해 주세요.'); return url.href.replace(/\/$/, ''); }
+  $('platform-home').addEventListener('click', () => busy($('platform-home'), async () => {
+    const configured = state.baseUrl || state.presetBaseUrl;
+    if (!configured) {
+      connectionView(); feedback('플랫폼 주소를 먼저 연결해 주세요. 연결하면 여기서 홈페이지를 열 수 있어요.'); $('server-url').focus(); return;
+    }
+    const url = new URL(configured);
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/')
+      throw new Error('플랫폼의 기본 주소를 확인해 주세요. 연결 설정에서 주소를 다시 지정할 수 있어요.');
+    await rpc('host.openExternal', {url: url.href, homepage: true});
+  }));
   $('server-url').addEventListener('input', () => { httpConsent(); $('connection-key').value = ''; });
   $('change-server').addEventListener('click', () => {
     const editing = $('server-url').readOnly; $('server-url').readOnly = !editing;
@@ -171,9 +181,20 @@
     for (const card of $('results').querySelectorAll('.tool-card[data-tool-id]')) if (card.dataset.toolId === String(item.id)) card.querySelector('.metrics')?.replaceWith(metrics(item));
   }
   function toolCard(item) {
-    const card = el('article', 'tool-card'); card.dataset.toolId = item.id;
+    const card = el('article', 'tool-card catalog-card'); card.dataset.toolId = item.id;
     const top = el('div', 'card-top'); top.append(symbol(item.type), typeBadge(item.type));
     const title = button(item.name, 'tool-title', () => detail(item.id));
+    title.setAttribute('aria-haspopup', 'dialog');
+    title.setAttribute('aria-controls', 'detail-dialog');
+    // Keep a native button for keyboard/screen-reader activation. Card surfaces
+    // share that one action, while nested controls keep their own click behavior.
+    card.addEventListener('click', event => {
+      if (event.target.closest('button,a,input,select,textarea,label,summary,[role=button],[contenteditable=true]')) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && (card.contains(selection.anchorNode) || card.contains(selection.focusNode))) return;
+      if (title.disabled) return;
+      title.focus({preventScroll:true}); title.click();
+    });
     const tags = el('div', 'tags'); for (const tag of [item.org, item.category, ...(item.workTags || []).slice(0, 2)].filter(Boolean)) tags.append(el('span', '', tag));
     const owner = el('p', 'card-owner'); owner.append(el('span', 'owner-label', '등록자'), el('span', '', registrant(item))); owner.title = `등록자 · ${registrant(item)}`;
     const foot = el('div', 'card-bottom'); foot.append(metrics(item), button('자세히 보기', 'text-button', () => detail(item.id)));
@@ -426,10 +447,12 @@
   }
   // Registration reuses the platform's immutable draft + human web-review flow.
   // No automatic approval, upload retry, background polling or command execution.
-  const publication = { loaded: false, allowed: false, busy: false, file: null, draft: null, requestId: null, extra: {}, existingExtra: {}, fileExtra: {}, opener: null, origin: '' };
+  const publication = { loaded: false, allowed: false, busy: false, file: null, draft: null, requestId: null, extra: {}, existingExtra: {}, fileExtra: {}, fileFields: {}, existingFields: {}, manualFields: new Set(), fileSourceSelected: false, opener: null, origin: '' };
   const publishFields = {name:'publish-name',desc:'publish-desc',platform:'publish-platform',type:'publish-type',guide:'publish-guide',orgId:'publish-org',categoryId:'publish-category',changes:'publish-changes',url:'publish-url',commandProject:'publish-command-project',commandUser:'publish-command-user'};
+  const publishFileFields = ['name','desc','platform','type','guide','changes'];
+  const publishExtraFields = ['packageId','workTags','environment','workflow','installProfile'];
   const publishSelects = ['publish-target','publish-existing','publish-mode','publish-platform','publish-type','publish-org','publish-category'];
-  const publishActionIds = ['publish-pick-file','publish-prepare','publish-status','publish-review-open','publish-commit','publish-edit','publish-target-find'];
+  const publishActionIds = ['publish-pick-file','publish-file-reapply','publish-prepare','publish-status','publish-review-open','publish-commit','publish-edit','publish-target-find'];
   function publishMessage(text, error = false) { $('publish-message').textContent=text; $('publish-message').classList.toggle('error',error); }
   function publishChanged() { publication.requestId=null; publication.draft=null; }
   function publishControls() {
@@ -458,6 +481,7 @@
     const mode=$('publish-mode').value;
     $('publish-file-panel').hidden=mode!=='file';$('publish-url-field').hidden=mode!=='url';$('publish-command-fields').hidden=mode!=='command';
     $('publish-existing-field').hidden=$('publish-target').value!=='update';$('publish-install-info').hidden=mode!=='file'||!publication.extra.installProfile;
+    $('publish-file-reapply').hidden=mode!=='file'||!publication.file||!publication.fileExtra.packageId;
     if(mode==='file'&&!state.hostFeatures.includes('publishFiles')) $('publish-file-help').textContent='파일을 선택하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.';
   }
   function publishInstallInfo() {
@@ -468,25 +492,60 @@
     $('publish-install-summary').textContent=[profile.kind,profile.host,scopes,profile.entrypoint].filter(Boolean).join(' / ');
     $('publish-keep-install').checked=true;
   }
-  function fillPublishMetadata(metadata, replace=false) {
-    if(!metadata||typeof metadata!=='object')return;
-    if(replace)publication.extra={};
-    for(const key of ['packageId','workTags','environment','workflow','installProfile']){
-      if(Object.prototype.hasOwnProperty.call(metadata,key))publication.extra[key]=metadata[key];
+  function setPublishField(key, value) {
+    const field=$(publishFields[key]);
+    // A package may name another supported host, but cannot invent a server
+    // organization/category or change the user's publication approval choice.
+    if(field.tagName==='SELECT'&&value&&![...field.options].some(option=>option.value===value)) {
+      if(key!=='platform')return;
+      field.append(new Option(value,value));
     }
+    field.value=value;
+    if(field.tagName==='SELECT')field.dispatchEvent(new Event('optionschanged'));
+  }
+  function publishExtra(metadata) {
+    return Object.fromEntries(publishExtraFields.filter(key=>Object.prototype.hasOwnProperty.call(metadata||{},key)).map(key=>[key,metadata[key]]));
+  }
+  function updatePublishExtra() {
+    // An existing tool's installation declaration belongs to its old artifact.
+    // Once a replacement is picked, only that file's verified declaration applies.
+    publication.extra={...(publication.fileSourceSelected?publication.fileExtra:publication.existingExtra)};
+    publishInstallInfo();publishMode();
+  }
+  function fillFileMetadata(metadata={}) {
+    const next=Object.fromEntries(publishFileFields.filter(key=>typeof metadata[key]==='string').map(key=>[key,metadata[key]]));
+    let filled=0;
+    for(const key of new Set([...Object.keys(publication.fileFields),...Object.keys(next)])) {
+      const identity=(key==='platform'||key==='type')&&Object.prototype.hasOwnProperty.call(next,key);
+      if(publication.manualFields.has(key)&&!identity)continue;
+      if(identity)publication.manualFields.delete(key);
+      setPublishField(key,next[key]??publication.existingFields[key]??'');
+      if(next[key])filled++;
+    }
+    publication.fileFields=next;
+    publication.fileExtra=publishExtra(metadata);updatePublishExtra();
+    return filled;
+  }
+  function fillPublishMetadata(metadata) {
+    if(!metadata||typeof metadata!=='object')return;
+    // Choosing a different existing tool is an explicit replacement of defaults.
+    const selectedFileFields=publication.fileFields;
+    publication.manualFields.clear();publication.fileFields={};publication.existingFields={};
+    publication.existingExtra=publishExtra(metadata);
     for(const [key,id] of Object.entries(publishFields)) {
-      if(typeof metadata[key]!=='string')continue;
-      const field=$(id);
-      if(field.tagName==='SELECT'&&metadata[key]&&![...field.options].some(option=>option.value===metadata[key])) field.append(new Option(metadata[key],metadata[key]));
-      field.value=metadata[key];if(field.tagName==='SELECT')field.dispatchEvent(new Event('optionschanged'));
+      const value=typeof metadata[key]==='string'?metadata[key]:'';
+      publication.existingFields[key]=value;setPublishField(key,value);
     }
     if(typeOfBoolean(metadata.approval))document.querySelector(`input[name="publish-visibility"][value="${metadata.approval?'approval':'public'}"]`).checked=true;
     if(['file','url','command'].includes(metadata.mode)){$('publish-mode').value=metadata.mode;$('publish-mode').dispatchEvent(new Event('optionschanged'));}
-    publishInstallInfo();publishMode();
+    if(publication.file)fillFileMetadata({...publication.fileExtra,...selectedFileFields});
+    else updatePublishExtra();
+    publishMode();
   }
   function typeOfBoolean(value){return typeof value==='boolean';}
   function resetPublish() {
     $('publish-form').reset();publication.file=null;publication.draft=null;publication.requestId=null;publication.extra={};publication.existingExtra={};publication.fileExtra={};
+    publication.fileFields={};publication.existingFields={};publication.manualFields.clear();publication.fileSourceSelected=false;
     $('publish-file-name').textContent='배포할 파일을 선택하세요';$('publish-file-help').textContent='ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB';
     for(const id of publishSelects)$(id).dispatchEvent(new Event('optionschanged'));
     publishInstallInfo();publishMode();
@@ -514,9 +573,14 @@
   $('publish-close').addEventListener('click',closePublish);
   $('publish-dialog').addEventListener('cancel',event=>{event.preventDefault();closePublish();});
   $('publish-form').addEventListener('submit',event=>event.preventDefault());
-  $('publish-form').addEventListener('input',publishChanged);
-  $('publish-form').addEventListener('change',publishChanged);
-  $('publish-target').addEventListener('change',()=>{publishMode();if($('publish-target').value==='new'){publication.existingExtra={};publication.extra={...publication.fileExtra};publishInstallInfo();$('publish-existing').value='';$('publish-existing').dispatchEvent(new Event('optionschanged'));}});
+  function publishFormChanged(event) {
+    publishChanged();
+    const key=Object.keys(publishFields).find(key=>publishFields[key]===event.target.id);
+    if(key)publication.manualFields.add(key);
+  }
+  $('publish-form').addEventListener('input',publishFormChanged);
+  $('publish-form').addEventListener('change',publishFormChanged);
+  $('publish-target').addEventListener('change',()=>{publishMode();if($('publish-target').value==='new'){publication.existingExtra={};publication.existingFields={};updatePublishExtra();$('publish-existing').value='';$('publish-existing').dispatchEvent(new Event('optionschanged'));}});
   $('publish-mode').addEventListener('change',publishMode);
   $('publish-target-find').addEventListener('click',()=>publishAction(async()=>{
     const result=await rpc('publishOptions',{q:$('publish-target-search').value.trim()});
@@ -526,7 +590,7 @@
   $('publish-existing').addEventListener('change',()=>publishAction(async()=>{
     if(!$('publish-existing').value)return;
     const result=await rpc('publishOptions',{toolId:Number($('publish-existing').value)});
-    fillPublishMetadata(result.existing?.metadata,true);publication.existingExtra={...publication.extra};publication.extra={...publication.existingExtra,...publication.fileExtra};publishInstallInfo();
+    fillPublishMetadata(result.existing?.metadata);
     if(publication.file)$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
     publishMessage('기존 도구의 설정을 불러왔어요. 새 자료·변경 내용과 공개 범위를 확인하세요.');
   }));
@@ -534,7 +598,7 @@
     const selected=await rpc('host.pickFile');if(selected.cancelled)return;
     // A new picker choice revokes the old capability. Preserve all written
     // metadata, but never keep a now-unusable file selection after inspection fails.
-    publication.file=null;publication.fileExtra={};publication.extra={...publication.existingExtra};publishInstallInfo();publishChanged();
+    publication.file=null;publication.fileSourceSelected=true;publication.fileExtra={};updatePublishExtra();publishChanged();
     $('publish-file-name').textContent='선택한 파일을 확인하고 있어요…';
     let inspected;
     try{inspected=await rpc('inspectPublishSource',{fileToken:selected.fileToken});}
@@ -544,18 +608,29 @@
     const bytes=inspected.source?.bytes??selected.size;
     const size=Number.isFinite(bytes)?(bytes<1024?`${bytes} B`:bytes<1024*1024?`${(bytes/1024).toFixed(1)} KB`:`${(bytes/1024/1024).toFixed(2)} MB`):'';
     $('publish-file-help').textContent=size?`${size} · 파일 내용은 등록 준비 시 업로드합니다.`:'파일 내용은 등록 준비 시 업로드합니다.';
-    fillPublishMetadata(inspected.metadata);publication.fileExtra=Object.fromEntries(['packageId','workTags','environment','workflow','installProfile'].filter(key=>Object.prototype.hasOwnProperty.call(inspected.metadata||{},key)).map(key=>[key,inspected.metadata[key]]));$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
+    const filled=fillFileMetadata(inspected.metadata||{});$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
     if(inspected.options){publishOptions($('publish-org'),inspected.options.organizations,'조직 선택');publishOptions($('publish-category'),inspected.options.categories,'업무 분류 선택');}
     if(inspected.candidates)publishOptions($('publish-existing'),inspected.candidates,'기존 도구 선택');
-    publishMessage(inspected.packageWarning||'파일을 확인했어요. 이름·설명·분류와 등록 방식을 확인해 주세요.',!!inspected.packageWarning);
+    const packaged=!!inspected.metadata?.packageId;
+    const notice=packaged?(filled?'ZIP에서 이름·설명·사용 안내 등을 자동으로 불러왔어요. 직접 작성한 설명은 유지하고 프로그램·유형은 ZIP에 맞췄습니다. 내용과 분류·공개 범위를 확인해 주세요.':'ZIP의 배포 정보를 확인했어요. 직접 작성한 설명은 유지했습니다. 내용과 분류·공개 범위를 확인해 주세요.'):'자동으로 채울 배포 정보가 없는 파일이에요. 이름·설명·사용 안내와 분류를 직접 입력해 주세요.';
+    publishMessage(inspected.packageWarning||notice,!!inspected.packageWarning);
   }));
+  $('publish-file-reapply').addEventListener('click',()=>{
+    if(publication.busy||!publication.file||!publication.fileExtra.packageId)return;
+    for(const key of publishFileFields)publication.manualFields.delete(key);
+    fillFileMetadata({...publication.fileExtra,...publication.fileFields});publishChanged();
+    publishMessage('ZIP의 이름·설명·사용 안내를 다시 적용했어요. 조직·분류·공개 범위는 그대로 유지됩니다.');
+  });
   function publishPayload() {
     const target=$('publish-target').value, mode=$('publish-mode').value;
     if(!target)throw Error('새 도구인지, 기존 도구의 새 버전인지 선택해 주세요.');
     if(target==='update'&&!$('publish-existing').value)throw Error('새 버전을 등록할 기존 도구를 선택해 주세요.');
     if(mode==='file'&&!publication.file)throw Error('배포할 파일을 선택해 주세요.');
-    const metadata={...publication.extra,mode};
+    const metadata={...(mode==='file'?publication.extra:publication.existingExtra),mode};
     for(const [key,id] of Object.entries(publishFields))metadata[key]=$(id).value.trim();
+    if(mode==='file'&&publication.fileExtra.packageId)for(const [key,label] of [['platform','사용 프로그램'],['type','기능 유형']]){
+      if(publication.fileFields[key]&&metadata[key]!==publication.fileFields[key])throw Error(`${label}은(는) 선택한 ZIP의 값(${publication.fileFields[key]})과 일치해야 해요.`);
+    }
     for(const [key,label] of [['name','도구 이름'],['desc','설명'],['platform','사용 프로그램'],['type','기능 유형'],['guide','설치·사용 안내'],['orgId','조직'],['categoryId','업무 분류']])if(!metadata[key])throw Error(`${label}을(를) 입력하거나 선택해 주세요.`);
     const visibility=document.querySelector('input[name="publish-visibility"]:checked');if(!visibility)throw Error('상세 내용과 파일의 공개 범위를 선택해 주세요.');
     metadata.approval=visibility.value==='approval';
@@ -565,7 +640,7 @@
       if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw Error('아이디·비밀번호가 포함되지 않은 HTTP 또는 HTTPS 주소를 입력하세요.');
     }
     if(mode==='command'&&!metadata.commandProject&&!metadata.commandUser)throw Error('지원하는 설치 명령어를 한 개 이상 입력해 주세요.');
-    if(mode!=='file')delete metadata.installProfile;
+    if(mode!=='file'){delete metadata.installProfile;delete metadata.packageId;}
     if(mode!=='url')delete metadata.url;
     if(mode!=='command'){delete metadata.commandProject;delete metadata.commandUser;}
     if(!publication.requestId)publication.requestId=crypto.randomUUID();

@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import uuid
 import zipfile
 
@@ -243,6 +245,116 @@ def test_zip_declaration_prefills_without_execution(ready):
     assert inspected['metadata']['guide'] == '설치 안내'
     assert inspected['metadata']['packageId'] == 'memo.skill'
     assert not client.draft_calls
+
+
+@pytest.mark.parametrize('artifact_name', ['html-report.zip', 'web-interface.zip'])
+def test_real_distribution_packages_supply_all_registration_fields(ready, artifact_name):
+    """The app imports the same declared data and guide text as web registration."""
+    store, client, _ = ready
+    archive = Path(__file__).resolve().parents[2] / 'skills_zip' / artifact_name
+    before = archive.read_bytes()
+    with zipfile.ZipFile(archive) as zipped:
+        declared = json.loads(zipped.read('ai-square.json').decode('utf-8-sig'))
+        guide = zipped.read(declared['guideFile']).decode('utf-8-sig').strip()
+    select(store, archive)
+
+    result = store.dispatch('inspectPublishSource')
+
+    expected = {key: declared[key] for key in ('name', 'desc', 'platform', 'type', 'workTags',
+                                               'environment', 'changes', 'workflow', 'packageId')}
+    expected['guide'] = guide
+    assert result['metadata'] == expected
+    assert result['packageWarning'] == ''
+    assert result['source'] == {'name': artifact_name, 'bytes': len(before),
+                                'sha256': hashlib.sha256(before).hexdigest()}
+    assert result['options'] == client.options
+    assert any(call[0] == '/api/publish-targets?packageId=' + declared['packageId'] for call in client.calls)
+    assert all(call[1] == 'GET' for call in client.calls)
+    assert not client.draft_calls and not client.commits
+    assert archive.read_bytes() == before
+    assert not set(result['metadata']) & {'approval', 'orgId', 'categoryId', 'owner'}
+
+
+@pytest.mark.parametrize('kind', ['Skill', 'MCP/Tool', '플러그인/하네스'])
+def test_distribution_skill_builder_output_is_readable_by_app(ready, kind):
+    store, client, source = ready
+    root = Path(__file__).resolve().parents[2]
+    prepared = source.parent / 'prepared'
+    prepared.mkdir()
+    (prepared / 'guides').mkdir()
+    declaration = dict(schemaVersion=1, packageId='fixture.distribution', name='배포 도구',
+                       desc='배포 스킬로 만든 파일을 자동 입력합니다.', platform='Claude', type=kind,
+                       entryPoint='SKILL.md', guideFile='guides/INSTALL.md', requiredFiles=['SKILL.md'],
+                       requirements=['Python 3.13'], workTags=['배포', '업무'], environment='Windows',
+                       changes='자동 입력 정보 확인', workflow={'steps': [{'title': '파일 선택'},
+                                   {'title': '내용 확인', 'description': '입력된 정보를 검토합니다.'}]})
+    (prepared / 'ai-square.json').write_text(json.dumps(declaration, ensure_ascii=False), encoding='utf-8-sig')
+    (prepared / 'SKILL.md').write_text('# 배포 도구\n', encoding='utf-8')
+    (prepared / 'guides' / 'INSTALL.md').write_bytes('  # 설치 안내\n\n업무를 선택하세요.\n'.encode('utf-8-sig'))
+    archive = source.parent / 'from-distribution-skill.zip'
+    built = subprocess.run([sys.executable, '-X', 'utf8', '-B',
+                            str(root / 'pt_ai_square/static/guides/pt-file-distribution/scripts/prepare_package.py'),
+                            str(prepared), str(archive)], capture_output=True, text=True, encoding='utf-8', timeout=30)
+    assert built.returncode == 0, built.stderr
+    select(store, archive)
+
+    result = store.dispatch('inspectPublishSource')
+
+    assert result['packageWarning'] == ''
+    assert result['metadata'] == dict(name=declaration['name'], desc=declaration['desc'],
+        platform='Claude', type=kind, guide='# 설치 안내\n\n업무를 선택하세요.', packageId='fixture.distribution',
+        workTags=['배포', '업무'], environment='Windows', changes='자동 입력 정보 확인',
+        workflow={'steps': [{'title': '파일 선택', 'description': ''},
+                            {'title': '내용 확인', 'description': '입력된 정보를 검토합니다.'}]})
+    assert all(call[1] == 'GET' for call in client.calls) and not client.draft_calls
+
+
+@pytest.mark.parametrize('invalid', ['missing-guide', 'non-utf8-guide', 'nested-manifest',
+                                    'duplicate-json-key', 'permission-field', 'type-alias'])
+def test_invalid_declaration_is_manual_entry_warning_without_partial_autofill(ready, invalid):
+    store, client, source = ready
+    declaration = dict(schemaVersion=1, packageId='fixture.invalid', name='배포 도구', desc='정리',
+                       platform='Claude', type='Skill', entryPoint='SKILL.md', guideFile='GUIDE.md')
+    if invalid == 'permission-field':
+        declaration['approval'] = True
+    if invalid == 'type-alias':
+        declaration['type'] = 'skill'
+    manifest = json.dumps(declaration, ensure_ascii=False)
+    if invalid == 'duplicate-json-key':
+        manifest = manifest.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1')
+    archive = source.with_suffix('.zip')
+    with zipfile.ZipFile(archive, 'w') as zipped:
+        zipped.writestr('nested/ai-square.json' if invalid == 'nested-manifest' else 'ai-square.json', manifest)
+        zipped.writestr('SKILL.md', '# skill')
+        if invalid != 'missing-guide':
+            zipped.writestr('GUIDE.md', b'\xff\xfeinvalid' if invalid == 'non-utf8-guide' else '설치 안내')
+    select(store, archive)
+
+    result = store.dispatch('inspectPublishSource')
+
+    assert result['metadata'] == {}
+    assert result['packageWarning'].startswith('배포 정보: ')
+    assert all(call[1] == 'GET' for call in client.calls) and not client.draft_calls
+
+
+@pytest.mark.parametrize('unsafe', ['path-traversal', 'duplicate-entry', 'secret-in-compressed-file'])
+def test_zip_autofill_never_accepts_unsafe_archive_contents(ready, unsafe):
+    store, client, source = ready
+    archive = source.with_suffix('.zip')
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zipped:
+        zipped.writestr('SKILL.md', '# skill')
+        if unsafe == 'path-traversal':
+            zipped.writestr('../outside.md', '# outside')
+        elif unsafe == 'duplicate-entry':
+            zipped.writestr('skill.MD', '# duplicate case-insensitive path')
+        else:
+            zipped.writestr('guide.md', '인증: ptsq_' + 'A' * 43)
+    select(store, archive)
+
+    with pytest.raises(worker.SquareError):
+        store.dispatch('inspectPublishSource')
+
+    assert not client.draft_calls and not client.commits
 
 
 def test_private_zip_members_are_blocked_before_upload(ready):

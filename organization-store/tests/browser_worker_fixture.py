@@ -29,7 +29,10 @@ elif action == 'disconnect':
 elif action == 'options':
  result = {'organizations': [{'id': 'ax', 'name': 'AX 추진팀'}]}
 elif action == 'catalog':
- result = {'items': [i for i in items if p.get('q', '') in i['name'] and (not p.get('type') or p['type'] == i['type'])], 'total': len(items), 'nextOffset': None}
+ query = p.get('q', '').strip().casefold()
+ matches = [i for i in items if query in ' '.join([i['name'], i['desc'], i['registrantName']]).casefold()
+            and (not p.get('type') or p['type'] == i['type'])]
+ result = {'items': matches, 'total': len(matches), 'nextOffset': None}
 elif action == 'detail':
  item = next(i for i in items if i['id'] == p['toolId'])
  result = {'item': dict(item, mode='zip', active=2, views=item['statistics']['views'], downloads=28, likes=item['statistics']['likes'], guide='1. 사용할 자료를 준비합니다.\n2. 대화에서 기능을 선택하고 요청합니다.\n3. 결과를 확인한 뒤 필요한 내용을 보완합니다.', environment='Windows · Claude Code', changes='첫 배포 · 기본 업무 흐름 지원', workflow={'steps':[{'title':'자료 준비','description':'사용할 문서를 선택합니다.'},{'title':'요청 작성','description':'원하는 결과를 입력합니다.'},{'title':'결과 확인','description':'결과를 확인하고 보완합니다.'}]}, versions=[{'n': 2, 'filename': 'fixture.zip', 'note':'업무 흐름과 안내를 개선했습니다.','created':1792800000},{'n':1,'filename':'fixture-v1.zip','note':'첫 배포','created':1792700000}], comments=[]), 'manifest': {'release':2,'downloadUrl': '/download/1/2','installProfile':{'scopes':['project','user']}}, 'canInstall': item['type'] in {'Skill','MCP'}, 'installNotice': '검증용 예시입니다. 실제 서버나 개인 프로필에는 접근하지 않습니다.', 'webUrl': 'https://square.example.test/'}

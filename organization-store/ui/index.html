@@ -6,7 +6,7 @@
 <body>
 <main id="store">
   <header class="store-header">
-    <div><p class="eyebrow">우리 조직의 AI 기능</p><h1>P&amp;T AI Square</h1><p class="subtitle">업무에 필요한 기능을 찾아보고, 사용할 공간에 설치하세요.</p></div>
+    <div><p class="eyebrow">우리 조직의 AI 기능</p><h1><button id="platform-home" class="brand-home" type="button" aria-label="P&amp;T AI Square 홈페이지 열기" title="P&amp;T AI Square 홈페이지 열기">P&amp;T AI Square</button></h1><p class="subtitle">업무에 필요한 기능을 찾아보고, 사용할 공간에 설치하세요.</p></div>
     <div class="header-actions"><button id="publish-open" class="secondary" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>도구 등록</button><button id="connection-button" class="connection" type="button" hidden><span class="status-dot"></span><span id="connection-label">연결 설정</span><span aria-hidden="true">›</span></button></div>
   </header>
   <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
@@ -29,7 +29,7 @@
   </section>
   <section id="catalog-view" hidden>
     <nav class="tabs" aria-label="P&amp;T AI Square 보기"><button type="button" data-tab="catalog" aria-current="page">둘러보기</button><button type="button" data-tab="installed">설치된 기능</button><button type="button" data-tab="updates">업데이트</button></nav>
-    <div id="catalog-toolbar" class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="이름·기능·업무로 검색" aria-label="기능 검색" maxlength="200" autocomplete="off"></label><select id="type-filter" aria-label="기능 유형"><option value="">모든 유형</option><option>Skill</option><option>MCP/Tool</option><option>플러그인/하네스</option></select><select id="org-filter" aria-label="조직"><option value="">모든 조직</option></select><select id="sort" aria-label="정렬"><option value="recommended">추천순</option><option value="newest">최신순</option><option value="realtime">최근 인기순</option><option value="cumulative">누적 인기순</option></select></div>
+    <div id="catalog-toolbar" class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="이름·기능·등록자로 검색" aria-label="이름·기능·업무·등록자 검색" maxlength="200" autocomplete="off"></label><select id="type-filter" aria-label="기능 유형"><option value="">모든 유형</option><option>Skill</option><option>MCP/Tool</option><option>플러그인/하네스</option></select><select id="org-filter" aria-label="조직"><option value="">모든 조직</option></select><select id="sort" aria-label="정렬"><option value="recommended">추천순</option><option value="newest">최신순</option><option value="realtime">최근 인기순</option><option value="cumulative">누적 인기순</option></select></div>
     <div class="results-heading"><p id="results-label">기능을 불러오는 중입니다.</p><button id="refresh" class="text-button" type="button">새로고침</button></div>
     <div id="results" class="card-grid" aria-live="polite"></div><button id="more" class="secondary more" type="button" hidden>더 보기</button>
     <p id="catalog-note" class="catalog-note">조회·좋아요·다운로드는 웹의 기록과 연결됩니다. 파일 다운로드와 실제 설치 상태는 구분해서 표시합니다.</p>
@@ -47,7 +47,7 @@
         <section class="publish-section"><h3><span>1</span>등록할 자료</h3>
           <div class="publish-grid"><label class="publish-field">등록 방식<select id="publish-target" aria-label="등록 방식"><option value="">등록 방식을 선택하세요</option><option value="new">새 도구 등록</option><option value="update">내 도구의 새 버전 등록</option></select></label><label id="publish-existing-field" class="publish-field" hidden>기존 도구<div class="publish-target-search"><input id="publish-target-search" type="search" maxlength="200" placeholder="내가 등록한 도구 검색" aria-label="내 도구 검색"><button id="publish-target-find" class="secondary" type="button">찾기</button></div><select id="publish-existing" aria-label="기존 도구"><option value="">기존 도구 선택</option></select></label></div>
           <label class="publish-field publish-mode-field">배포 방법<select id="publish-mode" aria-label="배포 방법"><option value="file">배포 파일</option><option value="url">웹 주소 · 원격 연결 안내</option><option value="command">설치 명령어 안내</option></select></label>
-          <div id="publish-file-panel" class="publish-file"><div><strong id="publish-file-name">배포할 파일을 선택하세요</strong><p id="publish-file-help">ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB</p></div><button id="publish-pick-file" class="secondary" type="button">파일 선택</button></div>
+          <div id="publish-file-panel" class="publish-file"><div><strong id="publish-file-name">배포할 파일을 선택하세요</strong><p id="publish-file-help">ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB</p><button id="publish-file-reapply" class="text-button" type="button" hidden>ZIP 정보 다시 적용</button></div><button id="publish-pick-file" class="secondary" type="button">파일 선택</button></div>
           <label id="publish-url-field" class="publish-field" hidden>연결 주소<input id="publish-url" type="url" placeholder="https://…" maxlength="2000"><small>주소와 연결 안내를 등록합니다. 원격 MCP에 자동으로 연결하지 않습니다.</small></label>
           <div id="publish-command-fields" class="publish-grid" hidden><label class="publish-field">업무 폴더용 명령어<textarea id="publish-command-project" rows="3" maxlength="12000" placeholder="지원하는 경우에만 입력하세요"></textarea></label><label class="publish-field">사용자 공통 명령어<textarea id="publish-command-user" rows="3" maxlength="12000" placeholder="지원하는 경우에만 입력하세요"></textarea></label></div>
         </section>
