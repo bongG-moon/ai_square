@@ -4,8 +4,8 @@ from queue import Empty, Queue
 import threading
 import webbrowser
 
-from .config import (DEFAULT_CONFIG, SquareError, Settings, atomic_json,
-                     default_download_directory, no_links, operation_lock)
+from .config import (DEFAULT_CONFIG, AuthenticationRequired, SquareError, Settings, atomic_json,
+                     default_download_directory, no_links, normalize_url, operation_lock)
 from .onboarding import connect, resolve_connection
 
 
@@ -19,10 +19,10 @@ def _tk():
 
 
 class ConnectionWindow:
-    def __init__(self, root, config_path=DEFAULT_CONFIG):
+    def __init__(self, root, config_path=DEFAULT_CONFIG, *, url=None):
         tk, ttk, _ = _tk()
         self.root, self.config_path = root, config_path
-        self.url = resolve_connection(config_path)
+        self.url = normalize_url(url) if url is not None else resolve_connection(config_path)
         self.busy = False
         self.completed = False
         self.results = Queue()
@@ -59,7 +59,7 @@ class ConnectionWindow:
         ttk.Label(frame, textvariable=self.status, style='Muted.Square.TLabel', wraplength=550).pack(anchor='w', fill='x', pady=(8, 16))
         actions = ttk.Frame(frame, style='Square.TFrame')
         actions.pack(side='bottom', fill='x')
-        ttk.Button(actions, text='KEY 발급 사이트 열기', command=lambda: webbrowser.open(self.url+'/local-access')).pack(side='left')
+        ttk.Button(actions, text='KEY 발급·재발급 사이트 열기', command=lambda: webbrowser.open(self.url+'/local-access')).pack(side='left')
         self.button = ttk.Button(actions, text='연결하기', style='Primary.TButton', command=self.start_connect)
         self.button.pack(side='right')
         root.protocol('WM_DELETE_WINDOW', self.close)
@@ -90,6 +90,8 @@ class ConnectionWindow:
             try:
                 result = connect(self.config_path, self.url, token, allow_http=accepted)
                 self.results.put((True, result))
+            except AuthenticationRequired:
+                self.results.put((False, 'KEY가 만료되었거나 취소·재발급되었을 수 있습니다. 아래 KEY 사이트 버튼에서 확인한 후 새 KEY를 입력하세요. 웹도 이용할 수 없다면 운영자에게 계정 상태를 확인해 주세요.'))
             except SquareError as error:
                 self.results.put((False, str(error)))
             except Exception:
@@ -126,20 +128,32 @@ class ConnectionWindow:
         self.root.destroy()
 
 
-def open_connection(config_path=DEFAULT_CONFIG):
-    # Validate before opening a window, including packages without a bound address.
-    resolve_connection(config_path)
+def _show_connection(config_path, url):
+    url = normalize_url(url)
     tk, _, _ = _tk()
     root = tk.Tk()
     try:
-        ConnectionWindow(root, config_path)
+        window = ConnectionWindow(root, config_path, url=url)
         root.mainloop()
+        return window.completed
     finally:
         try:
             root.destroy()
         except tk.TclError:
             pass
+
+def open_connection(config_path=DEFAULT_CONFIG):
+    # First connection respects the server bound into the downloaded ZIP.
+    _show_connection(config_path, resolve_connection(config_path))
     return 0
+
+
+def reconnect_key(config_path=DEFAULT_CONFIG, *, show_dialog=None):
+    # Renew the failing connection, even if the ZIP was originally downloaded
+    # from a different server. No KEY or user-supplied URL is an MCP argument.
+    url = Settings(config_path).url
+    completed = (show_dialog or _show_connection)(config_path, url)
+    return {'reconnected': bool(completed), 'baseUrl': url, 'authUrl': url+'/local-access'}
 
 
 def choose_workspace(config_path=DEFAULT_CONFIG, purpose='publish', *, chooser=None):

@@ -9,7 +9,7 @@
 </style>
 </head>
 <body><main>
-<small>P&T AI SQUARE · LOCAL MCP · 2026.10.24</small>
+<small>P&T AI SQUARE · LOCAL MCP · 2026.10.25</small>
 <h1>주소와 폴더는 자동으로.<br><span>내 KEY로 연결합니다.</span></h1>
 <p>사이트에서 받은 MCP를 실행하고 개인 KEY를 한 번 입력하세요. 서버 주소는 자동으로 채워지고, 다운로드 폴더도 내 PC에 자동으로 만들어집니다.</p>
 <div class="chips"><span>서버 주소 자동 설정</span><span>다운로드 폴더 자동 생성</span><span>실제 계정 인증 확인</span></div>
@@ -69,17 +69,27 @@
 <tr><td>신규 등록</td><td>“내가 만든 Skill을 등록해줘.” 필요하면 원본 폴더를 직접 선택합니다. 설명·흐름·조직·업무·공개 범위를 확인하고 웹에서 승인한 뒤 게시합니다.</td></tr>
 <tr><td>새 버전</td><td>기존 본인 도구 후보가 있으면 신규인지 업데이트인지 확인합니다. 승인된 내용으로 게시하면 같은 도구에 새 배포 번호가 생깁니다.</td></tr>
 <tr><td>버전 확인</td><td>“설치한 도구가 최신인지 확인해줘.” 버전만 확인하고 PC 파일을 자동으로 교체하지 않습니다.</td></tr>
+<tr><td>KEY 다시 연결</td><td>“AI SQUARE KEY 다시 연결해줘.” 현재 서버에 연결하는 숨김 입력 창을 엽니다. 새 KEY는 그 창에만 입력합니다.</td></tr>
 </tbody></table></div>
 <p>다운로드는 웹·MCP를 합쳐 사번·도구당 최초 1회만 집계합니다. 반복 수신과 업데이트는 추가 집계하지 않습니다. 기존 업로드 파일은 그대로 검색·다운로드할 수 있고, 자동 설치는 설치 정보가 등록된 항목에 한해 지원합니다.</p>
 </section>
 
 <section>
+<span class="step">RECONNECT · 재설치 없이</span><h2>KEY가 바뀌면 입력 창에서 다시 연결하세요.</h2>
+<p>MCP에서 <strong>401 인증 오류</strong>가 발생하면 현재 연결된 서버의 <strong>KEY 발급 화면 링크</strong>와 재연결 방법을 안내합니다. 예를 들어 현재 주소가 <code>http://회사서버:5000</code>이면 링크는 <code>http://회사서버:5000/local-access</code>입니다. 화면에 나온 실제 링크를 누르면 됩니다.</p>
+<ol><li>안내된 링크를 눌러 회사 웹에 로그인하고 <strong>내 연결 KEY → KEY 재발급</strong>에서 필요한 허용 작업을 선택합니다.</li><li>새 KEY를 복사한 뒤 AI에게 <strong>“AI SQUARE KEY 다시 연결해줘”</strong>라고 요청합니다.</li><li>인자가 없는 <code>reconnect_key</code> 도구가 개인 입력 창을 엽니다. 현재 서버 주소를 확인하고 <strong>가려진 개인 KEY 입력란</strong>에 새 KEY를 넣습니다. HTTP이면 연결 안내에도 체크합니다.</li><li><strong>연결하기</strong>를 누르고 본인 이름·부서가 확인되면 완료입니다. 다음 요청부터 새 KEY를 사용합니다.</li></ol>
+<p class="note"><strong>KEY는 대화창이나 MCP 도구 인자에 넣지 않습니다.</strong> 재연결 창은 현재 MCP 설정의 서버 주소로 열립니다. 다른 서버나 별도 설정 파일을 사용 중이어도 현재 연결을 유지합니다. 최초 연결 전이라면 웹에서 받은 ZIP의 <code>Connect.cmd</code>를 먼저 사용하세요.</p>
+<p>KEY만 바뀐 경우 MCP나 설치한 도구를 재설치할 필요는 없습니다. <code>Connect.cmd</code>를 직접 실행하는 대안도 있으며, 이때는 ZIP의 사이트 주소가 현재 MCP와 같은지 확인하세요. 예전 MCP에 재연결 도구가 없으면 최신 코드·ZIP을 반영한 후 AI 프로그램을 다시 시작합니다.</p>
+<p>재연결이 중단된 설치·업로드를 자동으로 다시 실행하지는 않습니다. <strong>게시 초안은 생성한 KEY ID에 연결되어 있으므로 재발급 후에는 새 초안을 만들고 웹에서 다시 승인</strong>합니다. 이미 게시한 도구·버전과 PC의 설치 파일은 유지됩니다.</p>
+</section>
+
+<section>
 <h2>연결 창이 열리지 않거나, KEY를 바꿨다면</h2>
 <details><summary>Python에 Tk가 없어 연결 창이 열리지 않습니다.</summary><p>압축을 푼 폴더의 PowerShell에서 아래 명령을 실행합니다. 웹에서 받은 ZIP이면 주소·폴더 옵션 없이 진행할 수 있습니다.</p><pre>python .\run_mcp.py setup</pre><p>HTTP 확인 질문에 답하고 KEY를 숨김 입력에 넣습니다. 연결 확인은 다음 명령으로도 가능합니다.</p><pre>python .\run_mcp.py status</pre></details>
-<details><summary>KEY를 재발급했습니다.</summary><p><code>Connect.cmd</code>를 다시 열어 새 KEY로 연결하세요. 새 MCP는 다음 작업 때 바뀐 설정을 읽습니다. MCP 코드 자체를 업데이트한 경우에는 AI 프로그램도 다시 시작합니다.</p></details>
+<details><summary>KEY를 재발급했습니다.</summary><p>AI에게 <strong>“AI SQUARE KEY 다시 연결해줘”</strong>라고 요청하고 열린 개인 입력 창에 새 KEY를 넣습니다. 현재 서버 인증에 성공하면 다음 요청부터 새 KEY를 사용합니다. <code>Connect.cmd</code>를 직접 사용할 때는 표시된 사이트가 현재 MCP와 같은지 확인합니다. KEY만 갱신하면 재설치가 필요 없지만, MCP 코드 자체를 업데이트한 경우에는 AI 프로그램을 다시 시작합니다.</p></details>
 <details><summary>서버 주소가 없다고 나옵니다.</summary><p>웹의 <strong>로컬 MCP 받기</strong>에서 최신 ZIP을 받으세요. GitHub 공통 ZIP 또는 예전 ZIP에는 사이트 주소가 없을 수 있습니다. 개발자가 직접 연결할 때만 <code>setup --url "http://회사서버주소"</code>을 사용할 수 있습니다.</p></details>
-<details><summary>401 / 403 / 409 오류가 나옵니다.</summary><p><strong>401:</strong> 취소·재발급된 KEY인지 확인하고 다시 연결합니다.<br><strong>403:</strong> 조회 권한·업로드 포함 KEY·본인 소유 여부를 확인합니다.<br><strong>409:</strong> 게시 초안의 웹 승인 상태와 버전 충돌을 확인합니다. 결과가 불명확하면 같은 초안의 상태를 먼저 조회합니다.</p></details>
-<details><summary>고급 설정: 추가 작업 폴더 / 환경변수 방식</summary><p>별도 원본 폴더는 폴더 선택 창에서 허용하는 것이 기본입니다. CLI에서는 <code>setup --workspace "C:\내작업폴더"</code>로 기존 폴더를 추가할 수 있습니다. 드라이브 전체는 허용하지 않습니다.</p><p><code>--token-from-env</code>는 KEY를 저장하는 옵션이 아닙니다. MCP를 실행하는 프로세스가 매번 <code>PTAI_API_TOKEN</code> 환경변수에서 읽는 자동화용 방식입니다. 일반 Windows 사용자는 연결 창의 암호화 저장을 사용합니다.</p></details>
+<details><summary>401 / 403 / 409 / 서버 접속 오류는 어떻게 다른가요?</summary><p><strong>401:</strong> KEY 만료·취소·재발급 또는 사용자 비활성화 등으로 인증할 수 없습니다. 안내된 현재 사이트의 KEY 링크를 확인하고 필요하면 새 KEY로 연결합니다. 계정 비활성화는 운영자에게 문의합니다.<br><strong>403:</strong> 해당 도구 조회 권한·업로드 포함 KEY·본인 소유 여부를 확인합니다. 재연결만으로 권한이 생기지는 않습니다.<br><strong>409:</strong> 게시 초안의 웹 승인 상태와 버전 충돌을 확인합니다. 같은 KEY로 통신을 재시도할 때는 기존 초안 상태를 먼저 확인하고, KEY를 재발급했다면 새 초안과 웹 승인이 필요합니다.<br><strong>접속 실패·5xx:</strong> 사내망·서버 상태를 확인합니다. 이 오류만으로 KEY가 만료되었다고 판단하지 않습니다. 저장 요청이었다면 반영 여부를 먼저 확인합니다.</p></details>
+<details><summary>고급 설정: 추가 작업 폴더 / 환경변수 방식</summary><p>별도 원본 폴더는 폴더 선택 창에서 허용하는 것이 기본입니다. CLI에서는 <code>setup --workspace "C:\내작업폴더"</code>로 기존 폴더를 추가할 수 있습니다. 드라이브 전체는 허용하지 않습니다.</p><p><code>--token-from-env</code>는 KEY를 저장하는 옵션이 아닙니다. MCP를 실행하는 프로세스가 매번 <code>PTAI_API_TOKEN</code> 환경변수에서 읽는 자동화용 방식입니다. 이 방식을 계속 쓴다면 재발급 후 환경변수를 갱신하고 AI 프로그램을 다시 시작합니다. 일반 Windows 사용자는 개인 입력 창의 암호화 저장을 사용합니다.</p></details>
 </section>
 
 <section>

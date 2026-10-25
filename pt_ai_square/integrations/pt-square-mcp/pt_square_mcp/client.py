@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .config import SquareError, no_links
+from .config import AuthenticationRequired, SquareError, no_links
 
 MAX_FILE_BYTES = 128 * 1024 * 1024
 ENDPOINTS = re.compile(r'^/(?:api/integration/me|api/catalog(?:/options)?|api/publish-targets|api/tools/[1-9][0-9]*(?:/manifest|/version-check)?|api/publish-drafts(?:/[a-f0-9-]+(?:/commit)?)?|download/[1-9][0-9]*/[1-9][0-9]*)$')
@@ -55,8 +55,10 @@ class Client:
             return self.opener.open(Request(self.url + path, body, headers, method=method), timeout=30)
         except HTTPError as error:
             code = error.code
-            messages = {401: 'KEY가 없거나 취소·재발급되었습니다. 웹 /local-access에서 확인하세요.',
-                        403: '이 KEY의 권한 또는 본인 도구 여부를 확인하세요.',
+            error.close()
+            if code == 401:
+                raise AuthenticationRequired(self.url) from None
+            messages = {403: '이 KEY의 권한 또는 본인 도구 여부를 확인하세요. KEY 재발급 전의 게시 초안은 새 KEY로 다시 준비하고 웹에서 승인하세요.',
                         404: '도구·버전·게시 초안을 찾을 수 없습니다.',
                         409: '승인 대기·내용 변경·버전 충돌입니다. 초안 상태와 웹 확인 화면을 확인하세요.',
                         413: '파일이 서버 업로드 한도를 초과했습니다.',

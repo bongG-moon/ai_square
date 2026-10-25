@@ -39,6 +39,26 @@ def normalize_url(value):
     return p.scheme + '://' + host + ((':' + str(port)) if port and port != (80 if p.scheme == 'http' else 443) else '')
 
 
+class AuthenticationRequired(SquareError):
+    """Safe recovery instructions bound only to the configured server origin."""
+
+    def __init__(self, url, *, missing=False):
+        self.auth_url = normalize_url(url) + '/local-access'
+        reason = ('연결 KEY가 없습니다.' if missing else
+                  '연결 KEY를 인증할 수 없습니다. 만료되었거나 취소·재발급된 KEY일 수 있습니다.')
+        super().__init__(reason + '\n\n'
+                         + f'[연결 KEY 발급·관리](<{self.auth_url}>)에서 로그인 후 KEY를 발급·재발급하세요. '
+                         '그다음 MCP에 KEY를 다시 입력하겠다고 요청하면 reconnect_key가 숨김 입력창을 엽니다. '
+                         '새 KEY는 그 창에만 입력하고 채팅이나 도구 인자로 전달하지 마세요. '
+                         '웹에서도 이용할 수 없다면 운영자에게 계정 상태를 확인해 주세요. '
+                         '재연결만으로 업로드·설치를 다시 실행하지 않습니다. '
+                         '재발급 전 게시 초안은 새 KEY로 다시 준비하고 웹에서 승인해야 합니다.')
+
+    def recovery(self):
+        return {'authRequired': True, 'errorCode': 'KEY_AUTH_REQUIRED',
+                'authUrl': self.auth_url, 'message': str(self), 'reconnectTool': 'reconnect_key'}
+
+
 def no_links(path):
     """Reject all existing symlink/reparse components, including Windows junctions."""
     path = Path(os.path.abspath(Path(path).expanduser()))
@@ -197,5 +217,5 @@ class Settings:
         else:
             raise SquareError('알 수 없는 KEY 보관 방식입니다.')
         if not TOKEN_RE.fullmatch(token):
-            raise SquareError('연결 KEY가 없습니다. setup으로 연결하고 웹 /local-access에서 발급하세요.')
+            raise AuthenticationRequired(self.url, missing=True)
         return token

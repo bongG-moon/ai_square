@@ -5,7 +5,7 @@ import uuid
 from urllib.parse import urlencode
 
 from .client import Client, positive, automatic_download_directory
-from .config import SquareError, Settings, atomic_json, scoped_path, no_links
+from .config import AuthenticationRequired, SquareError, Settings, atomic_json, scoped_path, no_links
 from .files import inspect, package, sha256
 from .install import Installer
 from .profiles import validate_profile
@@ -21,9 +21,12 @@ class Runtime:
     def connection_status(self):
         try:
             response=self.client.json('/api/integration/me')
+        except AuthenticationRequired as error:
+            return dict(error.recovery(),connected=False,baseUrl=self.settings.url,databaseAccess=False)
         except SquareError as error:
-            return {'connected':False,'baseUrl':self.settings.url,'authUrl':self.settings.url+'/local-access',
-                    'message':str(error),'databaseAccess':False,'notice':'KEY가 없거나 바뀌었다면 웹에서 확인한 뒤 setup을 다시 실행하세요. KEY를 대화창에 넣지 마세요.'}
+            return {'connected':False,'authRequired':False,'baseUrl':self.settings.url,
+                    'message':str(error),'databaseAccess':False,
+                    'notice':'표시된 권한 또는 서버 연결 문제를 확인하세요. 이 오류만으로 KEY를 재발급할 필요는 없습니다.'}
         return dict(response,connected=True,baseUrl=self.settings.url,trustedRoots=[str(p) for p in self.settings.roots],
                     downloadDirectory=str(self.settings.downloads),
                     transport='local-stdio',databaseAccess=False,credentialStored=self.settings.data['credentialRef'].split(':')[0],
