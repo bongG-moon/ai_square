@@ -55,6 +55,21 @@ test('only administrators see registration controls; download data is escaped',(
  assert.ok(h.workspace.innerHTML.includes('&lt;script>'));
 });
 
+test('optional Square extension stays separate from administrator-published app files',()=>{
+ const h=setup('member');
+ vm.runInContext(`axFiles=[${JSON.stringify(item)}];`,h.context);
+ h.context.renderAxWorkspace();
+ assert.match(h.workspace.innerHTML,/href="\/local-access\/workspace-extension\.zip" download/);
+ assert.match(h.workspace.innerHTML,/개인 KEY만 입력/);
+ assert.match(h.workspace.innerHTML,/href="\/local-access">KEY와 연결 안내/);
+ assert.ok(h.workspace.innerHTML.includes(item.downloadUrl));
+ assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);
+ h.context.actions['ax-filter']({dataset:{category:'plugin'}});
+ assert.match(h.workspace.innerHTML,/P&T AI Square 확장 받기/);
+ assert.match(h.workspace.innerHTML,/ws-ax-count">0개 파일/);
+ assert.equal(h.requests.length,0);
+});
+
 test('successful upload preserves multipart contract and shows the new file despite an earlier filter',async()=>{
  const h=setup();h.context.actions['ax-filter']({dataset:{category:'plugin'}});const form=h.newForm();
  form.submit();form.submit();assert.equal(h.requests.length,1);assert.ok(form.controls.every(x=>x.disabled));

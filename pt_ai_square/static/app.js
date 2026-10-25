@@ -435,6 +435,7 @@ async function afterWorkspaceSave(callback,form){
 }
 const originalRender=render, originalModal=openModal, originalDetail=detail, originalManage=manage;
 const originalCloseModal=closeModal,originalNavigate=navigate;
+let activeDetailView=null;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
 const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('ax-workspace','AX Workspace','','data-route="ax"')}${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
@@ -455,14 +456,14 @@ render=function(){
 };
 // A late detail response must not replace a newer dialog or reopen one the user dismissed.
 function invalidateDetailLoad(){return runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;}
-openModal=function(title,kicker,html){invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
-closeModal=function(){invalidateDetailLoad();return originalCloseModal();};
-navigate=function(route,sort){invalidateDetailLoad();return originalNavigate(route,sort);};
+openModal=function(title,kicker,html){activeDetailView=null;invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+closeModal=function(){activeDetailView=null;invalidateDetailLoad();return originalCloseModal();};
+navigate=function(route,sort){activeDetailView=null;invalidateDetailLoad();return originalNavigate(route,sort);};
 // This action captured the original function before the workspace extension loaded.
 actions['close-dialog']=closeModal;
 // Escape's cancel event is synchronous. A queued close event could otherwise cancel
 // a newly requested detail after a deliberate close-and-open sequence.
-$('#sq-dialog').addEventListener('cancel',invalidateDetailLoad);
+$('#sq-dialog').addEventListener('cancel',()=>{activeDetailView=null;invalidateDetailLoad();});
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -545,7 +546,24 @@ function renderWorkspace(){
 }
 function taxonomyPanel(){return `<div class="ws-panel-head"><div><h2>조직과 업무 분류</h2><p>저장하면 검색 필터와 등록·수정 화면에 바로 반영됩니다.</p></div></div><div class="ws-taxonomy">${[['organization','조직',organizations],['category','업무',server.categories||[]]].map(([kind,label,rows])=>`<section><div class="ws-panel-head"><h3>${label}</h3>${button('taxonomy-edit',icon('plus')+' 추가','sq-link',`data-kind="${kind}"`)}</div>${rows.map(x=>`<div class="ws-row"><span class="ws-order">${x.order}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${x.enabled?'선택 가능':'사용 중지 · 기존 기록 유지'}</p></div>${button('taxonomy-edit',icon('pencil'),'sq-icon',`data-kind="${kind}" data-id="${esc(x.id)}" aria-label="${esc(x.name)} 수정"`)}</div>`).join('')}</section>`).join('')}</div>`;}
 
+function renderDetailViews(x){
+ const summary=$('.sq-detail-id p');if(!summary)return;
+ let counter=$('.sq-detail-view-count');
+ if(!Number.isFinite(x.views)||x.views<0){counter?.remove();return;}
+ if(!counter){counter=document.createElement('small');counter.className='sq-detail-view-count';summary.after(counter);}
+ counter.textContent=`조회 ${Math.floor(x.views).toLocaleString('ko-KR')}회`;counter.title='같은 사용자의 30분 이내 반복 열람은 한 번으로 집계합니다.';
+}
+function recordDetailView(x){
+ // Reading details, refreshing metadata and changing detail tabs never count as new views.
+ // This write is best effort and must not delay or reopen the user's detail dialog.
+ void requestAPI(`/api/tools/${x.id}/view`,'POST',{}, {timeoutMs:4000,redirectOnAuth:false}).then(result=>{
+  if(!Number.isFinite(result.views)||result.views<0)return;
+  const current=getItem(x.id);if(current)current.views=result.views;
+  if(activeDetailView===x.id&&$('#sq-dialog').open&&runtime.detailId===x.id)renderDetailViews(current||x);
+ }).catch(()=>{});
+}
 detail=async function(id,tab='intro'){
+ const openingView=activeDetailView!==Number(id)||!$('#sq-dialog').open;
  const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=invalidateDetailLoad();
  if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return false;}
  // Revalidate on every open; no stale dialog bypass after access revocation.
@@ -558,6 +576,8 @@ detail=async function(id,tab='intro'){
   const current=getItem(id);if(current)lockedDetail(current);return false;
  }
  originalDetail(id,tab);
+ activeDetailView=x.id;renderDetailViews(x);
+ if(openingView&&server.dataMode!=='dummy')recordDetailView(x);
  deploymentLinks(x,tab);
  $('.sq-detail-top .sq-row-actions')?.insertAdjacentHTML('afterbegin',button('subscribe',icon(x.subscribed?'bell-ring':'bell')+(x.subscribed?'업데이트 알림 켜짐':'업데이트 알림 받기'),'sq-secondary',`data-id="${x.id}" aria-pressed="${x.subscribed}"`));
  if(tab==='comments'){
@@ -836,7 +856,7 @@ const baseRankItems=rankItems,baseRankRow=rankRowHTML,baseRenderRanks=renderRank
 const basePeopleRender=render,basePeopleRefresh=refresh;
 const peopleModes=$('.sq-rank-modes');
 peopleModes.setAttribute('aria-label','도구·구성원 순위');
-peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','함께한 동료','','type="button" data-mode="people" aria-pressed="false"'));
+peopleModes.insertAdjacentHTML('beforeend',button('rank-mode','함께 만드는 사람들','','type="button" data-mode="people" aria-pressed="false"'));
 $('.sq-chart-controls').insertAdjacentHTML('beforeend','<span id="sq-my-rank" class="sq-my-rank" hidden></span>');
 $('#sq-session').classList.add('sq-profile');
 $('#sq-session').insertAdjacentHTML('afterend',`<a id="sq-connection-key" class="sq-quiet sq-key-link" href="/local-access" aria-label="내 연결 KEY 발급·관리" title="연결 KEY 발급·관리">${icon('key-round')}</a>`);
@@ -880,11 +900,11 @@ rankRowHTML=function(row,rank){
 renderRanks=function(){
  baseRenderRanks();const isPeople=state.rankMode==='people';
  $('.sq-chart').dataset.rankType=isPeople?'people':'tools';
- $('#sq-chart-title').textContent=isPeople?'함께한 동료':'동료들이 많이 찾는 도구';
+ $('#sq-chart-title').textContent=isPeople?'함께 만드는 사람들':'동료들이 많이 찾는 도구';
  $('.sq-chart-labels>span:last-child').textContent=isPeople?'공유 기여도':'좋아요 · 다운로드';
  const me=$('#sq-my-rank');me.hidden=!isPeople;
  if(!isPeople)return;
- $('#sq-rank-range').textContent='함께한 동료';$('#sq-rank-period').textContent='전체 기간 · 공유 기여도';
+ $('#sq-rank-range').textContent='함께 만드는 사람들';$('#sq-rank-period').textContent='전체 기간 · 공유 기여도';
  const own=peopleRanks?.me;me.textContent=own?.rank?`내 순위 ${num(own.rank)}위 · ${num(own.score)}점`:'도구를 공유하고 함께 성장해요';
  if(peopleRanks?.asOf)$('#sq-chart-time').textContent=new Date(peopleRanks.asOf*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Seoul'});
  if(peopleRanksLoading&&!peopleRanks)$('#sq-rank-list').innerHTML='<div class="sq-empty" role="status">공유 기여도를 집계하고 있어요.</div>';
@@ -914,7 +934,7 @@ actions['rank-info']=()=>{
  const periods=people?'<div class="sq-ranking-period-note">전체 기간에 쌓인 공유 활동을 합산합니다.</div>':`<div class="sq-ranking-periods" aria-label="집계 기간 안내"><div${state.rankMode==='recent'?' class="is-current"':''}><strong>실시간</strong><span>집계 시각부터 최근 7일</span></div><div${state.rankMode==='total'?' class="is-current"':''}><strong>누적</strong><span>전체 기간</span></div></div>`;
  const rules=people?rule('버전이 늘어도, 도구는 한 번만','등록한 도구 수와 동료들이 보낸 좋아요·다운로드를 더합니다.')+rule('반복 활동은 추가 점수 없이','본인 도구에 대한 반응, 반복 다운로드와 업데이트는 제외합니다.')+rule('현재 유효한 공유 활동만','취소한 좋아요, 삭제된 도구와 비활성 사용자는 반영하지 않습니다.'):rule('좋아요는 한 번씩 반영','취소하면 점수가 빠지고, 다시 눌러도 최초 좋아요 날짜를 유지합니다.')+rule('처음 받은 다운로드만 반영','같은 사람이 같은 도구를 다시 받거나 업데이트해도 점수가 늘지 않습니다.');
  const details=people?`<li>조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다.</li><li>${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 고유 다운로드 수 → 사번 순으로 정렬합니다.')}</li>`:'<li>실시간 다운로드 점수에는 전체 기간 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.</li><li>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위에 표시된 활동 수도 선택한 기간 기준입니다.</li><li>접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 전환하는 애니메이션은 재집계와 별개입니다.</li><li>다운로드 수는 서버의 파일 응답 기준이며 PC 설치 완료 수가 아닙니다.</li>';
- openModal(people?'함께한 동료 · 집계 기준':'동료들이 많이 찾는 도구 · 집계 기준','순위 안내',`<section class="sq-ranking-guide"><p class="sq-ranking-intro">${people?'도구를 나눈 동료들을 소개합니다. 등록한 도구와 동료들의 반응을 바탕으로 공유 기여도 상위 10명을 보여드립니다.':'동료들의 좋아요와 다운로드를 모아 상위 10개 도구를 보여드립니다. 최근의 관심은 실시간으로, 꾸준한 이용은 누적으로 살펴보세요.'}</p><div class="sq-score-grid${people?' sq-score-grid-three':''}">${formula}</div>${periods}<div class="sq-ranking-rules"><h3>이렇게 반영해요</h3><ul>${rules}</ul></div><details class="sq-ranking-details"><summary>세부 집계 기준<span aria-hidden="true">${icon('chevron-down')}</span></summary><ul>${details}</ul></details><footer class="sq-ranking-footer"><span>${icon('refresh-cw')} 최신 활동으로 다시 확인할 수 있어요.</span>${button('rank-refresh','집계 새로고침','sq-secondary')}</footer></section>`);
+ openModal(people?'함께 만드는 사람들 · 집계 기준':'동료들이 많이 찾는 도구 · 집계 기준','순위 안내',`<section class="sq-ranking-guide"><p class="sq-ranking-intro">${people?'도구를 나눈 동료들을 소개합니다. 등록한 도구와 동료들의 반응을 바탕으로 공유 기여도 상위 10명을 보여드립니다.':'동료들의 좋아요와 다운로드를 모아 상위 10개 도구를 보여드립니다. 최근의 관심은 실시간으로, 꾸준한 이용은 누적으로 살펴보세요.'}</p><div class="sq-score-grid${people?' sq-score-grid-three':''}">${formula}</div>${periods}<div class="sq-ranking-rules"><h3>이렇게 반영해요</h3><ul>${rules}</ul></div><details class="sq-ranking-details"><summary>세부 집계 기준<span aria-hidden="true">${icon('chevron-down')}</span></summary><ul>${details}</ul></details><footer class="sq-ranking-footer"><span>${icon('refresh-cw')} 최신 활동으로 다시 확인할 수 있어요.</span>${button('rank-refresh','집계 새로고침','sq-secondary')}</footer></section>`);
 };
 function workflowDiagram(workflow){
  const steps=Array.isArray(workflow?.steps)?workflow.steps.slice(0,8):[];
@@ -941,7 +961,7 @@ async function loadAxWorkspace(){
 }
 function renderAxWorkspace(){
  const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||x.category===axFilter);
- workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>AX Workspace 설치 파일과 업무에 필요한 플러그인·연동 도구를 내려받으세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
+ workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>AX Workspace 설치 파일과 업무에 필요한 플러그인·연동 도구를 내려받으세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><section class="sq-callout" aria-label="P&T AI Square 선택 확장"><strong>P&T AI Square를 AX Workspace 안에서</strong><p>공통 앱에 선택 설치하는 확장입니다. ZIP 전체를 풀고 EXE를 설치하면 이 사이트 주소가 자동 설정됩니다. 앱을 다시 열어 개인 KEY만 입력하세요.</p><a class="sq-secondary" href="/local-access/workspace-extension.zip" download>${icon('download')} P&T AI Square 확장 받기</a> <a class="sq-link" href="/local-access">KEY와 연결 안내</a></section><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.created)} 등록</small><a class="sq-primary" href="${esc(x.downloadUrl)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
  mountIcons();
 }
 function axUploadArea(){

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "pt-ai-square.store",
+  "name": "P&T AI Square",
+  "version": "0.1.0",
+  "hostApi": 1,
+  "entrypoint": "worker.py",
+  "ui": "ui.html",
+  "actions": ["status", "connect", "disconnect", "options", "catalog", "detail", "like", "download", "prepareInstall", "install", "installations", "checkUpdates", "verify", "rollback"]
+}

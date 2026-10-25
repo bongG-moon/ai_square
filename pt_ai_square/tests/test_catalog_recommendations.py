@@ -195,7 +195,7 @@ def test_repeat_download_update_and_rel_like_do_not_boost_recent_counts(search_a
         record_download(1, 'update-only', 2, update=True)
     c, _ = client(search_app)
     metric = c.get('/api/catalog').json['items'][0]['statistics']
-    assert metric == dict(downloads=1, likes=1, recentLikes=0, recentDownloads=0, rankScore=0, totalRankScore=3)
+    assert metric == dict(downloads=1, likes=1, views=0, recentLikes=0, recentDownloads=0, rankScore=0, totalRankScore=3)
 
 
 def test_filters_pagination_newest_and_aliases(search_app):
@@ -256,7 +256,7 @@ def test_catalog_bulk_lookups_are_not_per_tool(search_app, monkeypatch):
     # One metadata query each, regardless of the number of catalog rows.
     assert calls.count('taxonomy') <= 2  # Auth public_user resolves its one org.
     assert calls.count('access') == 1
-    assert calls.count('users') <= 2  # Authentication plus bulk department list.
+    assert calls.count('users') <= 3  # Authentication, one registrar batch, one department batch.
 
 
 def test_personal_key_can_search_but_cannot_obtain_private_history(search_app):

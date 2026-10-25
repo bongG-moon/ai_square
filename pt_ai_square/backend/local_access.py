@@ -69,7 +69,12 @@ def token_user():
     read = request.method in {'GET', 'HEAD'} and request.endpoint in READ_ENDPOINTS
     publish = (row.get('scope', 'read') == 'publish' and request.method == 'POST'
                and request.endpoint in {'api.publish', 'api.inspect_package', 'publish_drafts.create', 'publish_drafts.commit'})
-    if not (read or publish):
+    # Desired-state PUT reuses the web's idempotent per-employee like accounting.
+    # Explicit detail views use the same bounded employee/tool counter. No
+    # other browser mutation is made available to a personal connection KEY.
+    like = request.method == 'PUT' and request.endpoint == 'api.like'
+    view = request.method == 'POST' and request.endpoint == 'api.record_view'
+    if not (read or publish or like or view):
         raise Forbidden('이 인증키에 허용되지 않은 작업입니다.')
     g.api_token_id = row['id']
     g.api_token_scope = row.get('scope', 'read')
@@ -87,6 +92,15 @@ def mcp_download():
     # This exact legacy static URL must also pass the normal browser auth guard.
     # Personal KEY callers are not added to the API allowlist above.
     from .mcp_package import download_package
+    return download_package()
+
+
+@local_access.get('/static/guides/ax-workspace-extension-setup.exe')
+@local_access.get('/local-access/workspace-extension.zip')
+def workspace_extension_download():
+    # The static source cannot bypass browser authentication or lose its origin
+    # preset. Both URLs return the same request-local ZIP, never a bare EXE.
+    from .store_package import download_package
     return download_package()
 
 
@@ -157,7 +171,7 @@ def issue():
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60:
         raise BadRequest('KEY 이름은 1~60자입니다.')
     if not isinstance(scope, str) or scope not in {'read', 'publish'}:
-        raise BadRequest('조회·다운로드 또는 업로드 포함 권한을 선택하세요.')
+        raise BadRequest('조회·다운로드·좋아요 또는 업로드 포함 권한을 선택하세요.')
     previous_id = current_connection_key(g.user['id'])
     token = 'ptsq_' + secrets.token_urlsafe(32)
     now = time.time()
@@ -168,7 +182,7 @@ def issue():
     # previous pointer so a simultaneous rotation cannot annotate the wrong key.
     # A failed write is never blindly replayed; only an acknowledged CAS miss is.
     for _ in range(5):
-        event = audit_event('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드'))
+        event = audit_event('개인 연결 KEY 발급·교체: ' + ('업로드 포함' if scope == 'publish' else '조회·다운로드·좋아요'))
         if previous_id:
             event['tokenUpdate'] = {'user': row['user'], 'id': previous_id,
                                     'fields': {'revoked': True, 'revokedAt': now, 'replacedBy': row['id']}}
@@ -256,6 +270,6 @@ def integration_me():
                              dept=g.user.get('dept', g.user.get('org', '')),
                              dept_cd=g.user.get('dept_cd', ''), role=g.user['role']),
                    key=dict(id=key_id, scope=scope) if key_id else None,
-                   capabilities=dict(search=True, download=True,
+                   capabilities=dict(search=True, download=True, like=True, view=True,
                                      publishDraft=bool(key_id and scope == 'publish'),
                                      approvalRequired=True))

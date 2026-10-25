@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>P&amp;T AI Square</title>
+<!--STORE_STYLE-->
+</head>
+<body>
+<main id="store">
+  <header class="store-header">
+    <div><p class="eyebrow">우리 조직의 AI 기능</p><h1>P&amp;T AI Square</h1><p class="subtitle">업무에 필요한 기능을 찾아보고, 사용할 공간에 설치하세요.</p></div>
+    <button id="connection-button" class="connection" type="button" hidden><span class="status-dot"></span><span id="connection-label">연결 설정</span><span aria-hidden="true">›</span></button>
+  </header>
+  <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+  <section id="connection-view" class="connection-view" aria-labelledby="connection-title" hidden>
+    <div class="intro"><span class="intro-icon" aria-hidden="true">◈</span><h2 id="connection-title">플랫폼과 한 번 연결하세요.</h2><p>웹에서 받은 개인 KEY로 연결합니다.<br>기존 좋아요와 다운로드 기록을 그대로 사용합니다.</p><ol class="steps"><li><b>01</b><span id="connection-server-step">플랫폼 주소 입력</span></li><li><b>02</b><span>웹의 연결 KEY 입력</span></li><li><b>03</b><span>기능을 찾아 다운로드·설치</span></li></ol><p class="muted">새 KEY를 발급할 필요는 없습니다. 기존에 발급받은 유효한 KEY를 사용하세요.</p></div>
+    <form id="connection-form" class="connection-form">
+      <div class="field-heading server-heading"><label for="server-url">연결할 플랫폼</label><button id="change-server" class="text-button" type="button" aria-controls="server-url" hidden>서버 주소 변경</button></div>
+      <input id="server-url" type="url" placeholder="https://플랫폼-서버" autocomplete="url" required maxlength="500" aria-describedby="server-help">
+      <p id="server-help" class="field-help">사용 중인 플랫폼의 기본 주소를 입력하세요.</p>
+      <div class="field-heading"><label for="connection-key">개인 연결 KEY</label><button id="key-guide" type="button" class="text-button">웹에서 KEY 확인 ↗</button></div>
+      <input id="connection-key" type="password" placeholder="ptsq_…" autocomplete="off" spellcheck="false" maxlength="80" required>
+      <p class="field-help">현재 Windows 계정에 암호화해 보관합니다. 대화나 로그에는 남기지 않습니다.</p>
+      <label id="http-warning" class="check-row" hidden><input id="allow-http" type="checkbox"><span>이 사내 HTTP 주소로 KEY가 암호화되지 않고 전송되는 것을 확인했습니다.</span></label>
+      <button id="connect-submit" class="primary" type="button">연결하기</button>
+      <button id="reuse-connection" class="secondary" type="button" hidden>기존 플랫폼 MCP 연결 사용</button>
+      <button id="connection-cancel" class="text-button" type="button" hidden>목록으로 돌아가기</button>
+      <button id="disconnect" class="text-button danger-text" type="button" hidden>P&amp;T AI Square 연결 해제</button>
+    </form>
+  </section>
+  <section id="catalog-view" hidden>
+    <nav class="tabs" aria-label="P&amp;T AI Square 보기"><button type="button" data-tab="catalog" aria-current="page">둘러보기</button><button type="button" data-tab="installed">설치된 기능</button><button type="button" data-tab="updates">업데이트</button></nav>
+    <div id="catalog-toolbar" class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="이름·기능·업무로 검색" aria-label="기능 검색" maxlength="200" autocomplete="off"></label><select id="type-filter" aria-label="기능 유형"><option value="">모든 유형</option><option>Skill</option><option>MCP/Tool</option><option>플러그인/하네스</option></select><select id="org-filter" aria-label="조직"><option value="">모든 조직</option></select><select id="sort" aria-label="정렬"><option value="recommended">추천순</option><option value="newest">최신순</option><option value="realtime">최근 인기순</option><option value="cumulative">누적 인기순</option></select></div>
+    <div class="results-heading"><p id="results-label">기능을 불러오는 중입니다.</p><button id="refresh" class="text-button" type="button">새로고침</button></div>
+    <div id="results" class="card-grid" aria-live="polite"></div><button id="more" class="secondary more" type="button" hidden>더 보기</button>
+    <p id="catalog-note" class="catalog-note">조회·좋아요·다운로드는 웹의 기록과 연결됩니다. 파일 다운로드와 실제 설치 상태는 구분해서 표시합니다.</p>
+  </section>
+  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
+    <header class="detail-dialog-head"><div><p id="detail-kicker" class="detail-kicker"></p><h2 id="detail-title">기능 상세</h2></div><button id="detail-close" class="icon-button" type="button" aria-label="상세 닫기" title="상세 닫기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+    <div id="detail-view" class="detail-view"></div><p id="detail-feedback" class="detail-feedback" role="status" aria-live="polite" hidden></p>
+  </dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="confirm-body"><h2 id="confirm-title"></h2><div id="confirm-content"></div><div class="confirm-actions"><button id="confirm-no" class="secondary" type="button">취소</button><button id="confirm-yes" class="primary" type="button">확인</button></div></div></dialog>
+  <footer class="store-footer"><span id="workspace-context">전체 공간 또는 선택한 폴더에 설치할 수 있습니다.</span><span>P&amp;T AI Square · 0.1.0</span></footer>
+</main>
+<!--STORE_SCRIPT-->
+</body></html>

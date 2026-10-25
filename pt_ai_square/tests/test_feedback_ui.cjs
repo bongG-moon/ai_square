@@ -461,12 +461,16 @@ for(const action of ['close','navigate'])for(const outcome of ['success','failur
   h.context.runtime.newId=19;h.context.getItem=()=>item;h.context.refresh=()=>refresh.promise;
   h.context.originalCloseModal=()=>{screen.dialogOpen=false;};
   h.context.originalNavigate=route=>{screen.route=route;screen.dialogOpen=false;};
-  vm.runInContext(app.slice(app.indexOf('closeModal=function(){invalidateDetailLoad();'),app.indexOf('// This action captured the original function')),h.context,{filename:'static/app.js navigation invalidation'});
+  const navigationStart=app.indexOf('closeModal=function(){'),navigationEnd=app.indexOf('// This action captured the original function',navigationStart);
+  assert.ok(navigationStart>=0&&navigationEnd>navigationStart,'deployed modal/navigation wrappers must be present');
+  h.context.activeDetailView={toolId:19};
+  vm.runInContext(app.slice(navigationStart,navigationEnd),h.context,{filename:'static/app.js navigation invalidation'});
   h.context.detail=async()=>{h.context.invalidateDetailLoad();details++;screen.dialogOpen=true;return true;};
   const pending=h.context.actions['published-detail']().catch(error=>{errors.push(error.message);});
   if(action==='close')h.context.closeModal();else h.context.navigate('browse');
   if(outcome==='success'){item={id:19,name:'Example'};refresh.resolve();}else refresh.reject(Error('Late read failure'));
   assert.equal(await pending,false);assert.equal(details,0);assert.equal(screen.dialogOpen,false);assert.deepEqual(errors,[]);
+  assert.equal(h.context.activeDetailView,null);
   assert.equal(screen.route,action==='navigate'?'browse':'home');assert.equal(h.requests.length,0);
  });
 }

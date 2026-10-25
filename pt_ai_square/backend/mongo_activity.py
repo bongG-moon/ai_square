@@ -101,8 +101,39 @@ def record_download(tid, uid, version, token_id=None, update=False):
         record['tokenId'] = token_id
     db().activity_state.update_one({'_id': key}, [{'$set': {'outbox': {'$concatArrays': [{'$ifNull': ['$outbox', []]}, [record]]}, 'count': {'$add': ['$count', 1]}, 'firstDownloadedAt': {'$cond': [eligible, now, '$firstDownloadedAt']}}}])
 
+
+VIEW_WINDOW_SECONDS = 30 * 60
+
+
+def record_view(tid, uid):
+    """One bounded state row per user/tool, without a per-open history outbox.
+
+    Web and extension share the same atomic cooldown. Read APIs, preview loads,
+    install plans and retries do not manufacture views or affect ranking.
+    """
+    now, key = time.time(), f'view:{tid}:{uid}'
+    try:
+        db().activity_state.update_one({'_id': key}, {'$setOnInsert': {
+            'tool': tid, 'user': uid, 'kind': 'view', 'count': 0,
+            'created': now, 'lastViewedAt': 0}}, upsert=True)
+    except DuplicateKeyError:
+        pass
+    result = db().activity_state.update_one(
+        {'_id': key, 'lastViewedAt': {'$lte': now - VIEW_WINDOW_SECONDS}},
+        {'$inc': {'count': 1}, '$set': {'lastViewedAt': now}})
+    try:
+        rows = list(db().activity_state.aggregate([
+            {'$match': {'tool': tid, 'kind': 'view'}},
+            {'$group': {'_id': None, 'views': {'$sum': '$count'}}}], maxTimeMS=5000))
+        return {'views': rows[0]['views'] if rows else 0,
+                'counted': result.modified_count == 1, 'pending': False}
+    except PyMongoError as error:
+        from .post_commit import log_deferred
+        log_deferred('view-count', error)
+        return {'views': None, 'counted': result.modified_count == 1, 'pending': True}
+
 def statistics(ids, uid, now):
-    stats = {tid: dict(liked=False, likes=0, downloads=0, recentLikes=0,
+    stats = {tid: dict(liked=False, likes=0, downloads=0, views=0, recentLikes=0,
                       recentDownloads=0, rankScore=0, totalRankScore=0) for tid in ids}
     cutoff = now - 7 * 86400
     first_downloads = {}
@@ -119,6 +150,8 @@ def statistics(ids, uid, now):
             if first is not None:
                 key = (r['tool'], r['user'])
                 first_downloads[key] = min(first_downloads.get(key, first), first)
+        elif r['kind'] == 'view':
+            s['views'] += max(0, r.get('count', 0))
     for (tid, user), first in first_downloads.items():
         stats[tid]['downloads'] += 1
         if cutoff <= first <= now: stats[tid]['recentDownloads'] += 1

@@ -13,6 +13,7 @@ from flask import g, jsonify, request
 from werkzeug.exceptions import BadRequest
 
 from .storage import db
+from .tool_access import can_read
 
 CANDIDATE_LIMIT = 5000
 DEPARTMENT_MEMBER_LIMIT = 10000
@@ -88,7 +89,7 @@ def _statistics(ids, now):
     exactly as the shared web ranking does. Updates with a null first date do
     not count. Likes use their original date even after unlike/re-like.
     """
-    result = {tid: dict(likes=0, downloads=0, recentLikes=0, recentDownloads=0,
+    result = {tid: dict(likes=0, downloads=0, views=0, recentLikes=0, recentDownloads=0,
                        rankScore=0, totalRankScore=0) for tid in ids}
     if not ids:
         return result
@@ -96,6 +97,10 @@ def _statistics(ids, now):
     rows = db().activity_state.aggregate([
         {'$match': {'tool': {'$in': ids}}},
         {'$facet': {
+            'views': [
+                {'$match': {'kind': 'view'}},
+                {'$group': {'_id': '$tool', 'count': {'$sum': '$count'}}},
+            ],
             'likes': [
                 {'$match': {'kind': 'like', 'liked': True}},
                 {'$set': {'first': _first('firstLikedAt')}},
@@ -113,6 +118,8 @@ def _statistics(ids, now):
         }},
     ], maxTimeMS=5000)
     for group in rows:
+        for row in group['views']:
+            result[row['_id']]['views'] = row['count']
         for kind, recent in [('likes', 'recentLikes'), ('downloads', 'recentDownloads')]:
             for row in group[kind]:
                 result[row['_id']][kind] = row['count']
@@ -230,10 +237,14 @@ def search_catalog():
             raise BadRequest('프로그램을 확인하세요.')
         query['data.platform'] = platform
 
-    projection = {('data.' + k): 1 for k in (*QUERY_FIELDS, 'type', 'platform', 'org', 'orgId', 'categoryId', 'approval')}
-    projection.update(owner=1, created=1)
+    projection = {('data.' + k): 1 for k in (*QUERY_FIELDS, 'type', 'platform', 'org', 'orgId', 'categoryId', 'approval', 'owner')}
+    projection.update(owner=1, created=1, departmentGrants=1)
     total = db().tools.count_documents(query, maxTimeMS=5000)
     rows = _candidates(query, projection, q, groups)
+    # Resolve actual registering accounts in one query, not a user lookup per
+    # result. data.owner is an editable contact label, not the registrar.
+    registrants = {user['_id']: user.get('name', '') for user in db().users.find(
+        {'_id': {'$in': list({row.get('owner') for row in rows} - {None})}}, {'name': 1})}
     ids = [r['_id'] for r in rows]
     now = time.time()
     stats = _statistics(ids, now)
@@ -252,6 +263,12 @@ def search_catalog():
     granted = {r['tool'] for r in db().access.find(
         {'user': g.user['id'], 'tool': {'$in': ids}, 'granted': True}, {'tool': 1})}
     is_admin = g.user['id'] in all_admin_ids()
+    # Exact stored SSO fields are needed only for department-granted rows;
+    # public/personal checks reuse authentication without a second user query.
+    profile = (db().users.find_one({'_id': g.user['id']})
+               if any(row.get('departmentGrants') for row in rows) else g.user)
+    liked = {r['tool'] for r in db().activity_state.find(
+        {'user': g.user['id'], 'tool': {'$in': ids}, 'kind': 'like', 'liked': True}, {'tool': 1})}
     prepared = []
     labels = {'name': '이름', 'workTags': '관련 업무 태그', 'desc': '설명', 'category': '업무 분류'}
     for row in rows:
@@ -283,13 +300,16 @@ def search_catalog():
             reasons.append(('최근 7일' if recent else '전체 기간') + ' 좋아요 × 2 + 고유 다운로드 × 1 기준입니다.')
         if not reasons:
             reasons.append('최근 등록 순서입니다.' if mode == 'newest' else '검색 관련도가 같은 경우 전사 누적 집계를 참고합니다.')
-        access = not data.get('approval') or row.get('owner') == g.user['id'] or is_admin or tid in granted
+        access = can_read(row, g.user['id'], profile, administrator=is_admin,
+                          personal_grant=tid in granted)
         item = {k: data.get(k, [] if k == 'workTags' else '') for k in ('name', 'desc', 'platform', 'org', 'orgId', 'category', 'workTags')}
         item.update(id=tid, type=TYPE_ALIASES.get(data.get('type'), data.get('type')),
+                    owner=data.get('owner', ''), registrantId=row.get('owner'),
+                    registrantName=registrants.get(row.get('owner'), '') or '등록자 정보 없음',
                     org=taxonomy.get(data.get('orgId'), data.get('org', '')),
                     category=taxonomy.get(data.get('categoryId'), data.get('category', '')),
                     access='approved' if access else 'permission_required',
-                    statistics=metric, reasons=reasons,
+                    statistics=metric, reasons=reasons, liked=tid in liked,
                     departmentPreference=({'status': 'applied', 'distinctUsers': signal['distinctUsers']}
                                           if signal else {'status': recommendation['status'] if recommendation['status'] != 'applied' else 'insufficient_sample'}))
         prepared.append((key, item))

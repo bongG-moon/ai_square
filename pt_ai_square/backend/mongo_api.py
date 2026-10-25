@@ -18,6 +18,7 @@ from . import post_commit
 from . import permanent_delete
 from .install_profiles import normalize_install_profile
 from . import department_access
+from .tool_access import can_read
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -36,16 +37,13 @@ def tool(tid, manage=False, trash=False):
 
 def allowed(t, uid=None):
     uid = uid or g.user['id']
-    profile = g.user if uid == g.user['id'] else db().users.find_one({'_id': uid})
-    if not profile or not profile.get('enabled', True): return False
-    if uid == t['owner'] or uid in all_admin_ids(): return True
-    if not t['data'].get('approval'): return True
-    if db().access.find_one({'tool': t['_id'], 'user': uid, 'granted': True}): return True
-    if not t.get('departmentGrants'): return False
     # Read exact stored SSO fields, not the editable catalog organization alias.
-    profile = db().users.find_one({'_id': uid, 'enabled': True})
-    return bool(profile and any(department_access.group_matches(rule, profile)
-                               for rule in t['departmentGrants']))
+    profile = (g.user if uid == g.user['id'] and not t.get('departmentGrants')
+               else db().users.find_one({'_id': uid}))
+    if can_read(t, uid, profile, administrator=uid in all_admin_ids()):
+        return True
+    return can_read(t, uid, profile, personal_grant=bool(db().access.find_one(
+        {'tool': t['_id'], 'user': uid, 'granted': True})))
 
 def usable(t):
     if not allowed(t): raise Forbidden('조회 권한이 필요합니다. 권한을 신청해 주세요.')
@@ -139,7 +137,7 @@ def name_of(uid):
 def feedback_row(c):
     return dict(id=c['_id'],tool=c['tool'],user=c['user'],author=name_of(c['user']),kind=c['kind'],text=c['body'],status=c.get('status','접수'),created=c['created'],revision=c.get('revision',0),replies=[dict(r,author=name_of(r['user'])) for r in c.get('replies',[])])
 
-def serialize(t, stats, now):
+def serialize(t, stats, now, registrants=None):
     data = resolved(t); access = db().access.find_one({'tool':t['_id'],'user':g.user['id']}); can_read = allowed(t)
     # Public card fields are deliberate. All other content is withheld server-side.
     if not can_read: data = {k:data[k] for k in ['name','desc','org','orgId','category','categoryId','platform','type','workTags','approval','visibility','audience','owner']}
@@ -150,6 +148,12 @@ def serialize(t, stats, now):
             versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),installProfile=v.get('data',{}).get('installProfile') if not v.get('deleted') and not v.get('withdrawn') else None,workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
     subscription = db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
+    if registrants is None:
+        account = db().users.find_one({'_id': t['owner']}, {'name': 1})
+        registrar = account.get('name', '') if account else ''
+    else:
+        registrar = registrants.get(t['owner'], '')
+    data.update(registrantId=t['owner'], registrantName=registrar or '등록자 정보 없음')
     return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),purgePending=bool(t.get('purge')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c) for c in db().feedback.find({'tool':t['_id']}).sort('created',-1)] if can_read else [],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
 
 def access_rows():
@@ -165,15 +169,27 @@ def bootstrap():
     now=time.time()
     ts=list(db().tools.find({'$or':[{'deleted':{'$ne':True}}, {'owner':g.user['id']}] } if g.user['role']!='admin' else {}).sort('_id',1))
     stats=activity.statistics([t['_id'] for t in ts],g.user['id'],now)
+    registrants={u['_id']:u.get('name','') for u in db().users.find({'_id':{'$in':list({t['owner'] for t in ts})}},{'name':1})}
     taxonomy=[dict(id=r['_id'],name=r['name'],kind=r['kind'],enabled=r['enabled'],order=r.get('order',0),owner=r.get('owner','')) for r in db().taxonomy.find().sort([('order',1),('name',1)])]
     retention=db().settings.find_one({'_id':'retention'})
     retention={key:retention[key] for key in ('keep','days')}
-    return jsonify(items=[serialize(t,stats[t['_id']],now) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
+    return jsonify(items=[serialize(t,stats[t['_id']],now,registrants) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(),policy=retention,rankAsOf=now,activityBackend='mongodb',unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
 
 @api.get('/api/tools/<int:tid>')
 def details(tid):
     t=tool(tid);usable(t)
     return jsonify(serialize(t,activity.statistics([tid],g.user['id'],time.time())[tid],time.time()))
+
+
+@api.post('/api/tools/<int:tid>/view')
+def record_view(tid):
+    t = tool(tid)
+    usable(t)
+    if payload() != {}:
+        raise BadRequest('상세 열람 요청의 항목을 확인해 주세요.')
+    result = activity.record_view(tid, g.user['id'])
+    result['pending'] = cleanup_late_tool_write(tid) or result['pending']
+    return jsonify(result)
 
 def publish_followup_pending(tid):
     return deliver_pending('tools',tid)

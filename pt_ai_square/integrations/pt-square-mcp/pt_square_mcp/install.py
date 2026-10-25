@@ -12,6 +12,7 @@ from .config import SquareError, atomic_json, read_json, no_links, scoped_path
 from .files import extract, sha256
 from .profiles import validate_profile
 from .client import automatic_download_directory
+from . import transactions
 
 
 def digest(value):
@@ -21,6 +22,21 @@ def digest(value):
 def tree_digest(path):
     path = no_links(path)
     return digest([(p.relative_to(path).as_posix(), sha256(p)) for p in sorted(path.rglob('*')) if no_links(p).is_file()])
+
+
+def directory_identity(path):
+    path = no_links(path)
+    if not path.is_dir():
+        raise SquareError('선택한 설치 폴더가 없거나 변경되었습니다. 폴더를 다시 선택하세요.')
+    info = path.stat()
+    return [info.st_dev, info.st_ino]
+
+
+def check_directory_identity(path, expected):
+    if (not isinstance(expected, list) or len(expected) != 2
+            or any(type(value) is not int for value in expected)
+            or directory_identity(path) != expected):
+        raise SquareError('선택한 설치 폴더가 변경되었습니다. 설치를 다시 준비하세요.')
 
 
 def replace_args(args, scope_dir, install_dir, entrypoint):
@@ -36,15 +52,27 @@ class Installer:
     def records(self):
         return read_json(self.record_path) if self.record_path.exists() else {}
 
+    def recover(self):
+        """Reconcile interrupted mutations without downloading or executing again."""
+        return transactions.recover(self)
+
+    def _recover_before_write(self):
+        result = self.recover()
+        if result['blocked']:
+            raise SquareError('중단된 설치를 먼저 확인해야 합니다. 설치된 기능의 복구 안내와 보관본을 확인하세요. 사용자 파일은 변경하지 않았습니다.')
+        return result
+
     def _identity(self, tool_id, host, scope, directory):
         return digest([self.settings.url,tool_id,host,scope,str(directory)])
 
     def prepare(self, tool_id, scope, project_path=''):
+        self._recover_before_write()
         if scope not in {'project','user'}:
             raise SquareError('설치 범위를 project(현재 작업 폴더) 또는 user(내 계정)로 명시하세요. 기본 범위는 없습니다.')
         scope_dir = scoped_path(project_path, self.settings.roots, existing=True) if scope == 'project' and project_path else self.home if scope == 'user' else None
         if scope_dir is None or not scope_dir.is_dir():
             raise SquareError('프로젝트 설치에는 허용된 프로젝트 폴더를 지정하세요.')
+        scope_identity = directory_identity(scope_dir)
         manifest = self.client.manifest(tool_id)
         profile = validate_profile(manifest.get('installProfile'))
         if not profile or profile['kind'] == 'manual' or profile['host'] != 'claude' and profile['kind'] in {'skill','mcp'}:
@@ -87,7 +115,7 @@ class Installer:
         if config_file and old_entry is not None and (not record or old_entry != record.get('configEntry')):
             raise SquareError('같은 이름의 MCP 설정이 이미 있습니다. 다른 설정을 덮어쓰지 않습니다.')
         plan = dict(id=uuid.uuid4().hex,origin=self.settings.url,created=time.time(),toolId=tool_id,manifest=manifest,
-                    profile=profile,scope=scope,scopeDir=str(scope_dir),target=str(destination),installId=install_id,
+                    profile=profile,scope=scope,scopeDir=str(scope_dir),scopeIdentity=scope_identity,target=str(destination),installId=install_id,
                     configFile=str(config_file) if config_file else None,configHash=config_hash,serverName=server_name,
                     existingTreeHash=tree_digest(destination) if destination.exists() else None,
                     existingRecordDigest=digest(record) if record else None)
@@ -98,6 +126,7 @@ class Installer:
             if profile.get('verification') and no_links(scope_dir/profile['verification']['relativePath']).exists():
                 raise SquareError('설치 확인 파일이 이미 존재합니다. 이 설치기로 새 설치 성공을 판정할 수 없습니다.')
         plan['approvalDigest'] = digest(plan)
+        check_directory_identity(scope_dir, scope_identity)
         atomic_json(self.settings.state / 'plans' / (plan['id'] + '.json'),plan)
         return dict(canInstall=True,planId=plan['id'],approvalDigest=plan['approvalDigest'],toolId=tool_id,
                     release=manifest['release'],scope=scope,scopeDir=str(scope_dir),destination=str(destination),
@@ -108,6 +137,7 @@ class Installer:
     def install(self, plan_id, approval_digest, confirmed=False):
         if not confirmed:
             raise SquareError('준비안의 설치 범위와 변경 내용을 사용자에게 확인받아야 합니다.')
+        self._recover_before_write()
         if not isinstance(plan_id,str) or len(plan_id)!=32 or any(c not in '0123456789abcdef' for c in plan_id):
             raise SquareError('설치 준비안 ID를 확인하세요.')
         path = self.settings.state/'plans'/(plan_id+'.json')
@@ -124,6 +154,7 @@ class Installer:
         scope_dir = scoped_path(plan['scopeDir'],self.settings.roots,existing=True) if plan['scope']=='project' else self.home
         if str(scope_dir)!=plan['scopeDir']:
             raise SquareError('설치 범위가 변경되었습니다.')
+        check_directory_identity(scope_dir, plan.get('scopeIdentity'))
         target = no_links(plan['target'])
         expected_target = no_links(scope_dir/'.claude'/'skills'/profile['slug']) if profile['kind']=='skill' else no_links(scope_dir/'.pt-ai-square'/'tools'/profile['slug'])
         if target!=expected_target:
@@ -155,6 +186,11 @@ class Installer:
                 shutil.rmtree(staging)
                 raise SquareError('Skill 지침이 비어 있습니다.')
         # A download/extract may take time; preserve edits made while it was running.
+        try:
+            check_directory_identity(scope_dir, plan['scopeIdentity'])
+        except SquareError:
+            shutil.rmtree(staging)
+            raise
         if (tree_digest(target) if target.exists() else None)!=plan['existingTreeHash']:
             shutil.rmtree(staging)
             raise SquareError('파일을 받는 동안 설치 대상이 변경되었습니다. 다시 준비하세요.')
@@ -164,11 +200,29 @@ class Installer:
         backup_dir = no_links(self.settings.state/'backups'/plan_id)
         backup_dir.mkdir(parents=True,exist_ok=False)
         original_config = config_file.read_bytes() if config_file and config_file.exists() else None
+        entry_data = None
+        planned_config = None
+        if profile['kind'] == 'mcp':
+            planned_config = json.loads(original_config) if original_config is not None else {}
+            entry_data = {'command':plan['command'][0],'args':plan['command'][1:]}
+            planned_config.setdefault('mcpServers', {})[plan['serverName']] = entry_data
+        planned_config_hash = (hashlib.sha256(transactions.json_bytes(planned_config)).hexdigest()
+                               if planned_config is not None else None)
+        record = dict(origin=self.settings.url,toolId=plan['toolId'],release=current['release'],sha256=current['sha256'],
+                      host=profile['host'],scope=plan['scope'],scopeDir=str(scope_dir),scopeIdentity=plan['scopeIdentity'],target=str(target),treeHash=tree_digest(staging),
+                      configFile=str(config_file) if config_file else None,configEntry=entry_data,configHash=planned_config_hash,
+                      serverName=plan['serverName'],status='configured' if profile['kind']=='mcp' else 'installed' if profile['kind']=='skill' else 'ready-to-launch',
+                      backup=str(backup_dir),previous=previous,verification=profile.get('verification'),created=time.time())
+        journal = transactions.begin(self, transaction_id=plan_id, operation='install', install_id=plan['installId'],
+                                     scope=plan['scope'], scope_dir=scope_dir, slug=profile['slug'], target=target,
+                                     old_source=backup_dir/'files', new_source=staging, before_record=previous, after_record=record,
+                                     config_file=config_file, config_before=original_config, config_after=planned_config)
         moved_old = False
         committed_new = False
         committed_record = False
         written_config_hash = None
         try:
+            check_directory_identity(scope_dir, plan['scopeIdentity'])
             target.parent.mkdir(parents=True,exist_ok=True)
             no_links(target)
             if target.exists():
@@ -176,7 +230,6 @@ class Installer:
                 moved_old = True
             shutil.move(str(staging),str(target))
             committed_new = True
-            entry_data = None
             result = {'installed':False,'toolId':plan['toolId'],'release':current['release'],'scope':plan['scope'],'destination':str(target)}
             if profile['kind']=='mcp':
                 conf = read_json(config_file) if config_file.exists() else {}
@@ -186,6 +239,8 @@ class Installer:
                 conf.setdefault('mcpServers',{})[plan['serverName']] = entry_data
                 if original_config is not None:
                     (backup_dir/'config.before.json').write_bytes(original_config)
+                if (sha256(config_file) if config_file.exists() else None) != plan['configHash']:
+                    raise SquareError('설치 중 연결 설정이 변경되었습니다. 사용자 설정은 덮어쓰지 않습니다.')
                 atomic_json(config_file,conf)
                 written_config_hash = sha256(config_file)
                 if read_json(config_file).get('mcpServers',{}).get(plan['serverName'])!=entry_data:
@@ -196,14 +251,12 @@ class Installer:
                 result.update(installed=True,status='installed',notice='SKILL.md와 보조 파일의 배치를 확인했습니다. AI 호스트가 지침을 다시 읽으면 사용할 수 있습니다.')
             else:
                 result.update(status='ready-to-launch',installed=False)
-            record = dict(origin=self.settings.url,toolId=plan['toolId'],release=current['release'],sha256=current['sha256'],
-                          host=profile['host'],scope=plan['scope'],scopeDir=str(scope_dir),target=str(target),treeHash=tree_digest(target),
-                          configFile=str(config_file) if config_file else None,configEntry=entry_data,configHash=written_config_hash,
-                          serverName=plan['serverName'],status=result['status'],backup=str(backup_dir),previous=previous,
-                          verification=profile.get('verification'),created=time.time())
+            if tree_digest(target) != record['treeHash'] or written_config_hash != record['configHash']:
+                raise SquareError('설치 파일 또는 설정이 기록 전에 변경되었습니다.')
             records[plan['installId']] = record
             atomic_json(self.record_path,records)
             committed_record = True
+            transactions.finish(journal)
             if profile['kind']=='installer':
                 try:
                     result.update(self._launch_installer(plan,target,artifact.suffix,scope_dir))
@@ -225,22 +278,16 @@ class Installer:
             except OSError:
                 result['planCleanupPending']=True
             result.update(installationId=plan['installId'],rollbackAvailable=profile['kind'] in {'skill','mcp'})
+            transactions.finish(journal)
             return result
         except Exception:
             if committed_record:
                 # The durable record is the local commit point. Never remove installed
                 # files after an unrelated plan-cleanup or installer follow-up failure.
                 raise
-            # Roll back only files/settings written by this call and still matching our write.
-            if config_file and written_config_hash and config_file.exists() and sha256(config_file)==written_config_hash:
-                if original_config is None:
-                    config_file.unlink()
-                else:
-                    config_file.write_bytes(original_config)
-            if committed_new and target.exists():
-                shutil.rmtree(no_links(target))
-            if moved_old:
-                shutil.move(str(backup_dir/'files'),str(target))
+            # Preserve edits made even during an exception path. The same WAL
+            # reconciliation handles partial moves and checks every owned byte.
+            transactions.recover(self, prefer_restore=True)
             raise
 
     def _launch_installer(self,plan,target,suffix,scope_dir):
@@ -263,6 +310,10 @@ class Installer:
                 'notice':'설치기를 시작했습니다. 설치 완료를 보장하지 않습니다. 설치 창을 완료한 뒤 verify_install로 선언한 결과 파일을 확인하세요. 외부 설치기 변경은 자동 복구할 수 없습니다.'}
 
     def verify(self, installation_id):
+        recovery = self.recover()
+        if any(row.get('toolId') == self.records().get(installation_id, {}).get('toolId') for row in recovery['blocked']):
+            return {'status':'recovery-required','installed':False,'recovery':recovery,
+                    'notice':'중단된 설치의 파일과 보관본을 먼저 확인해 주세요.'}
         records=self.records();record=records.get(installation_id)
         if not record:
             raise SquareError('설치 기록을 찾을 수 없습니다.')
@@ -279,6 +330,7 @@ class Installer:
     def rollback(self, installation_id, confirmed=False):
         if not confirmed:
             raise SquareError('설치 복구 범위를 확인한 뒤 실행하세요.')
+        self._recover_before_write()
         records=self.records();record=records.get(installation_id)
         if not record or record['status'] not in {'installed','configured'}:
             raise SquareError('이 설치는 파일·설정 자동 복구 대상이 아닙니다.')
@@ -297,7 +349,18 @@ class Installer:
         if previous and (not previous_files.is_dir() or tree_digest(previous_files)!=previous.get('treeHash')):
             raise SquareError('이전 버전 백업이 없거나 변경되었습니다. 현재 설치는 그대로 보존했습니다.')
         original_config=config_file.read_bytes() if config_file else None
-        displaced=no_links(target.with_name('.pt-square-rollback-'+uuid.uuid4().hex))
+        transaction_id=uuid.uuid4().hex
+        displaced=no_links(target.with_name('.pt-square-rollback-'+transaction_id))
+        planned_config = json.loads(original_config) if original_config is not None else None
+        if config_file:
+            if previous and previous.get('configEntry'):
+                planned_config['mcpServers'][record['serverName']] = previous['configEntry']
+            else:
+                planned_config['mcpServers'].pop(record['serverName'],None)
+        journal=transactions.begin(self,transaction_id=transaction_id,operation='rollback',install_id=installation_id,
+                                   scope=record['scope'],scope_dir=no_links(record['scopeDir']),slug=target.name,target=target,
+                                   old_source=displaced,new_source=previous_files,before_record=record,after_record=previous,
+                                   config_file=config_file,config_before=original_config,config_after=planned_config)
         old_returned=False
         written_hash=None
         # Keep the current installation intact under a temporary sibling name until
@@ -314,17 +377,26 @@ class Installer:
                     conf['mcpServers'][record['serverName']]=previous['configEntry']
                 else:
                     conf['mcpServers'].pop(record['serverName'],None)
-                atomic_json(config_file,conf);written_hash=sha256(config_file)
+                if sha256(config_file) != hashlib.sha256(original_config).hexdigest():
+                    raise SquareError('복구 중 연결 설정이 변경되었습니다. 사용자 설정은 덮어쓰지 않습니다.')
+                atomic_json(config_file,conf)
+                written_hash=hashlib.sha256(transactions.json_bytes(planned_config)).hexdigest()
+            expected_tree = previous.get('treeHash') if previous else None
+            if (tree_digest(target) if target.exists() else None) != expected_tree:
+                raise SquareError('복구 중 설치 파일이 변경되었습니다. 현재 파일을 보존했습니다.')
+            if config_file and sha256(config_file) != written_hash:
+                raise SquareError('복구 중 연결 설정이 변경되었습니다. 현재 설정을 보존했습니다.')
             atomic_json(self.record_path,records)
         except Exception:
-            if config_file and written_hash and sha256(config_file)==written_hash:
-                config_file.write_bytes(original_config)
-            if old_returned:
-                shutil.move(str(target),str(previous_files))
-            displaced.rename(target)
+            transactions.recover(self, prefer_restore=True)
             raise
         cleanup_pending=False
-        try:shutil.rmtree(displaced)
+        try:
+            if tree_digest(displaced) == record['treeHash']:
+                shutil.rmtree(displaced)
+            else:
+                cleanup_pending=True
         except OSError:cleanup_pending=True
+        transactions.finish(journal)
         return {'restored':True,'toolId':record['toolId'],'release':previous.get('release') if previous else None,
                 'cleanupPending':cleanup_pending,'notice':'이 MCP가 관리한 파일·해당 MCP 설정 항목만 복구했습니다. 외부 설치기 변경은 대상이 아닙니다.'}

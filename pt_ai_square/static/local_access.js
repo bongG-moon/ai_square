@@ -3,7 +3,7 @@
   const api = 'api/local-tokens';
   const $ = selector => document.querySelector(selector);
   const status = $('#status');
-  const scopeName = scope => scope === 'publish' ? '업로드 포함' : '조회·다운로드';
+  const scopeName = scope => scope === 'publish' ? '업로드 포함' : '조회·다운로드·좋아요';
   const date = value => new Date(value * 1000).toLocaleString('ko-KR', {year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit'});
   const lifetime = key => key.status === 'invalid' ? '재발급 필요' : (key.expires === null ? '유효기간 제한 없음' : (typeof key.expires === 'number' && Number.isFinite(key.expires) && key.expires > 0 ? `${date(key.expires)}까지` : '재발급 필요'));
   const stateName = state => ({active:'사용 중', expired:'만료됨', revoked:'사용 취소됨', replaced:'교체됨', invalid:'재발급 필요'}[state] || '발급 전');

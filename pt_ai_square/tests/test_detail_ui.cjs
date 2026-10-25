@@ -5,7 +5,7 @@ const source=fs.readFileSync(path.join(__dirname,'../frontend/frontend_workspace
 
 function deferred(){let resolve,reject;const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});return {promise,resolve,reject};}
 function setup(){
- const requests=[],refreshes=[],listeners={},opened=[];
+ const requests=[],refreshes=[],listeners={},opened=[],viewRequests=[];
  const inert={append(){},remove(){},insertAdjacentHTML(){},addEventListener(){}};
  const dialog={open:false,addEventListener(event,fn){(listeners[event]??=[]).push(fn);}};
  const items=[{id:1,name:'First',comments:[],likes:0},{id:2,name:'Second',comments:[],likes:0}];
@@ -14,7 +14,7 @@ function setup(){
   $:selector=>selector==='#sq-dialog'?dialog:['#sq-main','.sq-header nav','.sq-header-actions','.sq-header-actions [data-action="manage"]','.sq-detail-top .sq-row-actions'].includes(selector)?inert:null,
   $$:()=>[],setInterval(){},esc:String,button:()=>'',icon:()=>'',mountIcons(){},decoratePackageForm(){},deploymentLinks(){},
   getItem:id=>items.find(x=>x.id===+id),render(){},manage(){},showError(){},
-  requestAPI:url=>{const request=deferred();requests.push({...request,url});return request.promise;},
+  requestAPI:(url,method,body)=>{const request=deferred();(url.endsWith('/view')?viewRequests:requests).push({...request,url,method,body});return request.promise;},
   refresh:()=>{const request=deferred();refreshes.push(request);return request.promise;},
   openModal(title){dialog.open=true;opened.push(title);},closeModal(){dialog.open=false;},
   navigate(route){context.state.route=route;},
@@ -22,7 +22,7 @@ function setup(){
  };
  context.actions={'close-dialog':context.closeModal};
  vm.createContext(context);vm.runInContext(source,context,{filename:'frontend_workspace.js'});
- return {context,requests,refreshes,dialog,opened,items,emit:event=>listeners[event]?.forEach(fn=>fn())};
+ return {context,requests,refreshes,dialog,opened,items,viewRequests,emit:event=>listeners[event]?.forEach(fn=>fn())};
 }
 const fresh={likes:3,liked:false,marker:'fresh'};
 
@@ -94,4 +94,25 @@ test('current access denial still shows the permission prompt and current errors
  assert.equal(await pending,false);assert.deepEqual(h.opened,['조회 권한이 필요합니다.']);
  const current=h.context.detail(1);h.requests.shift().reject(Object.assign(Error('Service unavailable'),{status:503}));
  await assert.rejects(current,/Service unavailable/);
+});
+
+test('views count once for a visible detail, not on tab changes or permission denial',async()=>{
+ const h=setup();let pending=h.context.detail(1);h.requests.shift().resolve(fresh);await pending;
+ assert.equal(h.viewRequests.length,1);assert.equal(h.viewRequests[0].method,'POST');
+ pending=h.context.detail(1,'connect');h.requests.shift().resolve(fresh);await pending;
+ assert.equal(h.viewRequests.length,1);
+ h.context.actions['close-dialog']();pending=h.context.detail(1);h.requests.shift().resolve(fresh);await pending;
+ assert.equal(h.viewRequests.length,2);
+ h.context.actions['close-dialog']();pending=h.context.detail(2);h.requests.shift().reject(Object.assign(Error('Forbidden'),{status:403}));
+ await new Promise(setImmediate);h.refreshes.shift().resolve();await pending;
+ assert.equal(h.viewRequests.length,2);
+});
+
+test('a delayed or failed view write does not reopen a closed detail',async()=>{
+ const h=setup(),pending=h.context.detail(1);h.requests.shift().resolve(fresh);await pending;
+ h.context.actions['close-dialog']();h.viewRequests.shift().resolve({views:7});await new Promise(setImmediate);
+ assert.equal(h.dialog.open,false);assert.equal(h.items[0].views,7);assert.deepEqual(h.opened,['First']);
+ const next=h.context.detail(2);h.requests.shift().resolve(fresh);await next;
+ h.viewRequests.shift().reject(Error('Offline'));await new Promise(setImmediate);
+ assert.equal(h.dialog.open,true);assert.equal(h.context.runtime.detailId,2);
 });

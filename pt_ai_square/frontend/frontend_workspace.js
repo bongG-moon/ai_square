@@ -11,6 +11,7 @@ async function afterWorkspaceSave(callback,form){
 }
 const originalRender=render, originalModal=openModal, originalDetail=detail, originalManage=manage;
 const originalCloseModal=closeModal,originalNavigate=navigate;
+let activeDetailView=null;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
 const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('ax-workspace','AX Workspace','','data-route="ax"')}${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
@@ -31,14 +32,14 @@ render=function(){
 };
 // A late detail response must not replace a newer dialog or reopen one the user dismissed.
 function invalidateDetailLoad(){return runtime.detailLoadToken=(runtime.detailLoadToken||0)+1;}
-openModal=function(title,kicker,html){invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
-closeModal=function(){invalidateDetailLoad();return originalCloseModal();};
-navigate=function(route,sort){invalidateDetailLoad();return originalNavigate(route,sort);};
+openModal=function(title,kicker,html){activeDetailView=null;invalidateDetailLoad();originalModal(title,kicker,html);decorateForms();enhanceSelects();};
+closeModal=function(){activeDetailView=null;invalidateDetailLoad();return originalCloseModal();};
+navigate=function(route,sort){activeDetailView=null;invalidateDetailLoad();return originalNavigate(route,sort);};
 // This action captured the original function before the workspace extension loaded.
 actions['close-dialog']=closeModal;
 // Escape's cancel event is synchronous. A queued close event could otherwise cancel
 // a newly requested detail after a deliberate close-and-open sequence.
-$('#sq-dialog').addEventListener('cancel',invalidateDetailLoad);
+$('#sq-dialog').addEventListener('cancel',()=>{activeDetailView=null;invalidateDetailLoad();});
 function decorateForms(){
  const form=$('#sq-register-form')||$('#sq-edit-tool-form');if(!form)return;
  form.querySelector('[name=visibility]')?.closest('label')?.remove();$('#sq-audience')?.remove();
@@ -121,7 +122,24 @@ function renderWorkspace(){
 }
 function taxonomyPanel(){return `<div class="ws-panel-head"><div><h2>조직과 업무 분류</h2><p>저장하면 검색 필터와 등록·수정 화면에 바로 반영됩니다.</p></div></div><div class="ws-taxonomy">${[['organization','조직',organizations],['category','업무',server.categories||[]]].map(([kind,label,rows])=>`<section><div class="ws-panel-head"><h3>${label}</h3>${button('taxonomy-edit',icon('plus')+' 추가','sq-link',`data-kind="${kind}"`)}</div>${rows.map(x=>`<div class="ws-row"><span class="ws-order">${x.order}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${x.enabled?'선택 가능':'사용 중지 · 기존 기록 유지'}</p></div>${button('taxonomy-edit',icon('pencil'),'sq-icon',`data-kind="${kind}" data-id="${esc(x.id)}" aria-label="${esc(x.name)} 수정"`)}</div>`).join('')}</section>`).join('')}</div>`;}
 
+function renderDetailViews(x){
+ const summary=$('.sq-detail-id p');if(!summary)return;
+ let counter=$('.sq-detail-view-count');
+ if(!Number.isFinite(x.views)||x.views<0){counter?.remove();return;}
+ if(!counter){counter=document.createElement('small');counter.className='sq-detail-view-count';summary.after(counter);}
+ counter.textContent=`조회 ${Math.floor(x.views).toLocaleString('ko-KR')}회`;counter.title='같은 사용자의 30분 이내 반복 열람은 한 번으로 집계합니다.';
+}
+function recordDetailView(x){
+ // Reading details, refreshing metadata and changing detail tabs never count as new views.
+ // This write is best effort and must not delay or reopen the user's detail dialog.
+ void requestAPI(`/api/tools/${x.id}/view`,'POST',{}, {timeoutMs:4000,redirectOnAuth:false}).then(result=>{
+  if(!Number.isFinite(result.views)||result.views<0)return;
+  const current=getItem(x.id);if(current)current.views=result.views;
+  if(activeDetailView===x.id&&$('#sq-dialog').open&&runtime.detailId===x.id)renderDetailViews(current||x);
+ }).catch(()=>{});
+}
 detail=async function(id,tab='intro'){
+ const openingView=activeDetailView!==Number(id)||!$('#sq-dialog').open;
  const x=getItem(id);if(!x)throw Error('이 기능은 삭제되었거나 더 이상 사용할 수 없습니다.');runtime.detailId=x.id;const token=invalidateDetailLoad();
  if(x.deleted){openModal('휴지통에 있는 기능입니다.',x.name,`<p class="sq-note">복원한 후 기능 상세를 열 수 있습니다.</p>${button('restore-tool','복원','sq-primary',`data-id="${x.id}"`)}`);return false;}
  // Revalidate on every open; no stale dialog bypass after access revocation.
@@ -134,6 +152,8 @@ detail=async function(id,tab='intro'){
   const current=getItem(id);if(current)lockedDetail(current);return false;
  }
  originalDetail(id,tab);
+ activeDetailView=x.id;renderDetailViews(x);
+ if(openingView&&server.dataMode!=='dummy')recordDetailView(x);
  deploymentLinks(x,tab);
  $('.sq-detail-top .sq-row-actions')?.insertAdjacentHTML('afterbegin',button('subscribe',icon(x.subscribed?'bell-ring':'bell')+(x.subscribed?'업데이트 알림 켜짐':'업데이트 알림 받기'),'sq-secondary',`data-id="${x.id}" aria-pressed="${x.subscribed}"`));
  if(tab==='comments'){

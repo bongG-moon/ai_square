@@ -33,7 +33,7 @@ PTAI_COOKIE_SECURE = False
 PTAI_SESSION_COOKIE_NAME = 'pt_ai_square_session'
 
 # 선택 설정: 사용자가 브라우저에서 접속하는 AI SQUARE의 공용 주소입니다.
-# 비워두면 MCP를 받는 현재 사이트 주소를 ZIP에 자동 포함합니다. 일반 환경은 입력할 필요가 없습니다.
+# 비워두면 MCP/AX 선택 확장을 받는 현재 사이트 주소를 ZIP에 자동 포함합니다. 일반 환경은 입력할 필요가 없습니다.
 # 프록시 뒤에서 내부 주소/프로토콜로 보이는 경우에만 실제 외부 주소를 지정하세요.
 # 예: 'http://ai-square.company.example' 또는 'https://ai-square.company.example'
 # 경로(/local-access 등), 계정, KEY, 쿼리는 넣지 않습니다. 웹 실행 방식이나 포트를 바꾸지 않습니다.
