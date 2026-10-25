@@ -11,6 +11,17 @@ from .install import Installer
 from .profiles import validate_profile
 
 
+def fixed_package_id(item):
+    """Prefer the platform identity; old servers expose it only in first releases."""
+    if isinstance(item.get('packageId'),str) and item['packageId']:
+        return item['packageId']
+    versions=[v for v in item.get('versions',[]) if isinstance(v,dict)
+              and type(v.get('n')) is int and isinstance(v.get('package'),dict)
+              and isinstance(v['package'].get('packageId'),str) and v['package']['packageId']]
+    first=min(versions,key=lambda v:v['n'],default=None)
+    return first['package']['packageId'] if first else None
+
+
 class Runtime:
     def __init__(self, settings, client=None, home=None):
         self.settings = settings
@@ -70,16 +81,18 @@ class Runtime:
             raise SquareError('등록 metadata JSON 객체가 필요합니다.')
         values=dict(metadata)
         options=self.client.json('/api/catalog/options')
-        query={}
-        if values.get('packageId'):
-            query['packageId']=values['packageId']
-        if values.get('name'):
-            query['q']=values['name']
+        query={'packageId':values['packageId']} if values.get('packageId') else {'q':values['name']} if values.get('name') else {}
         candidates=self.client.json('/api/publish-targets?'+urlencode(query)).get('items',[])
+        candidate_match='packageId' if query.get('packageId') else 'name' if query.get('q') else 'all'
+        if not candidates and query.get('packageId') and values.get('name'):
+            # Names are only a second candidate search, never an update decision.
+            candidates=self.client.json('/api/publish-targets?'+urlencode({'q':values['name']})).get('items',[])
+            candidate_match='name'
         if target=='review':
             return {'targetSelectionRequired':True,'candidates':candidates,'options':options,'metadata':values,
+                    'candidateMatch':candidate_match if candidates else 'none',
                     'source':inspect(source_path,self.settings.roots) if source_path else None,
-                    'notice':'기존 본인 도구의 새 버전인지 별도 신규 도구인지, 조직·업무·조회 권한을 사용자에게 확인하세요. 아직 서버에 초안을 보내지 않았습니다.'}
+                    'notice':'기존 본인 도구의 새 버전인지 별도 신규 도구인지, 조직·업무·조회 권한을 사용자에게 확인하세요. 이름이 비슷해도 같은 도구로 확정하지 않습니다. 아직 서버에 초안을 보내지 않았습니다.'}
         required=['name','desc','platform','type','guide','orgId','categoryId']
         missing=[key for key in required if not isinstance(values.get(key),str) or not values[key].strip()]
         if type(values.get('approval'))is not bool:
@@ -92,6 +105,9 @@ class Runtime:
             raise SquareError('신규 등록에는 기존 tool_id를 지정하지 않습니다.')
         values.pop('toolId',None)
         values.pop('expectedRevision',None)
+        values.pop('sourcePackageId',None)
+        values.pop('packageIdentityChanged',None)
+        platform_package_id=None
         if target=='update':
             positive(tool_id)
             # Client hints are not authority. The backend independently enforces the KEY employee as owner.
@@ -100,6 +116,13 @@ class Runtime:
             if existing.get('ownerId')!=identity:
                 raise SquareError('본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
             values.update(toolId=tool_id,expectedRevision=existing['revision'])
+            platform_package_id=fixed_package_id(existing)
+            if source_path and platform_package_id and not values.get('packageId'):
+                source=scoped_path(source_path,self.settings.roots,existing=True)
+                if source.is_dir() and not (source/'ai-square.json').exists():
+                    # Only a new declaration needs a default. Existing ZIP bytes,
+                    # source declarations and explicitly supplied IDs stay intact.
+                    values['packageId']=platform_package_id
         if 'installProfile' in values:
             validate_profile(values['installProfile'])
         artifact=None
@@ -117,10 +140,23 @@ class Runtime:
             result['reviewUrl']=self.settings.url+review
         else:
             result.pop('reviewUrl',None)
+        source_package_id=declaration.get('packageId') if isinstance(declaration,dict) else None
+        # New servers provide the authoritative identity. Fill only absent fields
+        # for an older server, without replacing its identity with raw ZIP data.
+        result.setdefault('packageId',platform_package_id or source_package_id)
+        result.setdefault('sourcePackageId',source_package_id)
+        result.setdefault('packageIdentityChanged',bool(result['packageId'] and result['sourcePackageId'] and result['packageId']!=result['sourcePackageId']))
+        notice='웹 확인 주소를 열어 내용·공개 범위를 승인하세요. MCP는 승인 API를 호출할 수 없습니다. 승인 후 publish_item으로 게시합니다.'
+        if values.get('mode')=='url':
+            notice+=' 등록 주소는 연결 링크와 안내로 저장됩니다. 원격 MCP 자동 연결이나 API 변환은 수행하지 않습니다.'
+        if target=='update':
+            notice+=' 선택한 기존 도구 ID의 새 버전으로 준비했습니다.'
+            if isinstance(declaration,dict):
+                notice+=' 플랫폼 고정 packageId와 원본 ZIP의 sourcePackageId를 함께 확인하세요. 식별자가 달라도 원본 ZIP을 수정하지 않습니다.'
         # Draft bytes are already on the web server, immutable and waiting for human web approval.
         return dict(result,localPreparationId=local_id,preparedFile=str(artifact) if artifact else None,
                     preparedSha256=sha256(artifact) if artifact else None,package=declaration,
-                    notice='웹 확인 주소를 열어 내용·공개 범위를 승인하세요. MCP는 승인 API를 호출할 수 없습니다. 승인 후 publish_item으로 게시합니다.')
+                    notice=notice)
 
     def get_publish_status(self,draft_id):
         return self.client.json('/api/publish-drafts/'+self._draft_id(draft_id))

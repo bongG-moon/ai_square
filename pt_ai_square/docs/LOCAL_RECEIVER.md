@@ -27,9 +27,9 @@ python scripts/square_client.py configure --url http://127.0.0.1:5080
 ```
 
 아직 운영 주소를 모르면 로컬에서 웹 서버를 실행한 후 위 주소로 시험하면 됩니다.
-운영 서버가 정해지면 같은 명령의 주소를 실제 HTTPS 웹 주소로 바꾸세요.
+운영 서버가 정해지면 같은 명령의 주소를 실제 웹 주소로 바꾸세요. HTTPS는 그대로 연결하며, 사내 HTTP 주소는 KEY가 암호화되지 않고 전송됨을 확인한 뒤 `configure --url http://회사주소 --allow-http`로 해당 주소만 허용합니다. 다른 주소까지 허용하는 전역 설정이 아닙니다.
 주소는 기본적으로 사용자 폴더 아래 `.pt-ai-square/client.json`에 저장합니다.
-이 JSON에는 `baseUrl`만 들어가며 인증키와 MongoDB 정보를 저장하지 않습니다.
+이 JSON에는 `baseUrl`과 필요한 경우 확인한 HTTP 주소인 `allowHttpOrigin`이 들어가며 인증키와 MongoDB 정보를 저장하지 않습니다.
 `.env` 파일을 사용하지 않습니다.
 
 서버의 MongoDB 설정은 기존 `runtime_config.py` 그대로입니다.
@@ -127,6 +127,7 @@ python scripts/square_client.py check 12 --release 1
 중단·검증 실패·배포 변경 시 임시 파일은 정리합니다. 프로세스 강제 종료나 전원 종료로 남은 `.square-*.part`는 완성된 배포 파일이 아닙니다.
 서버의 다운로드 이력은 웹 다운로드와 같은 기준으로 기록합니다. 파일 검증 실패 시에도 서버에서 전송을 시작한 이력은 남을 수 있습니다.
 URL·명령어형 도구는 다운로드할 파일이 없으므로 `show`로 안내를 확인하며 외부 URL이나 명령어를 자동 실행하지 않습니다.
+등록된 URL은 HTTP·HTTPS를 지원하며 포트·경로를 포함할 수 있습니다. 이 주소를 조회하는 것과 해당 원격 MCP를 사용자 프로그램에 설정하는 것은 별개입니다. AI SQUARE의 개인 KEY를 등록된 외부 URL에 자동 전달하지 않습니다.
 검증 성공은 전송 파일의 일치 확인이며 악성코드 검사나 실행 안전성 검증은 아닙니다.
 
 도구에 동작 흐름 정보가 있으면 `show` 응답의 `workflow.steps`에서 순서별 제목·설명을 확인할 수 있습니다. 웹에서는 **도구 상세 → 소개 → 이렇게 동작해요.**로 표시됩니다. 배포 Skill이 실제 자료를 근거로 정리한 설명이며 실시간 실행 상태가 아닙니다.
@@ -175,15 +176,18 @@ ZIP은 명시한 두 소스 파일만 담으므로 개인 설정·인증키·데
 |---|---|
 | `GET /api/catalog/options` | 로그인 사번과 현재 사용 가능한 조직·업무 ID 확인 |
 | `POST /api/packages/inspect` | multipart `artifact`로 배포 정보 사전 확인. 게시 건수에는 포함하지 않음 |
-| `POST /api/tools` | multipart `metadata` JSON과 `artifact` 파일로 새 도구 등록 |
-| `POST /api/tools/{id}/versions` | 같은 형식으로 새 버전 게시. `metadata.expectedRevision` 필수 |
+| `POST /api/publish-drafts` | multipart `metadata` JSON과 선택적 `artifact`로 게시 초안 생성. 기존 도구는 `metadata.toolId`와 `metadata.expectedRevision` 지정 |
+| `GET /api/publish-drafts/{id}` | 초안 상태와 사용자가 열 웹 검토 주소 확인 |
+| `POST /api/publish-drafts/{id}/commit` | 사용자가 웹에서 승인한 초안 게시. 미승인 초안은 거절 |
 
 `metadata`에는 이름(name), 설명(desc), 담당자 표시(owner), 조직(orgId), 업무(categoryId), 대상 프로그램(platform), 유형(type), 설치 안내(guide), 관련 업무(workTags), 조회 권한 필요 여부(approval), 등록 방식(mode)을 넣습니다.
 담당자 표시 `owner`는 화면에 보이는 설명일 뿐, 실제 등록자 권한은 인증키에 연결된 사번으로 서버가 결정합니다.
 파일 등록은 `mode: "file"`과 `artifact` 파일을 보냅니다. URL·명령어형 게시도 기존 등록 API의 검증을 동일하게 적용합니다.
+URL형은 `mode: "url"`, `url: "http://mcp.example.internal:8080/mcp"`처럼 HTTP 또는 HTTPS 주소와 실제 연결 안내를 게시 메타데이터에 넣습니다. 주소에 아이디·비밀번호·개인 KEY를 넣지 않습니다. 포트·경로는 필요할 때 포함하며, URL 등록 자체로 원격 서버를 호출하거나 MCP 설정을 추가하지 않습니다. 플랫폼 KEY의 권한과 웹 게시 검토 절차는 그대로 적용됩니다.
 파일 검사·저장 용량·등록 권한·버전 충돌 확인은 웹 등록과 같습니다.
+개인 KEY로 `/api/tools`에 직접 게시하거나 웹 승인 API를 호출할 수 없습니다. 서버 초안을 만들고 사용자가 로그인한 웹에서 검토한 뒤 같은 초안을 게시합니다.
 
-예시(Python `requests`가 있는 환경, 토큰은 실행 환경변수 `PTAI_API_TOKEN`으로 전달):
+초안 생성 예시(Python `requests`가 있는 환경, 토큰은 실행 환경변수 `PTAI_API_TOKEN`으로 전달):
 
 ```python
 import json
@@ -193,7 +197,7 @@ import requests
 base = "https://실제-플랫폼-주소"  # 같은 PC mock 시험은 http://127.0.0.1:5080
 headers = {"Authorization": "Bearer " + os.environ["PTAI_API_TOKEN"]}
 # options 응답의 실제 조직/업무 ID를 확인하여 선택하세요.
-options = requests.get(base + "/api/catalog/options", headers=headers, timeout=30)
+options = requests.get(base + "/api/catalog/options", headers=headers, timeout=30, allow_redirects=False)
 options.raise_for_status()
 metadata = {
     "name": "회의록 정리", "desc": "회의 내용에서 결정 사항을 정리합니다.",
@@ -203,15 +207,16 @@ metadata = {
 }
 with open("SKILL.md", "rb") as f:
     result = requests.post(
-        base + "/api/tools", headers=headers,
+        base + "/api/publish-drafts", headers=headers,
         data={"metadata": json.dumps(metadata, ensure_ascii=False)},
-        files={"artifact": ("SKILL.md", f)}, timeout=120)
+        files={"artifact": ("SKILL.md", f)}, timeout=120, allow_redirects=False)
 result.raise_for_status()
-print(result.json())  # id, version
+draft = result.json()
+print(base + draft["reviewUrl"])  # 사용자가 웹에서 열어 검토할 주소. 아직 게시되지 않음.
 ```
 
-응답 시간 초과 시 실제로 게시됐을 수 있으므로 무조건 재전송하지 말고 등록 목록·버전부터 확인하세요.
-이 예시는 API를 직접 호출하는 방법입니다. 자연어로 파일 준비부터 게시까지 연결하려면 아래의 배포·자동 등록 Skill을 사용하세요. 다운로드용 Skill은 계속 수신 전용입니다.
+사용자가 위 웹 주소에서 승인하면 같은 KEY로 `POST /api/publish-drafts/{id}/commit`에 빈 JSON `{}`을 보내 게시합니다. 응답 시간 초과 시 같은 초안의 상태·결과부터 확인합니다. 새 초안을 무조건 반복 생성하지 않습니다.
+이 예시는 초안 API를 직접 호출하는 방법입니다. HTTP 플랫폼의 정확한 주소 확인과 재시도·파일 변경 검증까지 포함한 흐름은 아래의 배포·자동 등록 Skill 또는 로컬 MCP를 사용하세요. 다운로드용 Skill은 계속 수신 전용입니다.
 
 ## 내 이용 건수 확인
 
@@ -252,16 +257,17 @@ MongoDB의 `tools.versions.apiUsage`에 게시 사번·키 ID를 버전과 함�
 python scripts/square_client.py configure --url http://127.0.0.1:5080
 python scripts/publish_client.py auth
 python scripts/publish_client.py prepare --artifact ./release.zip --plan ./publish-plan.json
-# 준비 결과의 options를 보고 실제 조직·업무 ID를 선택
-python scripts/publish_client.py prepare --artifact ./release.zip --plan ./publish-plan.json --org-id organization-0 --category-id category-0
+# 준비 결과의 options와 기존 도구 후보를 확인하여 대상을 선택
+# 아래 123은 실제로 업데이트할 본인 도구 ID로 바꾸세요. 신규 등록이면 --tool 123 대신 --new를 사용합니다.
+python scripts/publish_client.py prepare --artifact ./release.zip --plan ./publish-plan.json --tool 123 --org-id organization-0 --category-id category-0
 # 사용자가 선택한 공개 범위가 조회 승인 필요일 때
 python scripts/publish_client.py publish --plan ./publish-plan.json --visibility approval
 ```
 
 전체 공개는 `--visibility public`을 사용합니다. 공개 범위 인자를 생략하면 게시되지 않습니다.
 MD·URL·명령어 등록은 `--metadata 등록설명.json`으로 이름·유형·설치 안내 등을 전달합니다.
-기존 도구는 준비안 옆 `.ai-square-publish-state.json`의 서버·사번·자료 연결 정보 또는 관리 가능한 동일 packageId로 찾습니다.
-이름이 비슷하다는 이유로 다른 도구를 덮어쓰지 않습니다. 후보가 여러 개면 사용자에게 확인하고 `--tool ID`로 지정합니다.
+기존 도구 후보는 준비안 옆 `.ai-square-publish-state.json`의 같은 서버·사번·자료 경로 연결 기록, 플랫폼의 고정 packageId 또는 이름 검색으로 찾습니다. 후보를 보고 `--tool ID`로 기존 도구를 지정하거나 `--new`로 신규를 선택합니다. 이미 대상을 지정한 요청은 반복 선택하지 않습니다. 이름이 비슷하다는 이유로 다른 도구를 덮어쓰지 않습니다.
+선택한 기존 도구는 새 ZIP의 packageId가 달라도 같은 도구 ID의 새 버전으로 등록합니다. 최초 정상 선언의 packageId는 플랫폼에 고정하고 새 파일의 원본 식별자를 별도로 기록합니다. ZIP 내부를 수정할 필요가 없으며 원본 파일·해시는 유지됩니다. 새 식별자를 과거 도구의 자동 별칭으로 등록하지 않습니다. 설치 정보의 실행 파일·경로·범위는 새 배포 내용에 맞는지 별도로 확인합니다.
 준비안·상태 파일에는 인증키를 저장하지 않으며 공유 파일에도 포함하지 않습니다.
 기존 상태 파일을 잃어버린 단일 MD 등 고유 ID가 없는 자료는 `--tool ID`로 기존 도구를 지정하세요.
 

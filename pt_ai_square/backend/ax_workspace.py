@@ -14,13 +14,13 @@ from .storage import audit_event, db, deliver_notifications, event
 
 
 ax_workspace = Blueprint('ax_workspace', __name__)
-CATEGORIES = {'workspace', 'plugin', 'integration', 'other'}
+CATEGORIES = {'workspace', 'plugin', 'integration'}
 
 
 def _text(raw, field, maximum, *, required=True):
     value = raw.get(field, '')
     if not isinstance(value, str):
-        raise BadRequest('파일 이름·설명·버전 정보를 확인해 주세요.')
+        raise BadRequest('파일 이름·설명 정보를 확인해 주세요.')
     value = value.strip()
     if len(value) > maximum or (required and not value) or '\x00' in value:
         raise BadRequest(f'{field} 항목은 {"1~" if required else "최대 "}{maximum}자로 입력해 주세요.')
@@ -38,11 +38,15 @@ def _metadata(*, updating=False):
     if not isinstance(raw, dict):
         raise BadRequest('등록 정보를 확인해 주세요.')
     category = raw.get('category', 'workspace')
+    # Older clients/documents used "other". Keep those files visible without
+    # a bulk rewrite of their stored metadata or historical releases.
+    if category == 'other':
+        category = 'integration'
     if not isinstance(category, str) or category not in CATEGORIES:
-        raise BadRequest('Workspace·플러그인·연동·기타 중 구분을 선택해 주세요.')
+        raise BadRequest('AX Workspace·확장 프로그램·연동 도구 중 구분을 선택해 주세요.')
     metadata = dict(name=_text(raw, 'name', 100),
                     description=_text(raw, 'description', 2000, required=False),
-                    category=category, version=_text(raw, 'version', 40))
+                    category=category)
     if updating:
         revision = raw.get('expectedRevision')
         if type(revision) is not int or revision < 1:
@@ -53,12 +57,14 @@ def _metadata(*, updating=False):
 
 def _public(row, *, subscribed=False):
     # A saved response never needs a second database read or reveals a server path.
+    release = row.get('release', 1)
     return dict(id=row['_id'], name=row['name'], description=row['description'],
-                category=row['category'], version=row['version'],
+                category='integration' if row['category'] == 'other' else row['category'],
+                version=str(release),
                 fileName=row['fileName'], size=row['size'], sha256=row['sha256'],
                 created=row['created'], author=row['author'],
                 updated=row.get('updated', row['created']),
-                revision=row.get('revision', 1), release=row.get('release', 1),
+                revision=row.get('revision', 1), release=release,
                 subscribed=subscribed,
                 downloadUrl=url_for('ax_workspace.download', file_id=row['_id']))
 
@@ -136,7 +142,7 @@ def publish():
     artifact = _upload()
     file_id = uuid.uuid4().hex
     now = time.time()
-    row = dict(_id=file_id, **metadata, path=artifact['path'],
+    row = dict(_id=file_id, **metadata, version='1', path=artifact['path'],
                fileName=artifact['name'], size=artifact['size'], sha256=artifact['sha'],
                created=now, updated=now, revision=1, release=1,
                author=g.user['name'], owner=g.user['id'],
@@ -164,8 +170,10 @@ def publish_version(file_id):
     if current.get('revision', 1) != expected:
         raise Conflict('다른 변경이 먼저 저장되었습니다. 목록을 새로고침해 주세요.')
     versions = list(current.get('versions') or [_version(current)])
-    if any(version['version'] == metadata['version'] for version in versions):
-        raise Conflict('이미 등록한 버전입니다. 새로운 버전 이름을 입력해 주세요.')
+    # Displayed versions are server-owned publication numbers. Ignore legacy
+    # client version/release fields; CAS still rejects stale/replayed writes.
+    next_release = current.get('release', 1) + 1
+    metadata['version'] = str(next_release)
     # Resolve recipients before saving bytes; notifications remain independent
     # from the committed version and are rechecked at actual delivery time.
     subscribers = list(db().workspace_subscriptions.find({'file': file_id, 'enabled': True}))
@@ -176,9 +184,9 @@ def publish_version(file_id):
     row = {**current, **metadata, 'path': artifact['path'], 'fileName': artifact['name'],
            'size': artifact['size'], 'sha256': artifact['sha'], 'updated': time.time(),
            'author': g.user['name'], 'owner': g.user['id'], 'revision': expected + 1,
-           'release': current.get('release', 1) + 1}
+           'release': next_release}
     row['versions'] = versions + [_version(row)]
-    release_event = event(recipients, metadata['name'] + ' 새 버전 ' + metadata['version'],
+    release_event = event(recipients, metadata['name'] + ' 새 버전 v' + metadata['version'],
                           {'type': 'workspace', 'id': file_id}, 'release')
     release_event['audit'] = audit_event('AX Workspace 새 버전 등록: ' + metadata['name'])['audit']
     query = {'_id': file_id, 'revision': expected}

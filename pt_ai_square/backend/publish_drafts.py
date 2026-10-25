@@ -10,6 +10,7 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Gone, NotFound
 from .storage import db, artifact_path, next_id
 from .post_commit import followup_pending
+from .package_identity import fixed_package_id, identity_fields
 from .local_access import current_connection_key, expiry_status
 from .mongo_api import (publication_request, publication_artifact, publication_data,
                         publish_prepared, tool, check_revision, payload)
@@ -20,6 +21,10 @@ DRAFT_LIFETIME_SECONDS = 24 * 60 * 60
 
 def digest(row):
     values = {k: row.get(k) for k in ('user', 'keyId', 'toolId', 'expectedRevision', 'metadata')}
+    # Existing drafts retain their original digest contract. New drafts bind the
+    # reviewed stable identity as well as the unmodified source declaration.
+    if 'packageId' in row:
+        values['packageId'] = row['packageId']
     values['artifact'] = {k: row['artifact'].get(k) for k in ('name', 'size', 'sha', 'url', 'commands', 'package')}
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -49,13 +54,18 @@ def active_key(row):
 
 def public(row):
     artifact = row['artifact']
+    target = {'packageId': row['packageId']} if 'packageId' in row else None
+    if target is None and row.get('toolId') is not None:
+        target = db().tools.find_one({'_id': row['toolId'], 'owner': row['user']},
+                                    {'packageId': 1, 'versions.n': 1, 'versions.package.packageId': 1})
     value = dict(id=row['_id'], status=row['status'], created=row['created'], expires=row['expires'],
                  metadata=row['metadata'], toolId=row.get('toolId'), expectedRevision=row.get('expectedRevision'),
                  reviewDigest=row['reviewDigest'], reviewUrl='/publish-review/' + row['_id'],
                  artifact=dict(name=artifact['name'], bytes=artifact['size'], sha256=artifact['sha'],
                                url=artifact['url'], commands=artifact.get('commands', {}),
                                packageRecognized=bool(artifact.get('package')),
-                               packageWarning=artifact.get('packageWarning', '')))
+                                packageWarning=artifact.get('packageWarning', '')),
+                 **identity_fields(target, artifact.get('package')))
     if row.get('result'):
         value['result'] = row['result']
     return value
@@ -144,7 +154,8 @@ def saved_result(row):
     return dict(id=saved['_id'], version=version['n'], replayed=True, pending=False,
                 packageRecognized=bool(version.get('package')),
                 packageWarning=version.get('packageWarning', ''),
-                deploymentUrl=f'/api/tools/{saved["_id"]}/releases/{version["n"]}/deployment' if version.get('package') else None)
+                deploymentUrl=f'/api/tools/{saved["_id"]}/releases/{version["n"]}/deployment' if version.get('package') else None,
+                **identity_fields(saved, version.get('package')))
 
 
 @publish_drafts.post('/api/publish-drafts')
@@ -179,6 +190,7 @@ def create():
         now = time.time()
         row = dict(_id=draft_id, user=g.user['id'], keyId=g.api_token_id, toolId=tid,
                    expectedRevision=target['revision'] if target else None, metadata=data, artifact=artifact,
+                    packageId=fixed_package_id(target, artifact.get('package')),
                    status='pending', created=now, expires=now + DRAFT_LIFETIME_SECONDS)
         # A stable target survives a successful insert whose response/result
         # marker was lost, even if an administrator later purges the tool.
@@ -189,7 +201,14 @@ def create():
             db().publish_drafts.insert_one(row)
         except DuplicateKeyError:
             previous = own_draft(draft_id)
-            if previous.get('creationDigest', previous['reviewDigest']) != row['reviewDigest']:
+            candidate_digest = row['reviewDigest']
+            if 'packageId' not in previous:
+                # A retry of a pre-upgrade request must use the original digest
+                # schema as well; its uploaded metadata and bytes still match.
+                legacy_candidate = dict(row)
+                legacy_candidate.pop('packageId', None)
+                candidate_digest = digest(legacy_candidate)
+            if previous.get('creationDigest', previous['reviewDigest']) != candidate_digest:
                 raise Conflict('같은 초안 요청 번호의 내용이 달라졌습니다. 새 요청 번호로 준비하세요.')
             followup_pending('duplicate-draft-file', remove_unreferenced, artifact)
             return jsonify(public(previous)), 200

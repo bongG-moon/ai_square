@@ -280,6 +280,7 @@
 #square-app .ws-ax-intro+.ws-board-head{margin-bottom:18px}
 #square-app #sq-ax-form>.ws-upload-area{margin-top:24px}
 #square-app #sq-ax-form>.sq-note{margin-top:18px}
+#square-app #sq-ax-form .ws-ax-version{display:flex;align-items:center;min-height:46px;box-sizing:border-box;padding:12px 14px;border:1px solid #e4e6ed;border-radius:12px;background:#f6f7fa;color:var(--sq-muted);font-size:14px}
 #square-app .ws-ax-filters{max-width:100%;overflow-x:auto;flex-shrink:1}
 #square-app .ws-ax-filters button{white-space:nowrap;flex-shrink:0}
 @media(hover:hover) and (prefers-reduced-motion:no-preference){#square-app .ws-ax-card:hover{transform:translateY(-3px);box-shadow:0 14px 32px #22223a12}}

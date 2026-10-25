@@ -64,6 +64,39 @@ def multipart(client, endpoint, artifact, metadata=None):
             return json.loads(response.read(4 * 1024 * 1024))
 
 
+def canonical_package_id(tool):
+    """Prefer the server identity; older servers expose only release declarations."""
+    if 'packageId' in tool:
+        return tool['packageId']
+    versions = sorted(tool.get('versions', []), key=lambda v: v['n'])
+    return next((v['package']['packageId'] for v in versions if v.get('package')), None)
+
+
+def saved_bindings(state):
+    rows = state.get('bindings', []) if state.get('schemaVersion') == 2 else [state]
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def same_source(binding, source_path):
+    # A shared output/plan directory or a matching packageId is not proof that
+    # two artifacts belong to the same project. This is only a candidate hint.
+    old_path = binding.get('sourcePath')
+    if not old_path and binding.get('sourceKey', '').startswith('file:'):
+        old_path = binding['sourceKey'][5:]  # legacy single-MD binding
+    return bool(source_path and isinstance(old_path, str) and old_path
+                and os.path.normcase(old_path) == os.path.normcase(source_path))
+
+
+def remember_binding(path, binding):
+    previous = read_json(path) if Path(path).exists() else {}
+    rows = [row for row in saved_bindings(previous)
+            if not (row.get('baseUrl') == binding['baseUrl'] and row.get('employeeId') == binding['employeeId']
+                    and row.get('sourcePath') == binding.get('sourcePath'))]
+    # Keep independent artifacts in one working directory independent. The
+    # latest top-level fields remain readable by older versions of the client.
+    save(path, dict(binding, schemaVersion=2, bindings=[binding] + rows[:99]))
+
+
 def prepare(client, artifact, metadata, plan_path, tool_id=None, new=False):
     """Inspect server-side; fill package fields. Never silently choose visibility."""
     plan_path = Path(plan_path).resolve()
@@ -80,24 +113,53 @@ def prepare(client, artifact, metadata, plan_path, tool_id=None, new=False):
         warning = inspected.get('warning', '')
     if new and tool_id:
         raise ClientError('--new와 --tool은 함께 사용할 수 없습니다.')
-    binding = read_json(state_path) if state_path.exists() else {}
+    if tool_id is not None and (type(tool_id) is not int or tool_id < 1):
+        raise ClientError('--tool에는 기존 도구의 양의 정수 ID를 넣으세요.')
+    state = read_json(state_path) if state_path.exists() else {}
+    source_path = str(artifact) if artifact else None
+    source_package_id = package.get('packageId') if package else None
     source_key = 'package:' + package['packageId'] if package else 'file:' + str(artifact) if artifact else 'named:' + str(metadata.get('name', ''))
-    same_identity = (binding.get('baseUrl') == client.url and binding.get('employeeId') == options['employee']['id']
-                     and binding.get('sourceKey') == source_key)
-    if not new and not tool_id and same_identity:
-        tool_id = binding.get('toolId')
-    if not new and not tool_id and package:
-        candidates = client.get('/api/publish-targets?' + urlencode({'packageId': package['packageId']}))['items']
-        if len(candidates) > 1:
-            raise ClientError('같은 packageId의 관리 가능한 도구가 여러 개입니다. 사용자에게 확인 후 --tool ID로 선택하세요.')
-        if candidates:
-            tool_id = candidates[0]['id']
+    candidates = []
+    binding_warning = ''
+    if not new and tool_id is None:
+        for binding in saved_bindings(state):
+            if (binding.get('baseUrl') != client.url or binding.get('employeeId') != options['employee']['id']
+                    or not same_source(binding, source_path) or type(binding.get('toolId')) is not int
+                    or binding['toolId'] < 1):
+                continue
+            try:
+                bound = client.details(binding['toolId'])
+                if bound.get('ownerId') == options['employee']['id'] and bound.get('canManage'):
+                    if not any(row['id'] == bound['id'] for row in candidates):
+                        candidates.append(dict(id=bound['id'], name=bound['name'], revision=bound['revision'],
+                                               packageId=canonical_package_id(bound), reason='same_source_path'))
+                else:
+                    binding_warning = '같은 자료 경로의 이전 연결을 현재 계정으로 업데이트할 수 없습니다. 대상을 다시 선택하세요.'
+            except AuthenticationRequired:
+                raise
+            except ClientError:
+                binding_warning = '같은 자료 경로의 이전 연결을 확인하지 못했습니다. 기존 도구 또는 별도 신규 등록을 선택하세요.'
+        name = str(metadata.get('name') or fields.get('name') or '').strip()
+        found = client.get('/api/publish-targets?' + urlencode({'packageId': source_package_id})).get('items', []) if source_package_id else []
+        reason = 'package_id'
+        if not found and name:
+            # A freshly rebuilt ZIP may declare a different ID. Offer a name
+            # candidate separately; never turn that source ID into an alias.
+            found = client.get('/api/publish-targets?' + urlencode({'q': name})).get('items', [])
+            reason = 'name'
+        if found:
+            seen = {row['id'] for row in candidates}
+            for row in found:
+                if row['id'] not in seen:
+                    candidates.append(dict(row, reason=reason))
+                    seen.add(row['id'])
+    selection_required = bool(candidates or binding_warning) and not new and tool_id is None
     previous = {}
     revision = None
     if tool_id:
         previous = client.details(tool_id)
-        if not previous.get('canManage'):
-            raise ClientError('이 도구의 새 버전을 게시할 권한이 없습니다.')
+        if not previous.get('canManage') or previous.get('ownerId') != options['employee']['id']:
+            raise ClientError('본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
         revision = previous['revision']
     keys = ['name','desc','platform','type','guide','environment','changes','workTags','orgId','categoryId','workflow']
     values = {k: previous[k] for k in keys if k in previous}
@@ -106,6 +168,8 @@ def prepare(client, artifact, metadata, plan_path, tool_id=None, new=False):
     # overrides this fallback, including a package that omits workflow.
     values.update(fields)
     values.update(metadata)
+    for key in ('packageId', 'sourcePackageId', 'packageIdentityChanged', 'toolId', 'expectedRevision'):
+        values.pop(key, None)  # Server identity is never caller-authored registration metadata.
     if package:
         # Match the server's release contract, even if a draft contains an old
         # workflow. Editing a recognized ZIP's flow requires changing its manifest.
@@ -114,21 +178,30 @@ def prepare(client, artifact, metadata, plan_path, tool_id=None, new=False):
     values['mode'] = 'file' if artifact else values.get('mode')
     values.pop('approval', None)  # Explicit publish --visibility is always required.
     missing = [k for k in ['name','desc','platform','type','guide','orgId','categoryId','mode'] if not values.get(k)]
-    plan = dict(schemaVersion=1, baseUrl=client.url, employeeId=options['employee']['id'],
+    package_id = canonical_package_id(previous) or source_package_id
+    identity_changed = bool(package_id and source_package_id and package_id != source_package_id)
+    plan = dict(schemaVersion=2, baseUrl=client.url, employeeId=options['employee']['id'],
                 toolId=tool_id, expectedRevision=revision, artifact=str(artifact) if artifact else None,
                 artifactSha256=sha(artifact) if artifact else None, metadata=values,
                 clientRequestId=str(uuid.uuid4()), statePath=str(state_path),
-                packageId=package.get('packageId') if package else None, sourceKey=source_key)
+                packageId=package_id, sourcePackageId=source_package_id, packageIdentityChanged=identity_changed,
+                sourcePath=source_path, sourceKey=source_key, requiresTargetSelection=selection_required)
     save(plan_path, plan)
-    return dict(plan=str(plan_path), action='new_version' if tool_id else 'new_tool', toolId=tool_id,
+    return dict(plan=str(plan_path), action='choose_target' if selection_required else 'new_version' if tool_id else 'new_tool', toolId=tool_id,
                 metadata=values, missing=missing, requiredChoice='공개(public) 또는 조회 승인 필요(approval)',
-                currentApproval=previous.get('approval') if previous else None, options=options, packageWarning=warning)
+                currentApproval=previous.get('approval') if previous else None, options=options, packageWarning=warning,
+                packageId=package_id, sourcePackageId=source_package_id, packageIdentityChanged=identity_changed,
+                candidates=candidates, requiresTargetSelection=selection_required, bindingWarning=binding_warning,
+                notice='기존 도구의 새 버전이면 --tool ID, 별도 신규 등록이면 --new로 다시 준비하세요.' if selection_required else
+                       '플랫폼의 고정 packageId를 유지하며 새 파일의 원본 선언과 바이트는 바꾸지 않습니다.' if identity_changed else '')
 
 
 def publish(client, plan_path, visibility):
     if visibility not in {'public','approval'}:
         raise ClientError('공개 또는 조회 승인 필요 여부를 먼저 확인하세요.')
     plan = read_json(plan_path)
+    if plan.get('requiresTargetSelection'):
+        raise ClientError('기존 도구 또는 신규 등록을 먼저 선택하세요. prepare --tool ID 또는 --new로 다시 준비하세요.')
     identity = client.get('/api/catalog/options')['employee']
     if plan['baseUrl'] != client.url or plan['employeeId'] != identity['id']:
         raise ClientError('준비안의 서버 또는 사번이 다릅니다. 다시 준비하세요.')
@@ -166,6 +239,9 @@ def publish(client, plan_path, visibility):
         except Exception:
             opened = False
         return dict(status='approval_required', draftId=draft['id'], reviewUrl=review_url,
+                    packageId=draft.get('packageId', plan.get('packageId')),
+                    sourcePackageId=draft.get('sourcePackageId', plan.get('sourcePackageId')),
+                    packageIdentityChanged=draft.get('packageIdentityChanged', plan.get('packageIdentityChanged', False)),
                     browserOpened=opened, notice='웹에서 파일·내용·공개 범위를 확인하고 승인한 뒤 같은 publish 명령을 다시 실행하세요. 아직 게시되지 않았습니다.')
     if draft['status'] not in {'approved', 'committing', 'committed'}:
         raise ClientError('등록 초안이 만료되었거나 사용할 수 없습니다. prepare부터 다시 진행하세요.')
@@ -174,10 +250,15 @@ def publish(client, plan_path, visibility):
         headers['X-CSRF-Token'] = client.get('/api/bootstrap')['csrf']
     with client.open('/api/publish-drafts/' + draft['id'] + '/commit', b'{}', headers) as response:
         result = json.loads(response.read(4 * 1024 * 1024))
-    save(plan['statePath'], dict(baseUrl=client.url, employeeId=identity['id'],
-                               toolId=result['id'], release=result['version'], packageId=plan.get('packageId'),
-                               sourceKey=plan['sourceKey']))
-    return dict(result, approval=draft['metadata']['approval'], notice='게시 완료. 설치·자동 실행은 하지 않았습니다.')
+    package_id = result.get('packageId', plan.get('packageId'))
+    source_package_id = result.get('sourcePackageId', plan.get('sourcePackageId'))
+    identity_changed = bool(package_id and source_package_id and package_id != source_package_id)
+    remember_binding(plan['statePath'], dict(baseUrl=client.url, employeeId=identity['id'],
+                                           toolId=result['id'], release=result['version'], packageId=package_id,
+                                           sourcePackageId=source_package_id, sourcePath=plan.get('sourcePath'),
+                                           sourceKey=plan['sourceKey']))
+    return dict(result, packageId=package_id, sourcePackageId=source_package_id, packageIdentityChanged=identity_changed,
+                approval=draft['metadata']['approval'], notice='게시 완료. 설치·자동 실행은 하지 않았습니다.')
 
 
 def main(argv=None):

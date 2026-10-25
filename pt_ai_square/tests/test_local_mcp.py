@@ -11,6 +11,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import zipfile
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -172,6 +173,33 @@ def test_prepare_does_not_auto_choose_update_and_requires_visibility(settings):
     assert not result['ready'] and not client.drafts
 
 
+@pytest.mark.parametrize('url',[
+    'http://mcp.example.test:8080/mcp',
+    'http://api.example.test/v1/tools?format=json',
+    'https://mcp.example.test/mcp',
+])
+def test_url_publication_keeps_http_or_https_address_without_file_or_connection_changes(settings,url):
+    client=FakeClient();runtime=Runtime(settings,client)
+    values=metadata()
+    values.pop('packageId');values.pop('entryPoint')
+    values.update(type='MCP/Tool',mode='url',url=url)
+    before=settings.path.read_bytes()
+    review=runtime.prepare_publish(values)
+    assert review['targetSelectionRequired'] and review['source'] is None
+    assert review['metadata']['url']==url and not client.drafts
+    for target,kwargs in [('new',{}),('update',{'tool_id':1})]:
+        draft=runtime.prepare_publish(values,target=target,**kwargs)
+        sent,artifact=client.drafts[-1]
+        assert sent['mode']=='url' and sent['url']==url and artifact is None
+        assert draft['preparedFile'] is None and draft['preparedSha256'] is None and draft['package'] is None
+        assert draft['reviewUrl'].startswith(settings.url+'/publish-review/')
+        assert '원격 MCP 자동 연결' in draft['notice']
+        if target=='update':assert sent['toolId']==1 and sent['expectedRevision']==3
+    assert settings.path.read_bytes()==before and settings.url=='http://localhost:5000'
+    assert not (settings.state/'publish').exists()
+    assert not any(path.startswith(('http:','https:')) or '/approve' in path for path,_,_ in client.calls)
+
+
 @pytest.mark.parametrize('name,value',[('.env','TOKEN=private'),('runtime_config.py','secret'),('nested/credential.dpapi.json','value'),('readme.md',KEY)])
 @pytest.mark.parametrize('suffix',['.zip','.axextension'])
 def test_prebuilt_zip_inspects_compressed_names_and_content(settings,name,value,suffix):
@@ -276,6 +304,115 @@ def test_update_requires_owner_and_uses_current_revision(settings):
     assert client.drafts[-1][0]['toolId']==1 and client.drafts[-1][0]['expectedRevision']==3
 
 
+class IdentityClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.target_detail={'packageId':'fixed-platform-id'}
+        self.exact_targets=[]
+        self.name_targets=[{'id':1,'name':'메모 요약','revision':3,'packageId':'fixed-platform-id'}]
+        self.draft_identity={}
+    def json(self,path,method='GET',data=None):
+        result=super().json(path,method,data)
+        if path.startswith('/api/publish-targets'):
+            query=parse_qs(urlsplit(path).query)
+            return {'items':copy.deepcopy(self.exact_targets if 'packageId' in query else self.name_targets)}
+        if path=='/api/tools/1':
+            result.update(copy.deepcopy(self.target_detail))
+        return result
+    def draft(self,metadata,artifact):
+        return dict(super().draft(metadata,artifact),**self.draft_identity)
+
+
+def declared_archive(package_id):
+    declaration={'schemaVersion':1,'packageId':package_id,'name':'메모 요약','desc':'메모를 요약합니다.',
+                 'platform':'Claude','type':'Skill','entryPoint':'SKILL.md','guideFile':'INSTALL.md',
+                 'requiredFiles':[],'requirements':[],'workTags':['메모'],'environment':'AI','changes':'갱신'}
+    return zipped({'ai-square.json':json.dumps(declaration,ensure_ascii=False),
+                   'SKILL.md':'# 원본 스킬\n','INSTALL.md':'설치 범위를 확인하세요.'})
+
+
+@pytest.mark.parametrize('exact_match',[False,True])
+def test_review_searches_exact_identity_then_name_separately_without_choosing_target(settings,exact_match):
+    client=IdentityClient();runtime=Runtime(settings,client)
+    if exact_match:client.exact_targets=copy.deepcopy(client.name_targets)
+    result=runtime.prepare_publish(metadata())
+    searches=[parse_qs(urlsplit(path).query) for path,_,_ in client.calls if path.startswith('/api/publish-targets')]
+    assert searches==([{'packageId':['memo-summary']}] if exact_match else [{'packageId':['memo-summary']},{'q':['메모 요약']}])
+    assert result['targetSelectionRequired'] and result['candidates'][0]['id']==1
+    assert result['candidateMatch']==('packageId' if exact_match else 'name')
+    assert not client.drafts and not (settings.state/'publish').exists()
+    assert not any(path=='/api/tools/1' for path,_,_ in client.calls)
+
+
+def test_review_without_any_match_still_requires_new_or_update_selection(settings):
+    client=IdentityClient();client.name_targets=[]
+    result=Runtime(settings,client).prepare_publish(metadata())
+    assert result['targetSelectionRequired'] and result['candidates']==[] and result['candidateMatch']=='none'
+    assert not client.drafts
+
+
+def test_explicit_update_accepts_changed_source_id_preserving_zip_and_fixed_identity(settings):
+    client=IdentityClient();runtime=Runtime(settings,client)
+    source=settings.roots[0]/'renamed-upload.zip';raw=declared_archive('new-source-id');source.write_bytes(raw)
+    values=metadata();values.update(packageId='metadata-is-not-the-zip',sourcePackageId='forged',packageIdentityChanged=False)
+    result=runtime.prepare_publish(values,str(source),'update',1)
+    assert result['packageId']=='fixed-platform-id' and result['sourcePackageId']=='new-source-id'
+    assert result['packageIdentityChanged'] is True and result['package']['packageId']=='new-source-id'
+    assert source.read_bytes()==raw==Path(result['preparedFile']).read_bytes()==client.drafts[0][1]
+    posted=client.drafts[0][0]
+    assert posted['toolId']==1 and posted['expectedRevision']==3
+    assert 'sourcePackageId' not in posted and 'packageIdentityChanged' not in posted
+    assert values['sourcePackageId']=='forged'  # Caller metadata was not mutated.
+
+
+@pytest.mark.parametrize('explicit_id',[None,'chosen-source-id'])
+def test_folder_declaration_uses_fixed_identity_only_when_input_is_missing(settings,explicit_id):
+    client=IdentityClient();folder=settings.roots[0]/'source';folder.mkdir();(folder/'SKILL.md').write_text('# source')
+    values=metadata()
+    if explicit_id is None:values.pop('packageId')
+    else:values['packageId']=explicit_id
+    result=Runtime(settings,client).prepare_publish(values,str(folder),'update',1)
+    expected=explicit_id or 'fixed-platform-id'
+    assert result['packageId']=='fixed-platform-id' and result['sourcePackageId']==expected
+    assert result['packageIdentityChanged']==bool(explicit_id)
+    with zipfile.ZipFile(result['preparedFile']) as z:assert json.loads(z.read('ai-square.json'))['packageId']==expected
+    assert not (folder/'ai-square.json').exists()
+    assert client.drafts[0][0]['packageId']==expected
+
+
+def test_existing_folder_declaration_is_never_rewritten_for_an_update(settings):
+    client=IdentityClient();folder=settings.roots[0]/'source';folder.mkdir()
+    with zipfile.ZipFile(io.BytesIO(declared_archive('retained-source-id'))) as z:z.extractall(folder)
+    before=(folder/'ai-square.json').read_bytes();values=metadata();values.pop('packageId')
+    result=Runtime(settings,client).prepare_publish(values,str(folder),'update',1)
+    assert result['packageId']=='fixed-platform-id' and result['sourcePackageId']=='retained-source-id'
+    with zipfile.ZipFile(result['preparedFile']) as z:assert z.read('ai-square.json')==before
+    assert (folder/'ai-square.json').read_bytes()==before and 'packageId' not in client.drafts[0][0]
+
+
+def test_old_server_fallback_uses_first_recognized_identity_not_latest(settings):
+    client=IdentityClient();client.target_detail={'versions':[{'n':3,'package':{'packageId':'latest-id'}},
+        {'n':1,'package':None},{'n':2,'package':{'packageId':'first-fixed-id'},'withdrawn':True}]}
+    source=settings.roots[0]/'later.zip';source.write_bytes(declared_archive('current-source-id'))
+    result=Runtime(settings,client).prepare_publish(metadata(),str(source),'update',1)
+    assert result['packageId']=='first-fixed-id' and result['sourcePackageId']=='current-source-id'
+
+
+def test_server_identity_response_wins_over_local_legacy_hints(settings):
+    client=IdentityClient();client.draft_identity={'packageId':'server-fixed-id','sourcePackageId':'server-source-id','packageIdentityChanged':True}
+    source=settings.roots[0]/'SKILL.md';source.write_text('# source')
+    result=Runtime(settings,client).prepare_publish(metadata(),str(source),'update',1)
+    assert all(result[key]==value for key,value in client.draft_identity.items())
+
+
+@pytest.mark.parametrize('field,value',[('slug','../unsafe'),('entrypoint','../SKILL.md')])
+def test_changed_package_identity_does_not_bypass_install_profile_checks(settings,field,value):
+    client=IdentityClient();source=settings.roots[0]/'different.zip';source.write_bytes(declared_archive('different-source'))
+    values=metadata();values['installProfile']=dict(profile(),**{field:value})
+    with pytest.raises(SquareError):Runtime(settings,client).prepare_publish(values,str(source),'update',1)
+    assert not client.drafts
+
+
 def test_commit_only_calls_draft_commit(settings):
     client=FakeClient();runtime=Runtime(settings,client)
     result=runtime.publish_item('12345678-1234-1234-1234-123456789abc')
@@ -335,9 +472,10 @@ def zipped(files):
     return raw.getvalue()
 
 
-def test_skill_zip_files_and_mcp_merge_without_erasing_other_entries(settings,tmp_path):
+@pytest.mark.parametrize('suffix', ['.zip', '.ZIP', '.Zip'])
+def test_skill_zip_files_and_mcp_merge_without_erasing_other_entries(settings,tmp_path,suffix):
     raw=zipped({'server.py':'print("not executed")','helper.py':'# helper'})
-    client=FakeClient(raw,'.zip',profile('mcp'));installer=Installer(settings,client,tmp_path)
+    client=FakeClient(raw,suffix,profile('mcp'));installer=Installer(settings,client,tmp_path)
     config=settings.roots[0]/'.mcp.json';atomic_json(config,{'mcpServers':{'existing':{'command':'keep'}},'unrelated':42})
     plan=installer.prepare(1,'project',str(settings.roots[0]));result=installer.install(plan['planId'],plan['approvalDigest'],True)
     values=read_json(config)

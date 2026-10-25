@@ -4,7 +4,6 @@ import json
 import re
 import time
 import uuid
-from urllib.parse import urlsplit
 from flask import Blueprint, current_app, g, jsonify, request, send_file, session
 from werkzeug.exceptions import BadRequest, Forbidden, NotFound, Conflict
 from pymongo import ReturnDocument
@@ -20,6 +19,8 @@ from .install_profiles import normalize_install_profile
 from . import department_access
 from .tool_access import can_read
 from .catalog_snapshot import CatalogSnapshot
+from .package_identity import fixed_package_id, identity_fields, valid_package_id
+from .publication_urls import publication_url
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -115,6 +116,9 @@ def cas(t, update, audit_message=None):
     if audit_message:
         add_outbox(update, audit_event(audit_message))
     update.setdefault('$inc', {})['revision'] = 1
+    identity = fixed_package_id(t)
+    if identity:
+        update.setdefault('$set', {})['packageId'] = identity
     if not db().tools.update_one({'_id': t['_id'], 'revision': t['revision'], 'purge': {'$exists': False}}, update).modified_count:
         raise Conflict('다른 변경이 반영되었습니다. 새로고침 후 다시 시도해 주세요.')
     return deliver_pending('tools', t['_id'])
@@ -147,10 +151,13 @@ def serialize(t, stats, now, registrants=None, snapshot=None):
     if not can_read: data = {k:data[k] for k in ['name','desc','org','orgId','category','categoryId','platform','type','workTags','approval','visibility','audience','owner']}
     data.update(guide=data.get('guide',''),environment=data.get('environment',''),changes=data.get('changes',''))
     versions = []
+    identity_tool = {'packageId': fixed_package_id(t)} if can_read else None
     if can_read:
         for v in reversed(t.get('versions', [])):
-            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),installProfile=v.get('data',{}).get('installProfile') if not v.get('deleted') and not v.get('withdrawn') else None,workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None))
+            versions.append(dict(n=v['n'],age=int((now-v['created'])/86400),size=round(v['size']/1048576,3),bytes=v['size'],refs=0,note=v['note'],deleted=v.get('deleted',False),withdrawn=v.get('withdrawn',False),sha256=v['sha'],filename=v['name'],created=v['created'],url=v['url'] if not v.get('deleted') and not v.get('withdrawn') else '',package=v.get('package'),packageWarning=v.get('packageWarning',''),installProfile=v.get('data',{}).get('installProfile') if not v.get('deleted') and not v.get('withdrawn') else None,workflow=v.get('data',{}).get('workflow') if not v.get('deleted') and not v.get('withdrawn') else None,commands=v.get('commands',{}) if not v.get('deleted') and not v.get('withdrawn') else {},deploymentUrl=f'/api/tools/{t["_id"]}/releases/{v["n"]}/deployment' if v.get('package') and not v.get('deleted') and not v.get('withdrawn') else None,**identity_fields(identity_tool,v.get('package'))))
     current = next((v for v in t.get('versions',[]) if v['n']==t['active']), None)
+    if can_read:
+        data.update(identity_fields(identity_tool,current.get('package') if current else None))
     subscription = snapshot.subscriptions.get(t['_id']) if snapshot is not None else db().subscriptions.find_one({'tool':t['_id'],'user':g.user['id']})
     if snapshot is not None:
         registrar = snapshot.users.get(t['owner'], {}).get('name', '')
@@ -222,7 +229,7 @@ def publication_receipt(request_id):
     request_key=publication_request_key(request_id)
     stored=db().tools.find_one(
         {'versions.publishRequest.key':request_key},
-        {'owner':1,'deleted':1,'purge':1,
+        {'owner':1,'deleted':1,'purge':1,'packageId':1,
          'versions':{'$elemMatch':{'publishRequest.key':request_key}},
          'outbox':{'$slice':1},'postCommit':{'$slice':1}})
     if not stored or stored.get('deleted') or stored.get('purge') or not manager(stored):
@@ -232,10 +239,17 @@ def publication_receipt(request_id):
     if version is None:
         return jsonify(status='unconfirmed')
     recognized=bool(version.get('package'))
+    identity_tool = stored
+    if not valid_package_id(stored.get('packageId')):
+        # The receipt loads one matching release; legacy identity needs only the
+        # original IDs/sequence, not every historic file or metadata payload.
+        identity_tool = db().tools.find_one({'_id':stored['_id']},
+            {'packageId':1,'versions.n':1,'versions.package.packageId':1}) or stored
     return jsonify(status='confirmed',id=stored['_id'],version=version['n'],
                    pending=bool(stored.get('outbox') or stored.get('postCommit')),
                    packageRecognized=recognized,packageWarning=version.get('packageWarning',''),
-                   deploymentUrl=f'/api/tools/{stored["_id"]}/releases/{version["n"]}/deployment' if recognized else None)
+                   deploymentUrl=f'/api/tools/{stored["_id"]}/releases/{version["n"]}/deployment' if recognized else None,
+                   **identity_fields(identity_tool,version.get('package')))
 
 
 @api.post('/api/tools')
@@ -258,8 +272,7 @@ def publication_request():
 
 def publication_artifact(raw):
     if raw.get('mode')=='url':
-        url=text(raw,'url',2048);parts=urlsplit(url)
-        if parts.scheme!='https' or not parts.hostname or parts.username or parts.password: raise BadRequest('인증정보 없는 HTTPS 주소를 입력해 주세요.')
+        url=publication_url(raw.get('url'))
         artifact=dict(path=None,name='',size=0,sha='',url=url)
     elif raw.get('mode')=='command':
         commands={scope:text(raw,key,8000,False) for scope,key in [('project','commandProject'),('user','commandUser')]}
@@ -278,9 +291,6 @@ def publication_data(raw, artifact, t=None):
         raw['workflow']=package.get('workflow')
         if any(raw.get(k)!=package[k] for k in ['platform','type']):
             raise BadRequest('프로그램·유형이 ZIP 배포 정보와 다릅니다. ai-square.json 또는 입력값을 맞춰 주세요.')
-        previous=next((v.get('package') for v in reversed(t['versions']) if v.get('package')),None) if t else None
-        if previous and previous['packageId']!=package['packageId']:
-            raise BadRequest('새 버전의 packageId가 기존 도구와 다릅니다. 다른 도구는 새로 등록하세요.')
     return metadata(raw,t['data'] if t else None)
 
 
@@ -297,6 +307,7 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
         request_id=raw.get('clientRequestId')
         request_key=publication_request_key(request_id) if request_id is not None else None
         package=artifact.get('package')
+        identity=identity_fields(t,package)
         data=publication_data(raw,artifact,t)
         fingerprint=hashlib.sha256(json.dumps(dict(target=tid,data=data,sha=artifact['sha'],url=artifact['url'],commands=artifact.get('commands',{})),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         def replay():
@@ -306,7 +317,8 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
             if saved['publishRequest']['fingerprint']!=fingerprint:
                 raise Conflict('같은 게시 요청 번호의 내용이 다릅니다. 새 준비안을 생성하세요.')
             return jsonify(id=existing['_id'],version=saved['n'],replayed=True,
-                           pending=publish_followup_pending(existing['_id'])),200
+                           pending=publish_followup_pending(existing['_id']),
+                           **identity_fields(existing,saved.get('package'))),200
         if request_key:
             previous_response=replay()
             if previous_response: return previous_response
@@ -322,9 +334,15 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
         if t:
             future=dict(t,data=data)
             e=event(followers(future),f'{data["name"]} v{n} 업데이트',{'type':'tool','id':tid},'release')
-            pending=cas(t,{'$set':{'data':data,'active':n,'fallback':t['active'],'paused':False},'$push':{'versions':version,'outbox':{'$each':[e,job]}}})
+            changes={'data':data,'active':n,'fallback':t['active'],'paused':False}
+            if identity['packageId']:
+                changes['packageId']=identity['packageId']
+            pending=cas(t,{'$set':changes,'$push':{'versions':version,'outbox':{'$each':[e,job]}}})
         else:
-            try: db().tools.insert_one({'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'outbox':[job]})
+            created={'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'outbox':[job]}
+            if identity['packageId']:
+                created['packageId']=identity['packageId']
+            try: db().tools.insert_one(created)
             except DuplicateKeyError:
                 if request_key:
                     previous_response=replay()
@@ -332,7 +350,7 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
                 raise
         committed=True
         if not t: pending=publish_followup_pending(tid)
-        return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None),201
+        return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None,**identity),201
     finally:
         if cleanup_on_failure and not committed and artifact['path']:
             # A network timeout may follow a committed write. Never remove a potentially referenced file.
@@ -828,7 +846,7 @@ def manifest(tid):
     t=tool(tid);usable(t);v=next(v for v in t['versions'] if v['n']==t['active'])
     if v.get('deleted') or v.get('withdrawn'):
         raise NotFound('현재 배포 가능한 버전이 없습니다.')
-    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow'),installProfile=v.get('data',{}).get('installProfile'),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.')
+    return jsonify(schemaVersion=1,toolId=tid,revision=t['revision'],release=t['active'],filename=v['name'],updatePaused=t.get('paused',False),downloadUrl=f'/download/{tid}/{t["active"]}' if v['path'] else None,url=v['url'],sha256=v['sha'],bytes=v['size'],package=v.get('package'),packageWarning=v.get('packageWarning',''),workflow=v.get('data',{}).get('workflow'),installProfile=v.get('data',{}).get('installProfile'),commands=v.get('commands',{}),deploymentUrl=f'/api/tools/{tid}/releases/{v["n"]}/deployment' if v.get('package') else None,managedInstall=False,notice='배포 원본은 그대로 보관합니다. PC 자동 설치·파일 교체는 수행하지 않습니다.',**identity_fields(t,v.get('package')))
 
 @api.get('/api/tools/<int:tid>/releases/<int:n>/deployment')
 def deployment_info(tid,n):
@@ -841,7 +859,7 @@ def deployment_info(tid,n):
         downloadUrl=f'/download/{tid}/{n}',versionCheckUrl=f'/api/tools/{tid}/version-check?release={n}',
         authenticationRequired=True,managedInstall=False,
         installationGuide=v['data']['guide'],environment=v['data']['environment'],workflow=v['data'].get('workflow'),installProfile=v['data'].get('installProfile'),
-        notice='상대 주소는 이 웹 서비스 주소 기준입니다. 실제 설치 후 이 배포 번호를 기록하세요. SSO 인증 연결과 실행 시 확인 코드는 도구 제작자가 연결해야 합니다.')
+        notice='상대 주소는 이 웹 서비스 주소 기준입니다. 실제 설치 후 이 배포 번호를 기록하세요. SSO 인증 연결과 실행 시 확인 코드는 도구 제작자가 연결해야 합니다.',**identity_fields(t,v.get('package')))
     response.headers['Content-Disposition']=f'attachment; filename="ai-square-{tid}-v{n}.json"'
     return response
 

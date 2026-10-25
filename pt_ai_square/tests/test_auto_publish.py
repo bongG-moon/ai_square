@@ -8,7 +8,7 @@ import time
 import pytest
 from .conftest import ready, publish as web_publish
 from .test_receiver import server
-from .test_package_declaration import declaration
+from .test_package_declaration import declaration, bundle
 from .test_personal_api_usage import issue
 from .test_workflow import flow
 from pt_ai_square.backend.storage import db
@@ -104,7 +104,7 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     assert cli('publish','--plan',str(plan),'--visibility','approval')['version']==1
     member,_=ready(app,'member')
     assert member.get('/download/1/1').status_code==403
-    # New output file, same package ID + saved binding => same tool, v2.
+    # New output file: an ID match is a candidate, not a silent update decision.
     changed=tmp_path/'tool-v2.zip'
     (source/'main.py').write_text('updated resource')
     # A newly inspected ZIP without a flow must override the prior release.
@@ -112,6 +112,8 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     result=subprocess.run([sys.executable,'-X','utf8',str(SCRIPTS/'prepare_package.py'),str(source),str(changed)],capture_output=True,encoding='utf-8')
     assert result.returncode==0,result.stderr
     prepared=cli('prepare','--artifact',str(changed),'--plan',str(plan))
+    assert prepared['action']=='choose_target' and prepared['candidates'][0]['id']==1
+    prepared=cli('prepare','--artifact',str(changed),'--plan',str(plan),'--tool','1')
     assert prepared['action']=='new_version' and prepared['toolId']==1 and prepared['currentApproval']
     assert prepared['metadata']['workflow'] is None
     pending=cli('publish','--plan',str(plan),'--visibility','public')
@@ -126,13 +128,14 @@ def test_skill_prepare_cli_publish_and_auto_update(app, server, tmp_path):
     with app.app_context():
         assert db().tools.count_documents({})==1
         assert len(db().tools.find_one({'_id':1})['versions'])==2
-    # Without a local binding, a unique managed packageId still resolves v2.
+    # Even a unique ID candidate without a binding needs the user's selection.
     client=publisher.Client(server,token['token'])
     found=publisher.prepare(client,changed,{},tmp_path/'elsewhere'/'plan.json')
-    assert found['toolId']==1 and found['action']=='new_version'
+    assert found['toolId'] is None and found['action']=='choose_target'
+    assert found['candidates'][0]['id']==1
     # Preview and final publication must agree: a stale manual draft cannot
     # override the inspected ZIP's release-specific workflow.
-    found=publisher.prepare(client,changed,{'workflow':flow('이전 초안')},tmp_path/'elsewhere'/'plan.json')
+    found=publisher.prepare(client,changed,{'workflow':flow('이전 초안')},tmp_path/'elsewhere'/'plan.json',tool_id=1)
     assert found['metadata']['workflow'] is None
 
 
@@ -153,11 +156,15 @@ def test_md_preserved_and_package_candidate_lookup(app, server, tmp_path):
     md.write_text('# 새 내용',encoding='utf-8')
     with pytest.raises(publisher.ClientError,match='변경'):
         publisher.publish(client,plan,'approval')
-    publisher.prepare(client,md,{},plan)
+    assert publisher.prepare(client,md,{},plan)['action']=='choose_target'
+    publisher.prepare(client,md,{},plan,tool_id=1)
     assert reviewed_publish(client,plan,'approval',owner,h)['version']==2
     # A different MD in the same directory must not silently replace this tool.
     other=tmp_path/'OTHER.md'; other.write_text('# another',encoding='utf-8')
-    assert publisher.prepare(client,other,fields,plan)['action']=='new_tool'
+    other_preview=publisher.prepare(client,other,fields,plan)
+    assert other_preview['action']=='choose_target'
+    assert all(row['reason']=='name' for row in other_preview['candidates'])
+    assert publisher.prepare(client,other,fields,plan,new=True)['action']=='new_tool'
 
 
 @pytest.mark.parametrize('change,expected', [
@@ -176,7 +183,7 @@ def test_manual_release_workflow_preserved_replaced_or_removed(app, server, tmp_
     publisher.prepare(client, md, fields, plan)
     assert reviewed_publish(client, plan, 'public', owner, h)['version'] == 1
     md.write_text('# 회의록 정리\n업데이트', encoding='utf-8')
-    prepared = publisher.prepare(client, md, change, plan)
+    prepared = publisher.prepare(client, md, change, plan, tool_id=1)
     assert prepared['action'] == 'new_version' and prepared['metadata']['workflow'] == expected
     assert reviewed_publish(client, plan, 'public', owner, h)['version'] == 2
     current = owner.get('/api/tools/1').json
@@ -188,6 +195,94 @@ def test_manual_release_workflow_preserved_replaced_or_removed(app, server, tmp_
     assert owner.post('/api/tools/1/rollback', headers=h,
                       json={'version': 1, 'expectedRevision': 2}).status_code == 200
     assert owner.get('/api/tools/1/manifest').json['workflow'] == flow()
+
+
+def test_changed_zip_identity_updates_explicit_tool_and_preserves_original_bytes(app, server, tmp_path):
+    owner, headers = ready(app)
+    token, _ = issue(owner, headers)
+    client = publisher.Client(server, token['token'])
+    artifact = tmp_path/'release.zip'
+    original = bundle()
+    artifact.write_bytes(original)
+    plan = tmp_path/'plan.json'
+    fields = dict(orgId='organization-0', categoryId='category-0')
+    publisher.prepare(client, artifact, fields, plan, new=True)
+    first = reviewed_publish(client, plan, 'public', owner, headers)
+    assert first['packageId'] == first['sourcePackageId'] == 'sample-tool'
+    changed = declaration()
+    changed.update(packageId='new-project-build', entryPoint='requirements.txt', changes='완전히 새 파일 구성')
+    second_bytes = bundle(changed)
+    artifact.write_bytes(second_bytes)
+    preview = publisher.prepare(client, artifact, {}, plan)
+    assert preview['action'] == 'choose_target'
+    assert preview['candidates'][0]['id'] == first['id']
+    assert preview['candidates'][0]['reason'] == 'same_source_path'
+    with pytest.raises(publisher.ClientError, match='--tool'):
+        publisher.publish(client, plan, 'public')
+    preview = publisher.prepare(client, artifact, {}, plan, tool_id=first['id'])
+    assert preview['packageId'] == 'sample-tool'
+    assert preview['sourcePackageId'] == 'new-project-build' and preview['packageIdentityChanged']
+    second = reviewed_publish(client, plan, 'public', owner, headers)
+    assert second['id'] == first['id'] and second['version'] == 2
+    assert second['packageId'] == 'sample-tool' and second['sourcePackageId'] == 'new-project-build'
+    assert owner.get(f'/download/{first["id"]}/1').data == original
+    assert owner.get(f'/download/{first["id"]}/2').data == second_bytes == artifact.read_bytes()
+    current = owner.get(f'/api/tools/{first["id"]}').json
+    assert current['packageId'] == 'sample-tool'
+    assert current['versions'][0]['package']['packageId'] == 'new-project-build'
+    assert current['versions'][0]['package']['entryPoint'] == 'requirements.txt'
+    state = publisher.read_json(plan.parent/'.ai-square-publish-state.json')
+    assert state['toolId'] == first['id'] and state['packageId'] == 'sample-tool'
+    assert state['sourcePackageId'] == 'new-project-build'
+    # A changed declaration is not a new automatic alias for this tool.
+    assert client.get('/api/publish-targets?packageId=new-project-build')['items'] == []
+    assert client.get('/api/publish-targets?packageId=sample-tool')['items'][0]['id'] == first['id']
+    # A different output file can still update the selected tool explicitly.
+    other = tmp_path/'different-build.zip'
+    other.write_bytes(second_bytes)
+    preview = publisher.prepare(client, other, {}, plan)
+    assert preview['action'] == 'choose_target' and preview['toolId'] is None
+    assert preview['candidates'][0]['id'] == first['id'] and preview['candidates'][0]['reason'] == 'name'
+    preview = publisher.prepare(client, other, {}, plan, tool_id=first['id'])
+    assert preview['toolId'] == first['id'] and preview['action'] == 'new_version'
+    assert not preview['requiresTargetSelection']
+    unrelated = declaration()
+    unrelated.update(packageId='unrelated-build', name='완전히 다른 도구')
+    other.write_bytes(bundle(unrelated))
+    preview = publisher.prepare(client, other, {}, plan)
+    assert preview['action'] == 'new_tool' and not preview['candidates']
+
+
+@pytest.mark.parametrize('source_url', ['http://mcp.example.internal:8080/mcp', 'https://api.example.test/v1/tools'])
+def test_url_publish_client_keeps_source_link_without_creating_a_package(app, server, tmp_path, monkeypatch, source_url):
+    owner, headers = ready(app)
+    token, _ = issue(owner, headers)
+    client = publisher.Client(server, token['token'])
+    fields = dict(name='원격 연결 도구', desc='등록한 주소와 연결 안내를 제공합니다.', platform='Claude',
+                  type='MCP/Tool', guide='사용하는 프로그램에서 서버 주소와 인증 방식을 확인하세요.',
+                  orgId='organization-0', categoryId='category-0', mode='url', url=source_url)
+    calls = []
+    original = publisher.multipart
+    def recording_multipart(client, endpoint, artifact, metadata=None):
+        calls.append((endpoint, artifact))
+        return original(client, endpoint, artifact, metadata)
+    monkeypatch.setattr(publisher, 'multipart', recording_multipart)
+    plan = tmp_path/'publish-url.json'
+    prepared = publisher.prepare(client, None, fields, plan, new=True)
+    assert prepared['action'] == 'new_tool' and prepared['metadata']['url'] == source_url
+    assert not prepared['missing'] and calls == []
+    stored_plan = publisher.read_json(plan)
+    assert stored_plan['artifact'] is None and stored_plan['artifactSha256'] is None
+    pending = publisher.publish(client, plan, 'public')
+    with app.app_context():
+        assert db().tools.count_documents({}) == 0
+    approve_pending(owner, headers, pending, False)
+    result = publisher.publish(client, plan, 'public')
+    assert result['version'] == 1 and calls == [('/api/publish-drafts', None)]
+    manifest = owner.get(f'/api/tools/{result["id"]}/manifest').json
+    assert manifest['url'] == source_url and manifest['downloadUrl'] is None
+    assert manifest['package'] is None and manifest['installProfile'] is None
+    assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
 
 
 def test_key_missing_opens_safe_auth_page(app, server, tmp_path, monkeypatch, capsys):

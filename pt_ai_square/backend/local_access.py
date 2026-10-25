@@ -8,6 +8,7 @@ from flask import Blueprint, g, jsonify, redirect, render_template, request, ses
 from werkzeug.exceptions import BadRequest, Conflict, Forbidden, Unauthorized
 from .storage import db, public_user, audit_event, deliver_notifications
 from .post_commit import followup_pending
+from .package_identity import fixed_package_id, identity_fields
 
 local_access = Blueprint('local_access', __name__)
 READ_ENDPOINTS = {
@@ -249,13 +250,23 @@ def publish_targets():
     if package_id:
         # A declared identity is stronger than a human-readable name, which can
         # change between releases. Only fall back to similarity without an ID.
-        query['versions.package.packageId'] = package_id
+        # MongoDB 5-compatible candidate lookup. Historic source IDs are only a
+        # legacy read aid, never aliases of the stable platform identity.
+        query['$or'] = [{'packageId': package_id}, {'versions.package.packageId': package_id}]
     elif q:
         query['$or'] = [{'data.' + key: {'$regex': re.escape(q), '$options': 'i'}}
                         for key in ('name', 'desc', 'workTags')]
-    rows = db().tools.find(query).sort('_id', -1).limit(20)
-    return jsonify(items=[dict(id=t['_id'], name=t['data']['name'], revision=t['revision'])
-                          for t in rows])
+    rows = db().tools.find(query).sort('_id', -1)
+    items = []
+    for t in rows:
+        if package_id and fixed_package_id(t) != package_id:
+            continue
+        current = next((v for v in t.get('versions', []) if v['n'] == t['active']), None)
+        items.append(dict(id=t['_id'], name=t['data']['name'], revision=t['revision'],
+                          **identity_fields(t, current.get('package') if current else None)))
+        if len(items) == 20:
+            break
+    return jsonify(items=items)
 
 
 @local_access.get('/api/catalog')

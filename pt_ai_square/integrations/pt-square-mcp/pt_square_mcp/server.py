@@ -151,7 +151,7 @@ def make_server(config_path=DEFAULT_CONFIG):
 
     @mcp.tool(annotations=write)
     def prepare_publish(metadata:dict,source_path:str='',target:str='review',tool_id:int|None=None)->dict:
-        """target=review는 기존 본인 도구 후보만 반환. 사용자 확인 후 target=new/update로 게시 초안 준비. metadata에는 name,desc,platform,type,guide,orgId,categoryId,approval(bool)를 명시. 폴더는 packageId/entryPoint로 ZIP을 생성하고 단일 MD는 유지. workflow는 실제 동작만 기재. 웹 승인 전 게시되지 않습니다."""
+        """target=review는 packageId 정확검색 후 없으면 이름으로 본인 도구 후보만 반환. 이름만으로 신규/업데이트를 결정하지 말고 사용자 확인 후 target=new/update로 준비. update는 명시 tool_id의 고정 packageId와 원본 sourcePackageId를 구분하며 서로 달라도 ZIP을 수정하지 않습니다. metadata에는 name,desc,platform,type,guide,orgId,categoryId,approval(bool)를 명시. 폴더는 packageId/entryPoint로 ZIP을 생성하며 누락된 packageId만 기존 고정ID를 기본값으로 사용. 단일 MD는 유지. 파일 없이 mode=url과 인증정보 없는 HTTP/HTTPS url을 지정하면 연결 링크·안내로 등록하며 원격 MCP 자동 연결은 수행하지 않습니다. 플랫폼 KEY 연결 주소·HTTP 동의 설정은 변경하지 않습니다. 웹 승인 전 게시되지 않습니다."""
         return run('prepare_publish',metadata,source_path,target,tool_id)
 
     @mcp.tool(annotations=read)

@@ -175,7 +175,7 @@ class Installer:
         artifact = self.client.download(current,automatic_download_directory(self.settings,current),update=bool(previous))
         staging = no_links(self.settings.state/'staging'/plan_id)
         staging.parent.mkdir(parents=True,exist_ok=True)
-        if artifact.suffix=='.zip':
+        if artifact.suffix.lower()=='.zip':
             extract(artifact,staging)
         else:
             staging.mkdir(exist_ok=False)

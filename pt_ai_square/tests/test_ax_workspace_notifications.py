@@ -16,7 +16,7 @@ def toggle(client, headers, file_id, enabled):
 
 
 def update(client, headers, file_id, **metadata):
-    data = dict(expectedRevision=1, version='2.0.0')
+    data = dict(expectedRevision=1)
     data.update(metadata)
     return upload(client, headers, file_id=file_id, **data)
 
@@ -109,6 +109,7 @@ def test_new_version_keeps_card_and_old_bytes_and_notifies_subscribed_active_use
     assert response.status_code == 201 and response.json['followupsPending'] is False
     latest = response.json['file']
     assert latest['id'] == file['id'] and latest['revision'] == latest['release'] == 2
+    assert latest['version'] == '2'
     assert latest['created'] == file['created'] and latest['updated'] >= file['created']
     assert latest['subscribed'] is True
     assert len(member.get('/api/ax-workspace').json['files']) == 1
@@ -117,11 +118,12 @@ def test_new_version_keeps_card_and_old_bytes_and_notifies_subscribed_active_use
     downloaded.close()
     with app.app_context():
         stored = db().workspace_files.find_one({'_id': file['id']})
-        assert [v['version'] for v in stored['versions']] == ['1.0.0', '2.0.0']
+        assert [v['version'] for v in stored['versions']] == ['1', '2']
         assert [artifact_path(v['path']).read_bytes() for v in stored['versions']] == [b'# original', b'# newest']
         assert used_bytes() == len(b'# original# newest')
         notices = list(db().notifications.find({'target.type': 'workspace'}))
         assert len(notices) == 1 and notices[0]['user'] == 'member'
+        assert notices[0]['title'].endswith('새 버전 v2')
         assert notices[0]['kind'] == 'release' and notices[0]['target'] == {'type': 'workspace', 'id': file['id']}
         assert stored['outbox'] == []
     # An intentional new item stays independent despite matching its name.
@@ -129,18 +131,29 @@ def test_new_version_keeps_card_and_old_bytes_and_notifies_subscribed_active_use
     assert len(member.get('/api/ax-workspace').json['files']) == 2
 
 
-def test_legacy_file_upgrades_atomically_without_losing_first_release(app):
+@pytest.mark.parametrize('has_history', [False, True])
+def test_legacy_file_upgrades_atomically_without_losing_first_release(app, has_history):
     admin, ah = ready(app, 'admin')
     file = upload(admin, ah).json['file']
     with app.app_context():
-        db().workspace_files.update_one({'_id': file['id']}, {'$unset': {
-            'revision': '', 'release': '', 'versions': '', 'updated': ''}})
+        legacy = {'version': '0.23.32', 'category': 'other'}
+        missing = {'revision': '', 'release': '', 'updated': ''}
+        if has_history:
+            legacy.update({'versions.0.version': '0.23.32', 'versions.0.category': 'other'})
+        else:
+            missing['versions'] = ''
+        db().workspace_files.update_one({'_id': file['id']}, {
+            '$set': legacy, '$unset': missing})
     listed = admin.get('/api/ax-workspace').json['files'][0]
     assert listed['revision'] == listed['release'] == 1
-    assert update(admin, ah, file['id']).status_code == 201
+    assert listed['version'] == '1' and listed['category'] == 'integration'
+    assert update(admin, ah, file['id'], category='other').status_code == 201
     with app.app_context():
         row = db().workspace_files.find_one({'_id': file['id']})
-        assert len(row['versions']) == 2 and row['versions'][0]['version'] == '1.0.0'
+        assert len(row['versions']) == 2
+        assert row['versions'][0]['version'] == '0.23.32' and row['versions'][0]['category'] == 'other'
+        assert row['versions'][1]['version'] == row['version'] == '2'
+        assert row['versions'][1]['category'] == row['category'] == 'integration'
 
 
 @pytest.mark.parametrize('revision', [None, True, '1', 0, -1, [], {}])
@@ -151,16 +164,23 @@ def test_version_requires_valid_revision_before_staging(app, revision):
     assert len(files(app)) == 1
 
 
-def test_stale_or_duplicate_version_does_not_store_extra_bytes(app):
+def test_auto_versions_ignore_client_numbers_and_reject_stale_replays_before_staging(app):
     admin, ah = ready(app, 'admin')
     file = upload(admin, ah).json['file']
-    assert update(admin, ah, file['id'], version='1.0.0').status_code == 409
     assert update(admin, ah, file['id'], expectedRevision=2).status_code == 409
     assert len(files(app)) == 1
-    assert update(admin, ah, file['id']).status_code == 201
+    second = update(admin, ah, file['id'], version='1.0.0', release=9999)
+    assert second.status_code == 201 and second.json['file']['version'] == '2'
     assert update(admin, ah, file['id']).status_code == 409
-    assert update(admin, ah, file['id'], expectedRevision=2).status_code == 409
     assert len(files(app)) == 2
+    third = update(admin, ah, file['id'], expectedRevision=2, version='1.0.0', release=-1)
+    assert third.status_code == 201
+    assert third.json['file']['version'] == '3' and third.json['file']['release'] == 3
+    assert update(admin, ah, file['id'], expectedRevision=2).status_code == 409
+    assert len(files(app)) == 3
+    with app.app_context():
+        row = db().workspace_files.find_one({'_id': file['id']})
+        assert [version['version'] for version in row['versions']] == ['1', '2', '3']
 
 
 def test_concurrent_version_cas_preserves_winner_and_cleans_unreferenced_loser(app, monkeypatch):

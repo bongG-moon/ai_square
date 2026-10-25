@@ -26,7 +26,8 @@ def test_saved_zip_and_old_version_receipts_return_the_matching_release(app):
         assert result.status_code == 200
         assert result.json == dict(status='confirmed', id=1, version=number,
                                    pending=False, packageRecognized=False,
-                                   packageWarning='', deploymentUrl=None)
+                                   packageWarning='', deploymentUrl=None,
+                                   packageId=None, sourcePackageId=None, packageIdentityChanged=False)
         assert result.headers['Cache-Control'] == 'no-store'
     with app.app_context():
         assert db().tools.count_documents({}) == 1
@@ -47,7 +48,10 @@ def test_receipt_preserves_package_result_without_exposing_server_paths(app):
     assert result['packageWarning'] == '배포 정보 일부를 확인해 주세요.'
     assert result['deploymentUrl'] == '/api/tools/1/releases/1/deployment'
     assert set(result) == {'status', 'id', 'version', 'pending',
-                           'packageRecognized', 'packageWarning', 'deploymentUrl'}
+                           'packageRecognized', 'packageWarning', 'deploymentUrl',
+                           'packageId', 'sourcePackageId', 'packageIdentityChanged'}
+    assert result['packageId'] == result['sourcePackageId'] == 'example-skill'
+    assert result['packageIdentityChanged'] is False
 
 
 def test_missing_and_legacy_publications_are_unconfirmed_not_failed(app):

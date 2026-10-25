@@ -23,6 +23,9 @@
     $('review-fields').replaceChildren();
     const lookup = (items, value) => (items || []).find(v => (v.id || v._id) === value)?.name || value;
     addField('구분 · 프로그램', `${m.type} · ${m.platform}`);
+    if (draft.packageId) addField('플랫폼 packageId', draft.packageId);
+    if (draft.sourcePackageId) addField('파일의 원본 packageId', draft.sourcePackageId);
+    if (draft.packageIdentityChanged) addField('버전 연결', '선택한 도구의 최초 packageId를 유지해 새 버전으로 게시합니다. 원본 ZIP은 변경하지 않습니다.');
     addField('조직', lookup(options?.organizations, m.orgId));
     addField('업무', lookup(options?.categories, m.categoryId));
     addField('관련 업무', (m.workTags || []).join(' · '));

@@ -115,8 +115,7 @@ def test_declaration_cannot_grant_access_or_skip_actual_validation(app):
     card=next(x for x in member.get('/api/bootstrap').json['items'] if x['id']==tid)
     assert card['versions']==[] and 'package' not in card
     assert member.get(f'/api/tools/{tid}/manifest').status_code==403
-    different=declaration();different['packageId']='different-tool'
-    assert post(c,h,bundle(different),f'/api/tools/{tid}/versions',expectedRevision=1).status_code==400
+    assert all(key not in card for key in ('packageId','sourcePackageId','packageIdentityChanged'))
     assert post(c,h,blob,f'/api/tools/{tid}/versions',expectedRevision=1,type='Skill').status_code==400
     no_manifest=io.BytesIO()
     with zipfile.ZipFile(no_manifest,'w') as z:z.writestr('README.md','# legacy')
@@ -136,6 +135,39 @@ def test_legacy_inspection_remains_supported(app):
     r=c.post('/api/packages/inspect',headers=h,data={'artifact':(io.BytesIO(blob.getvalue()),'legacy.zip')})
     assert r.status_code==200 and r.json['recognized'] is False
     assert not list((Path(app.config['DATA_DIR'])/'artifacts').iterdir())
+
+
+def test_existing_package_identity_accepts_entirely_new_archive_and_entrypoint(app):
+    client,headers=ready(app)
+    first_blob=bundle()
+    first=post(client,headers,first_blob)
+    assert first.status_code==201
+    tool_id=first.json['id']
+    manifest=declaration()
+    manifest.update(name='새로 구현한 기능', entryPoint='src/new_main.py',
+                    guideFile='docs/QUICK_START.md', requiredFiles=['settings.example.json'],
+                    changes='파일 구성을 새로 정리했습니다.')
+    content=io.BytesIO()
+    with zipfile.ZipFile(content,'w') as archive:
+        archive.writestr('ai-square.json',json.dumps(manifest,ensure_ascii=False))
+        archive.writestr('src/new_main.py','raise RuntimeError("NEW SOURCE MUST NEVER EXECUTE")')
+        archive.writestr('docs/QUICK_START.md','새 설치 위치와 실행 방법을 확인하세요.')
+        archive.writestr('settings.example.json','{"mode":"new"}')
+    new_blob=content.getvalue()
+    updated=post(client,headers,new_blob,f'/api/tools/{tool_id}/versions',
+                 expectedRevision=1,file_name='completely-new-source.zip')
+    assert updated.status_code==201,updated.json
+    assert updated.json['id']==tool_id and updated.json['version']==2
+    with app.app_context():
+        assert db().tools.count_documents({})==1
+        document=db().tools.find_one({'_id':tool_id})
+        assert [v['package']['packageId'] for v in document['versions']]==['sample-tool','sample-tool']
+        assert len(document['versions'])==2 and document['revision']==2
+    latest=client.get(f'/api/tools/{tool_id}/manifest').json
+    assert latest['filename']=='completely-new-source.zip'
+    assert latest['package']['entryPoint']=='src/new_main.py'
+    assert client.get(f'/download/{tool_id}/1').data==first_blob
+    assert client.get(f'/download/{tool_id}/2').data==new_blob
 
 
 def test_downloadable_skill_builds_accepted_package(app,tmp_path):

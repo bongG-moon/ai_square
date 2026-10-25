@@ -1,5 +1,8 @@
 """End-to-end local MCP orchestration against the actual Flask+Mongo contracts."""
 import sys
+import io
+import json
+import zipfile
 from pathlib import Path
 import pytest
 from .conftest import ready
@@ -87,3 +90,120 @@ def test_real_mcp_url_without_package_id_and_admin_key_owner_guard(app,server,tm
     admin,ah=ready(app,'admin');admin_key,_=issue(admin,ah);monkeypatch.setenv('PTAI_API_TOKEN',admin_key['token'])
     with pytest.raises(SquareError,match='본인'):runtime.prepare_publish(metadata,target='update',tool_id=tid)
     with pytest.raises(SquareError):runtime.client.json('/api/admin/settings')
+
+
+def test_real_mcp_http_url_new_and_update_require_web_approval_without_creating_files(app,server,tmp_path,monkeypatch):
+    home=tmp_path/'fake-home';home.mkdir();monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    owner,h=ready(app);key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
+    workspace=tmp_path/'workspace';workspace.mkdir();config=tmp_path/'config.json'
+    save_config(config,server,[workspace],allow_http=True);runtime=Runtime(Settings(config),home=home)
+    before=config.read_bytes();values=fields()
+    for name in ('packageId','entryPoint','installProfile'):values.pop(name)
+    first_url='http://mcp.example.test:8080/mcp'
+    next_url='http://api.example.test/v2/tools?format=json'
+    values.update(type='MCP/Tool',mode='url',url=first_url,guide='등록된 주소의 연결 안내를 확인하세요.')
+    review=runtime.prepare_publish(values)
+    assert review['targetSelectionRequired'] and review['source'] is None
+    with app.app_context():assert db().publish_drafts.count_documents({})==0
+    first=runtime.prepare_publish(values,target='new')
+    assert first['preparedFile'] is None and first['package'] is None
+    with pytest.raises(SquareError):runtime.publish_item(first['id'])
+    with app.app_context():assert db().tools.count_documents({})==0
+    approved=owner.post('/api/publish-drafts/'+first['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':first['reviewDigest']})
+    assert approved.status_code==200,approved.json
+    created=runtime.publish_item(first['id']);tid=created['id']
+    assert created['version']==1 and runtime.get_item(tid)['url']==first_url
+    assert runtime.publish_item(first['id'])['version']==1
+    values.update(url=next_url,changes='새 API 주소 안내')
+    review=runtime.prepare_publish(values)
+    assert review['targetSelectionRequired'] and any(row['id']==tid for row in review['candidates'])
+    second=runtime.prepare_publish(values,target='update',tool_id=tid)
+    assert second['toolId']==tid and second['expectedRevision']==1 and second['preparedFile'] is None
+    with pytest.raises(SquareError):runtime.publish_item(second['id'])
+    assert runtime.get_item(tid)['url']==first_url
+    approved=owner.post('/api/publish-drafts/'+second['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':second['reviewDigest']})
+    assert approved.status_code==200,approved.json
+    updated=runtime.publish_item(second['id']);assert updated['id']==tid and updated['version']==2
+    assert runtime.publish_item(second['id'])['version']==2
+    detail=runtime.get_item(tid)
+    assert detail['url']==next_url and {v['n']:v['url'] for v in detail['versions']}=={1:first_url,2:next_url}
+    manifest=runtime.client.manifest(tid)
+    assert manifest['url']==next_url and manifest['downloadUrl'] is None and manifest['bytes']==0
+    assert runtime.installer.prepare(tid,'project',str(workspace))['canInstall'] is False
+    with pytest.raises(SquareError):runtime.download_item(tid)
+    assert config.read_bytes()==before and not (runtime.settings.state/'publish').exists()
+    assert not any(workspace.iterdir())
+    with app.app_context():
+        row=db().tools.find_one({'_id':tid})
+        assert db().tools.count_documents({})==1 and len(row['versions'])==2
+        assert all(v['path'] is None and v['size']==0 and v['sha']=='' for v in row['versions'])
+
+
+def test_real_mcp_url_credentials_are_rejected_before_draft_creation(app,server,tmp_path,monkeypatch):
+    home=tmp_path/'fake-home';home.mkdir();monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    owner,h=ready(app);key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
+    workspace=tmp_path/'workspace';workspace.mkdir();config=tmp_path/'config.json'
+    save_config(config,server,[workspace],allow_http=True);runtime=Runtime(Settings(config),home=home)
+    values=fields()
+    for name in ('packageId','entryPoint','installProfile'):values.pop(name)
+    values.update(type='MCP/Tool',mode='url',url='http://username:password@mcp.example.test/mcp')
+    with pytest.raises(SquareError) as error:runtime.prepare_publish(values,target='new')
+    assert 'password' not in str(error.value)
+    with app.app_context():
+        assert db().publish_drafts.count_documents({})==0 and db().tools.count_documents({})==0
+    assert not any(workspace.iterdir())
+
+
+def test_real_mcp_changed_zip_identity_requires_explicit_target_and_keeps_fixed_identity(app,server,tmp_path,monkeypatch):
+    home=tmp_path/'fake-home';home.mkdir();monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    owner,h=ready(app);key,_=issue(owner,h);monkeypatch.setenv('PTAI_API_TOKEN',key['token'])
+    workspace=tmp_path/'workspace';workspace.mkdir();source=workspace/'source';source.mkdir()
+    (source/'SKILL.md').write_text('# Original skill\n',encoding='utf-8')
+    config=tmp_path/'config.json';save_config(config,server,[workspace],allow_http=True)
+    runtime=Runtime(Settings(config),home=home);values=fields()
+    first=runtime.prepare_publish(values,str(source),target='new')
+    assert owner.post('/api/publish-drafts/'+first['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':first['reviewDigest']}).status_code==200
+    created=runtime.publish_item(first['id']);tid=created['id']
+    assert runtime.get_item(tid)['packageId']=='test.memo-summary'
+    # Build a different declaration in an independently named ZIP. The MCP may
+    # inspect/copy it, but neither it nor the server may rewrite these bytes.
+    original=Path(first['preparedFile']).read_bytes();buffer=io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(original)) as old, zipfile.ZipFile(buffer,'w') as new:
+        for entry in old.infolist():
+            raw=old.read(entry.filename)
+            if entry.filename=='ai-square.json':
+                declaration=json.loads(raw);declaration['packageId']='new.source-identity'
+                raw=json.dumps(declaration,ensure_ascii=False).encode('utf-8')
+            elif entry.filename=='SKILL.md':raw=b'# New original source\n'
+            new.writestr(entry.filename,raw)
+    archive=workspace/'new-filename-and-identity.zip';raw=buffer.getvalue();archive.write_bytes(raw)
+    values['packageId']='new.source-identity';values['changes']='원본 식별자가 다른 새 배포'
+    with app.app_context():before=db().publish_drafts.count_documents({})
+    review=runtime.prepare_publish(values,str(archive))
+    assert review['targetSelectionRequired'] and review['candidateMatch']=='name'
+    assert any(row['id']==tid for row in review['candidates'])
+    with app.app_context():assert db().publish_drafts.count_documents({})==before
+    second=runtime.prepare_publish(values,str(archive),target='update',tool_id=tid)
+    assert second['toolId']==tid and second['expectedRevision']==1
+    assert second['packageId']=='test.memo-summary' and second['sourcePackageId']=='new.source-identity'
+    assert second['packageIdentityChanged'] is True and Path(second['preparedFile']).read_bytes()==raw
+    with pytest.raises(SquareError):runtime.publish_item(second['id'])
+    assert owner.post('/api/publish-drafts/'+second['id']+'/approve',headers=h,json={'approval':False,'reviewDigest':second['reviewDigest']}).status_code==200
+    published=runtime.publish_item(second['id']);assert published['id']==tid and published['version']==2
+    detail=runtime.get_item(tid)
+    assert detail['packageId']=='test.memo-summary' and detail['sourcePackageId']=='new.source-identity'
+    assert detail['packageIdentityChanged'] is True
+    assert {v['n']:v['package']['packageId'] for v in detail['versions']}=={1:'test.memo-summary',2:'new.source-identity'}
+    manifest=runtime.client.manifest(tid)
+    assert manifest['packageId']=='test.memo-summary' and manifest['sourcePackageId']=='new.source-identity'
+    assert manifest['package']['packageId']=='new.source-identity'
+    downloaded=runtime.download_item(tid,update=True);assert Path(downloaded['file']).read_bytes()==raw==archive.read_bytes()
+    plan=runtime.installer.prepare(tid,'project',str(workspace))
+    assert Path(plan['destination'])==workspace/'.claude'/'skills'/'mcp-e2e-memo'
+    installed=runtime.installer.install(plan['planId'],plan['approvalDigest'],True)
+    assert (Path(installed['destination'])/'SKILL.md').read_bytes()==b'# New original source\n'
+    assert (Path(installed['destination'])/'ai-square.json').read_bytes()==json.dumps(declaration,ensure_ascii=False).encode('utf-8')
+    with app.app_context():
+        row=db().tools.find_one({'_id':tid});assert row['packageId']=='test.memo-summary'
+        assert row['versions'][1]['package']['packageId']=='new.source-identity'
+        assert db().tools.count_documents({})==1

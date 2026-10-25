@@ -23,7 +23,7 @@ def archive(name='README.md'):
 
 def upload(client, headers, *, file_name='ax_workspace.zip', content=None, file_id=None, **metadata):
     data = dict(name='AX Workspace', description='사내 업무 환경 설치 파일입니다.',
-                category='workspace', version='1.0.0')
+                category='workspace')
     data.update(metadata)
     endpoint = '/api/ax-workspace' + (f'/{file_id}/versions' if file_id else '')
     return client.post(endpoint, headers=headers,
@@ -52,6 +52,7 @@ def test_session_admin_csrf_and_member_download(app):
     public = response.json['file']
     assert response.json['followupsPending'] is False
     assert public['author'] == 'admin'
+    assert public['version'] == '1' and public['release'] == 1
     assert public['fileName'] == 'ax_workspace.zip'
     assert public['sha256'] == hashlib.sha256(content).hexdigest()
     assert public['size'] == len(content)
@@ -170,12 +171,44 @@ def test_invalid_artifacts_leave_no_metadata_or_partial_file(app, name, content)
     {'name': ''}, {'name': 'a' * 101}, {'name': ['bad']},
     {'description': 'a' * 2001}, {'description': None},
     {'category': 'unknown'}, {'category': ['workspace']},
-    {'version': ''}, {'version': 'a' * 41},
 ])
 def test_metadata_validation_happens_before_writing_file(app, metadata):
     admin, headers = ready(app, 'admin')
     assert upload(admin, headers, **metadata).status_code == 400
     assert files(app) == []
+
+
+@pytest.mark.parametrize('version', [None, '', '99.8.7', {'untrusted': True}])
+def test_initial_version_is_server_assigned_and_legacy_client_fields_are_ignored(app, version):
+    admin, headers = ready(app, 'admin')
+    response = upload(admin, headers, version=version, release=9999)
+    assert response.status_code == 201
+    assert response.json['file']['version'] == '1'
+    assert response.json['file']['release'] == 1
+    with app.app_context():
+        stored = db().workspace_files.find_one({'_id': response.json['file']['id']})
+        assert stored['version'] == '1' and stored['release'] == 1
+        assert stored['versions'][0]['version'] == '1'
+
+
+def test_legacy_other_category_is_normalized_without_rewriting_existing_metadata(app):
+    admin, headers = ready(app, 'admin')
+    response = upload(admin, headers, category='other')
+    assert response.status_code == 201
+    file_id = response.json['file']['id']
+    assert response.json['file']['category'] == 'integration'
+    with app.app_context():
+        assert db().workspace_files.find_one({'_id': file_id})['category'] == 'integration'
+        db().workspace_files.update_one({'_id': file_id}, {'$set': {
+            'category': 'other', 'version': '0.23.32',
+            'versions.0.category': 'other', 'versions.0.version': '0.23.32'}})
+    listed = admin.get('/api/ax-workspace').json['files'][0]
+    assert listed['category'] == 'integration' and listed['version'] == '1'
+    with app.app_context():
+        stored = db().workspace_files.find_one({'_id': file_id})
+        assert stored['category'] == 'other' and stored['version'] == '0.23.32'
+        assert stored['versions'][0]['category'] == 'other'
+        assert stored['versions'][0]['version'] == '0.23.32'
 
 
 def test_upload_quota_includes_workspace_files(app):

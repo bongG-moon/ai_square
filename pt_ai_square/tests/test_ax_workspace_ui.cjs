@@ -42,7 +42,7 @@ function setup(role='admin',{search='',route='ax'}={}){
   id===null?context.actions['ax-register']():context.actions['ax-version']({dataset:{id}});
   const controls=[{disabled:false},{disabled:false}];
   const node={id:'sq-ax-form',dataset:{},isConnected:true,
-   entries:[['name',item.name],['description',item.description],['category',item.category],['version',item.version]],
+   entries:[['name',item.name],['description',item.description],['category',item.category]],
    querySelectorAll:()=>controls};
   currentForm=node;
   const file={name:item.fileName,size:item.size};context.chooseAxFile([file]);
@@ -68,7 +68,7 @@ test('AX catalog displays only administrator-published downloads and normal filt
  vm.runInContext(`axFiles=[${JSON.stringify(item)}];`,h.context);
  h.context.renderAxWorkspace();
  assert.doesNotMatch(h.workspace.innerHTML,/workspace-extension\.zip|P&T AI Square를 AX Workspace 안에서|P&T AI Square 확장 받기/);
- assert.match(h.workspace.innerHTML,/관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구/);
+ assert.match(h.workspace.innerHTML,/관리자가 등록한 AX Workspace 설치 파일과 확장 프로그램·연동 도구/);
  assert.equal((h.workspace.innerHTML.match(/ download /g)||[]).length,1);
  assert.ok(h.workspace.innerHTML.includes(item.downloadUrl));
  assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);
@@ -84,8 +84,32 @@ test('AX catalog displays only administrator-published downloads and normal filt
 test('empty catalog guides administrators to register without providing a built-in installer',()=>{
  const h=setup();h.context.renderAxWorkspace();
  assert.match(h.workspace.innerHTML,/아직 등록된 파일이 없습니다/);
- assert.match(h.workspace.innerHTML,/파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요/);
+ assert.match(h.workspace.innerHTML,/파일 등록을 눌러 설치 파일이나 확장 프로그램을 공유하세요/);
  assert.doesNotMatch(h.workspace.innerHTML,/ download[ >]|workspace-extension\.zip/);
+});
+
+test('four catalog tabs show extension programs and retain legacy other files under integrations',()=>{
+ const h=setup('member'),extension={...item,id:'p',name:'확장 파일',category:'plugin'},integration={...item,id:'i',name:'연동 파일',category:'integration'},legacy={...item,id:'o',name:'기존 기타 파일',category:'other'};
+ seed(h,[item,extension,integration,legacy]);h.context.renderAxWorkspace();
+ const tabs=[...h.workspace.innerHTML.matchAll(/data-action="ax-filter" data-category="([^"]+)" aria-pressed="(?:true|false)">([^<]+)<\/button>/g)].map(x=>[x[1],x[2]]);
+ assert.deepEqual(tabs,[['all','전체'],['workspace','AX Workspace'],['plugin','확장 프로그램'],['integration','연동 도구']]);
+ assert.match(h.workspace.innerHTML,/ws-ax-count">4개 파일/);
+ h.context.actions['ax-filter']({dataset:{category:'plugin'}});
+ assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2>확장 파일<\/h2>/);assert.doesNotMatch(h.workspace.innerHTML,/<h2>기존 기타 파일<\/h2>/);
+ h.context.actions['ax-filter']({dataset:{category:'integration'}});
+ assert.match(h.workspace.innerHTML,/ws-ax-count">2개 파일/);assert.match(h.workspace.innerHTML,/<h2>연동 파일<\/h2>/);assert.match(h.workspace.innerHTML,/<h2>기존 기타 파일<\/h2>/);
+ assert.doesNotMatch(h.workspace.innerHTML,/<h2>확장 파일<\/h2>/);
+ h.context.actions['ax-filter']({dataset:{category:'workspace'}});
+ assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2>AX Workspace 설치<\/h2>/);
+});
+
+test('registration offers three categories and a read-only v1; legacy other editing selects integrations',()=>{
+ const h=setup();h.context.actions['ax-register']();
+ let html=h.opened.at(-1).html;
+ assert.deepEqual([...html.matchAll(/<option value="([^"]+)"/g)].map(x=>x[1]),['workspace','plugin','integration']);
+ assert.match(html,/<output class="ws-ax-version">v1 · 자동<\/output>/);assert.doesNotMatch(html,/name="version"/);
+ seed(h,[{...item,category:'other',release:2,version:'old-custom-label'}]);h.context.actions['ax-version']({dataset:{id:item.id}});html=h.opened.at(-1).html;
+ assert.match(html,/<option value="integration" selected>연동 도구/);assert.match(html,/>v3 · 자동</);assert.doesNotMatch(html,/old-custom-label|name="version"/);
 });
 
 test('AX extension selection preserves the download filename and excludes unrelated files',()=>{
@@ -189,6 +213,15 @@ test('successful upload preserves multipart contract and shows the new file desp
  form.submit();assert.equal(h.requests.length,2);
 });
 
+test('new and existing uploads never send a client version, even from an older retained form',async()=>{
+ for(const existing of [false,true]){
+  const h=setup();seed(h);const form=h.newForm(existing?item.id:null);form.node.entries.push(['version','999']);form.submit();
+  const metadata=JSON.parse(h.requests[0].body.values.find(([name])=>name==='metadata')[1]);
+  assert.equal(Object.hasOwn(metadata,'version'),false);assert.equal(metadata.expectedRevision,existing?3:undefined);
+  h.requests[0].reject(Error('test ends before saving'));await tick();
+ }
+});
+
 test('failed upload keeps the draft and selection for retry',async()=>{
  const h=setup(),form=h.newForm();form.submit();const failure=Error('upload failed');h.requests[0].reject(failure);await tick();
  assert.deepEqual(h.errors,[failure]);assert.equal(h.dialog.open,true);assert.equal(form.node.dataset.saved,undefined);
@@ -239,37 +272,39 @@ test('file picker uses server size configuration instead of a hardcoded installe
 function seed(h,rows=[item]){vm.runInContext(`axFiles=${JSON.stringify(rows)};`,h.context);}
 function subscriptionButton(h,id=item.id){const b={dataset:{id},disabled:false,innerHTML:'',setAttribute(k,v){this[k]=v;}};h.subscriptionButtons.push(b);return b;}
 
-test('administrator version form retains escaped metadata, requires a new version, and is unavailable to members',()=>{
+test('administrator version form retains escaped metadata, shows the next automatic release, and is unavailable to members',()=>{
  for(const role of ['admin','member']){
   const h=setup(role);seed(h,[{...item,name:'<img src=x>',description:'<script>unsafe</script>',category:'plugin'}]);h.context.renderAxWorkspace();
   assert.equal(h.workspace.innerHTML.includes('data-action="ax-version"'),role==='admin');
   h.context.actions['ax-version']({dataset:{id:item.id}});assert.equal(h.opened.length,role==='admin'?1:0);
   if(role==='admin'){
    const html=h.opened[0].html;assert.match(html,/value="&lt;img src=x>"/);assert.match(html,/&lt;script>unsafe&lt;\/script>/);
-   assert.match(html,/<option value="plugin" selected>/);assert.match(html,/name="version" required[^>]*현재 1\.0\.0/);
-   assert.doesNotMatch(html,/name="version"[^>]*value=/);assert.equal(h.value('axVersionTarget.revision'),3);
+   assert.match(html,/<option value="plugin" selected>확장 프로그램/);assert.match(html,/<output class="ws-ax-version">v2 · 자동<\/output>/);
+   assert.doesNotMatch(html,/name="version"/);assert.equal(h.value('axVersionTarget.revision'),3);
   }
  }
 });
 
 test('new version posts one multipart request to the stable file id with its revision and then refreshes the same card',async()=>{
- const h=setup();seed(h);const form=h.newForm(item.id);form.node.entries[3][1]='1.1.0';form.submit();form.submit();
+ const h=setup();seed(h);const form=h.newForm(item.id);form.file.name='completely-renamed-installer.zip';form.submit();form.submit();
  assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,`/api/ax-workspace/${item.id}/versions`);
  assert.deepEqual(JSON.parse(h.requests[0].body.values.find(([k])=>k==='metadata')[1]),{...Object.fromEntries(form.node.entries),expectedRevision:3});
  assert.equal(h.requests[0].body.values.find(([k])=>k==='file')[1],form.file);
- h.requests[0].resolve({file:{...item,version:'1.1.0',revision:4,release:2},followupsPending:true});await tick();
- h.requests[1].resolve({files:[{...item,version:'1.1.0',revision:4,release:2}]});await tick();
- assert.equal(h.value('axFiles.length'),1);assert.equal(h.value('axFiles[0].id'),item.id);assert.match(h.workspace.innerHTML,/v1\.1\.0/);
+ assert.equal(h.requests[0].body.values.find(([k])=>k==='file')[1].name,'completely-renamed-installer.zip');
+ h.requests[0].resolve({file:{...item,version:'2',revision:4,release:2},followupsPending:true});await tick();
+ h.requests[1].resolve({files:[{...item,version:'2',revision:4,release:2}]});await tick();
+ assert.equal(h.value('axFiles.length'),1);assert.equal(h.value('axFiles[0].id'),item.id);assert.match(h.workspace.innerHTML,/v2 ·/);
  assert.deepEqual(h.announcements,['새 버전을 등록했습니다.']);assert.equal(form.node.dataset.saved,'true');
 });
 
 test('legacy release uses revision 1, version conflict preserves its draft, and opening a fresh registration clears the target',async()=>{
- const h=setup();seed(h,[{...item,revision:undefined}]);const form=h.newForm(item.id);form.submit();
+ const h=setup();seed(h,[{...item,revision:undefined,release:undefined}]);const form=h.newForm(item.id);form.submit();
+ assert.match(h.opened.at(-1).html,/>v2 · 자동</);
  assert.equal(JSON.parse(h.requests[0].body.values[0][1]).expectedRevision,1);
  h.requests[0].reject(Error('다른 관리자가 새 버전을 등록했습니다.'));await tick();
  assert.equal(h.value('axFile'),form.file);assert.ok(form.controls.every(x=>!x.disabled));assert.equal(h.errors.length,1);
  form.submit();assert.equal(h.requests[1].url,`/api/ax-workspace/${item.id}/versions`);h.requests[1].reject(Error('conflict'));await tick();
- h.newForm();assert.equal(h.value('axVersionTarget'),null);
+ h.newForm();assert.equal(h.value('axVersionTarget'),null);assert.match(h.opened.at(-1).html,/>v1 · 자동</);
 });
 
 test('subscription toggle blocks repeat clicks and uses only the confirmed response for its pressed state',async()=>{

@@ -1,11 +1,38 @@
 // Inspect a declaration, never run or transform uploaded code.
+function updatePackageIdentity(){
+ const item=runtime.releaseId?getItem(runtime.releaseId):null;if(!item)return null;
+ // A platform identity survives replacement ZIPs, manual releases and rollback.
+ // Legacy responses without the fixed field use the first recognized release.
+ const version=[...(item.versions||[])].filter(v=>v.package?.packageId).sort((a,b)=>a.n-b.n)[0];
+ return {toolId:item.id,name:item.name||'',packageId:item.packageId||version?.package.packageId||''};
+}
+function packageIdentityField(label,value,kind){
+ return `<div class="sq-field" data-package-identity-field><span>${label}</span><input type="text" readonly value="${esc(value)}" aria-label="${label}" spellcheck="false"><button type="button" class="sq-link" data-package-copy="${kind}">${icon('copy')} ${label} 복사</button></div>`;
+}
+function updatePackagePanel(){
+ const identity=updatePackageIdentity();if(!identity)return '';
+ return `<section class="ws-package" aria-label="업데이트할 도구의 식별 정보"><div class="ws-package-heading">${icon('package')}<strong>${esc(identity.name)} · 기존 도구의 새 버전을 등록합니다.</strong></div><div class="sq-form-grid">${packageIdentityField('도구 ID',String(identity.toolId),'tool')}${identity.packageId?packageIdentityField('플랫폼 packageId',identity.packageId,'package'):'<div class="sq-field"><span>플랫폼 packageId</span><p>처음 정상적으로 읽힌 배포 파일의 식별자를 사용합니다.</p></div>'}</div><p>선택한 도구에 새 배포 번호가 추가됩니다. ${identity.packageId?'도구 ID와 최초 packageId는 유지되며 새 ZIP의 식별자가 달라도 등록할 수 있습니다. ZIP을 수정하거나 다시 압축할 필요가 없습니다.':'배포 정보가 없는 일반 파일도 등록할 수 있습니다.'} 파일명·코드·시작 파일이 바뀌었다면 새 파일에 맞는 설치 안내도 확인해 주세요.</p></section>`;
+}
+function packageIdentityDifference(d){
+ const identity=updatePackageIdentity(),check=d.packageInspection;
+ if(!identity?.packageId||d.mode!=='file'||!d.file||check?.state!=='ready'||!check.result?.recognized)return null;
+ const received=check.result.package?.packageId;
+ return received&&received!==identity.packageId?{...identity,received}:null;
+}
+async function copyPackageIdentity(button){
+ const field=button.closest('[data-package-identity-field]')?.querySelector('input');if(!field?.value)return;
+ try{await navigator.clipboard.writeText(field.value);button.textContent='복사 완료';announce('식별자를 복사했습니다.');}
+ catch{field.focus();field.select();announce('값을 선택했습니다. Ctrl+C 또는 복사 메뉴로 복사하세요.');}
+}
 function packagePanel(d){
  const p=d.packageInspection;if(!p)return '';
  if(p.state==='loading')return '<div class="ws-package" role="status"><strong>배포 정보를 확인하고 있습니다.</strong><p>파일을 임시 전송하여 확인합니다. 게시 전에는 보관하지 않습니다.</p></div>';
  if(p.state==='error')return `<div class="ws-package is-error" role="alert"><strong>배포 정보를 읽지 못했습니다.</strong><p>${esc(p.error)}</p><p>입력 항목을 직접 작성하면 그대로 게시할 수 있습니다. 게시 시 기본 파일 검사는 다시 진행합니다.</p><button type="button" class="sq-link" data-package-retry>다시 검사</button></div>`;
  if(!p.result.recognized)return `<div class="ws-package"><strong>${p.result.warning?'배포 정보를 읽지 못했습니다':'일반 파일 등록'}</strong><p>${esc(p.result.warning||p.result.notice)}</p><p>이름·유형·설치 안내를 직접 입력하고 게시하세요.</p></div>`;
  const info=p.result.package;
- return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'배포 정보 다시 적용':'배포 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
+ const difference=packageIdentityDifference(d);
+ const identityNotice=difference?`<div class="ws-package-facts" role="status"><strong>기존 도구의 새 버전으로 연결됩니다.</strong><span>유지할 플랫폼 packageId <b>${esc(difference.packageId)}</b></span><span>새 파일의 원본 packageId <b>${esc(difference.received)}</b></span><small>파일의 식별자가 달라도 게시할 수 있습니다. 원본 ZIP은 그대로 보관합니다.</small></div>`:'';
+ return `<div class="ws-package"><div class="ws-package-heading">${icon('file-check-2')}<strong>배포 정보 확인 완료</strong><span class="ws-badge">${esc(info.type)}</span></div><p>${esc(info.name)} · ${esc(info.platform)}</p><small>필수 파일 확인 · 원본 그대로 배포 · 실행 검증 제외</small>${identityNotice}${info.workflow?.steps?.length?`<p>동작 흐름 ${info.workflow.steps.length}단계가 상세 화면에 함께 표시됩니다.</p>`:''}<div class="ws-package-facts"><span>파일의 원본 packageId <b>${esc(info.packageId||'')}</b></span><span>시작 파일 <b>${esc(info.entryPoint)}</b></span><span>필요 환경 <b>${esc(info.requirements.join(' · ')||'별도 기재 없음')}</b></span></div><button type="button" class="sq-link" data-package-apply>${p.applied?'배포 정보 다시 적용':'배포 정보를 입력란에 적용'}</button><small>이름·소개·유형·설치 안내 등이 바뀝니다. 조직·업무 분야·담당자·조회 권한은 유지됩니다.</small></div>`;
 }
 function decoratePackageForm(form){
  if(form.id!=='sq-register-form')return;
@@ -18,6 +45,7 @@ function decoratePackageForm(form){
   if(anchor)anchor.insertAdjacentHTML('afterend',packagePanel(d));
   else form.insertAdjacentHTML('afterbegin',packagePanel(d));
  }
+ if(runtime.releaseId)form.insertAdjacentHTML('afterbegin',updatePackagePanel());
 }
 function applyPackageFields(d,result){
  for(const key of ['name','desc','platform','type','environment','changes','guide'])d[key]=result.metadata[key];
@@ -43,7 +71,8 @@ async function inspectSelectedPackage(file){
  if(runtime.draft===d&&$('#sq-register-form'))wizard();
 }
 function packageBlockingError(d){
- // Metadata inspection is advisory. Publish validates the actual file independently.
+ // Inspection is advisory. The selected tool, not a ZIP identity, determines
+ // the update target; the server independently enforces permissions and bytes.
  return '';
 }
 root.addEventListener('change',e=>{
@@ -51,6 +80,7 @@ root.addEventListener('change',e=>{
  try{selectFiles('artifact',[...e.target.files]);}catch(error){showError(error);}
 },true);
 root.addEventListener('click',e=>{
+ const copy=e.target.closest('[data-package-copy]');if(copy){e.preventDefault();copyPackageIdentity(copy);return;}
  if(e.target.closest('[data-package-retry]')){e.preventDefault();captureDraft();inspectSelectedPackage(runtime.draft.file);}
  if(e.target.closest('[data-package-apply]')){e.preventDefault();captureDraft();applyPackageFields(runtime.draft,runtime.draft.packageInspection.result);wizard();}
 });

@@ -1,5 +1,7 @@
 // Administrator-published downloads are kept separate from community tool rankings.
-const axCategories={workspace:'AX Workspace',plugin:'플러그인',integration:'연동 도구',other:'기타'};
+const axCategories={workspace:'AX Workspace',plugin:'확장 프로그램',integration:'연동 도구'};
+function axCategory(value){return Object.keys(axCategories).includes(value)?value:'integration';}
+function axNextRelease(item){return item?(Number.isSafeInteger(item.release)&&item.release>0?item.release:1)+1:1;}
 let axFiles=[],axFilter='all',axFile=null,axLoadToken=0,axUploadBusy=false,axMaxFileBytes=128*1048576-65536;
 let axVersionTarget=null,axHighlightId=null,axMutationToken=0,axCatalogGeneration=0,axSubscriptionRead=null,axSubscriptionCheckedAt=0,axDownloadTimer=null;
 const axSubscriptionBusy=new Set();
@@ -58,8 +60,8 @@ async function showAxWorkspace(id=null){
 }
 function openAxWorkspaceFile(id){return showAxWorkspace(id);}
 function renderAxWorkspace(){
- const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||x.category===axFilter);
- workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>관리자가 등록한 AX Workspace 설치 파일과 플러그인·연동 도구를 찾아보세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card${axHighlightId===String(x.id)?' is-highlighted':''}" data-ax-card="${esc(x.id)}" tabindex="-1"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[x.category]||'기타')}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.updated||x.created)} ${x.release>1?'업데이트':'등록'}</small><a class="sq-primary" href="${esc(x.downloadUrl)}" data-ax-download="${esc(x.id)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div><div class="ws-ax-card-actions">${button('ax-subscription',axSubscriptionLabel(x),'ws-ax-subscription',`data-id="${esc(x.id)}" aria-pressed="${x.subscribed===true}" aria-label="${esc(x.name)} 업데이트 알림 ${x.subscribed?'끄기':'켜기'}" ${axSubscriptionBusy.has(x.id)?'disabled':''}`)}${admin?button('ax-version','새 버전 등록','sq-link',`data-id="${esc(x.id)}"`):''}</div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 플러그인을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
+ const admin=server.user.role==='admin',rows=axFiles.filter(x=>axFilter==='all'||axCategory(x.category)===axFilter);
+ workspace.innerHTML=`<div class="ws-ax-intro"><span class="ws-ax-symbol">${icon('monitor-down')}</span><div><h2>설치부터 연결까지, 한곳에서.</h2><p>관리자가 등록한 AX Workspace 설치 파일과 확장 프로그램·연동 도구를 찾아보세요.</p></div>${admin?button('ax-register',icon('plus')+' 파일 등록','sq-primary'):''}</div><div class="ws-board-head"><div class="ws-segment ws-ax-filters">${Object.entries({all:'전체',...axCategories}).map(([key,label])=>button('ax-filter',label,'',`data-category="${key}" aria-pressed="${axFilter===key}"`)).join('')}</div><span class="ws-ax-count">${rows.length}개 파일</span></div><div class="ws-ax-grid">${rows.map(x=>`<article class="ws-ax-card${axHighlightId===String(x.id)?' is-highlighted':''}" data-ax-card="${esc(x.id)}" tabindex="-1"><div class="ws-ax-card-top"><span class="ws-ax-symbol">${icon(x.category==='workspace'?'monitor-down':x.category==='plugin'?'blocks':'cable')}</span>${badge(axCategories[axCategory(x.category)])}</div><h2>${esc(x.name)}</h2><p>${esc(x.description)}</p><div class="ws-ax-file"><strong>${esc(x.fileName)}</strong><span>${esc(x.version?'v'+x.version:'버전 미입력')} · ${fileSize(x.size)}</span></div><div class="ws-ax-card-footer"><small>${dated(x.updated||x.created)} ${x.release>1?'업데이트':'등록'}</small><a class="sq-primary" href="${esc(x.downloadUrl)}" data-ax-download="${esc(x.id)}" download aria-label="${esc(x.name)} 다운로드">${icon('download')} 다운로드</a></div><div class="ws-ax-card-actions">${button('ax-subscription',axSubscriptionLabel(x),'ws-ax-subscription',`data-id="${esc(x.id)}" aria-pressed="${x.subscribed===true}" aria-label="${esc(x.name)} 업데이트 알림 ${x.subscribed?'끄기':'켜기'}" ${axSubscriptionBusy.has(x.id)?'disabled':''}`)}${admin?button('ax-version','새 버전 등록','sq-link',`data-id="${esc(x.id)}"`):''}</div></article>`).join('')||blank('folder-down',axFilter==='all'?'아직 등록된 파일이 없습니다.':'이 분류에 등록된 파일이 없습니다.',admin?'파일 등록을 눌러 설치 파일이나 확장 프로그램을 공유하세요.':'관리자가 파일을 등록하면 이곳에서 내려받을 수 있습니다.')}</div>`;
  mountIcons();
 }
 function axUploadArea(){
@@ -74,7 +76,7 @@ function chooseAxFile(files){
 function refreshAxFile(){const area=$('[data-ax-drop]');if(area){area.outerHTML=axUploadArea();mountIcons();}}
 Object.assign(actions,{
  'ax-workspace':()=>showAxWorkspace(),
- 'ax-filter':b=>{axFilter=b.dataset.category;renderAxWorkspace();},
+ 'ax-filter':b=>{axFilter=b.dataset.category==='all'? 'all':axCategory(b.dataset.category);renderAxWorkspace();},
  'ax-register':()=>openAxUpload(),
  'ax-version':b=>openAxUpload(b.dataset.id),
  'ax-subscription':b=>toggleAxSubscription(b.dataset.id),
@@ -85,7 +87,7 @@ function openAxUpload(id=null){
  if(server.user.role!=='admin'||axUploadBusy)return;
  const item=id===null?null:axFiles.find(x=>x.id===id);if(id!==null&&!item)return;
  axFile=null;axVersionTarget=item?{id:item.id,revision:item.revision||1}:null;
- openModal(item?'새 버전 등록':'배포 파일 등록','AX Workspace · 관리자',`<form id="sq-ax-form"><div class="sq-form-grid"><label class="sq-field wide"><span>이름 *</span><input name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="예: AX Workspace Windows 설치 파일"></label><label class="sq-field wide"><span>설명 *</span><textarea name="description" maxlength="2000" required placeholder="어떤 파일인지, 설치 전에 알아둘 내용을 적어주세요.">${esc(item?.description||'')}</textarea></label><label class="sq-field"><span>분류</span><select name="category">${Object.entries(axCategories).map(([key,label])=>`<option value="${key}" ${item?.category===key?'selected':''}>${label}</option>`).join('')}</select></label><label class="sq-field"><span>${item?'새 배포 버전':'배포 버전'} *</span><input name="version" required maxlength="40" placeholder="${item?esc('현재 '+(item.version||'버전 미입력')+' · 예: 1.1.0'):'예: 1.0.0'}"></label></div>${axUploadArea()}<p class="sq-note">${item?'기존 카드의 파일을 새 버전으로 바꾸고, 업데이트 알림을 켠 사용자에게 소식을 전합니다.':'등록하면 사내 사용자가 바로 내려받을 수 있습니다. 선택한 파일 형식 그대로 배포됩니다.'}</p><div class="sq-actions"><button class="sq-primary">${item?'새 버전 등록':'파일 등록'}</button></div></form>`);
+ openModal(item?'새 버전 등록':'배포 파일 등록','AX Workspace · 관리자',`<form id="sq-ax-form"><div class="sq-form-grid"><label class="sq-field wide"><span>이름 *</span><input name="name" maxlength="100" required value="${esc(item?.name||'')}" placeholder="예: AX Workspace Windows 설치 파일"></label><label class="sq-field wide"><span>설명 *</span><textarea name="description" maxlength="2000" required placeholder="어떤 파일인지, 설치 전에 알아둘 내용을 적어주세요.">${esc(item?.description||'')}</textarea></label><label class="sq-field"><span>분류</span><select name="category">${Object.entries(axCategories).map(([key,label])=>`<option value="${key}" ${(item?axCategory(item.category):'workspace')===key?'selected':''}>${label}</option>`).join('')}</select></label><div class="sq-field"><span>배포 버전</span><output class="ws-ax-version">v${axNextRelease(item)} · 자동</output></div></div>${axUploadArea()}<p class="sq-note">${item?'기존 카드의 파일을 새 버전으로 바꾸고, 업데이트 알림을 켠 사용자에게 소식을 전합니다.':'등록하면 사내 사용자가 바로 내려받을 수 있습니다. 선택한 파일 형식 그대로 배포됩니다.'}</p><div class="sq-actions"><button class="sq-primary">${item?'새 버전 등록':'파일 등록'}</button></div></form>`);
 }
 // Keep browser streaming downloads intact. Only a later API read confirms auto-subscription.
 root.addEventListener('click',e=>{if(!e.target.closest('a[data-ax-download]'))return;clearTimeout(axDownloadTimer);axDownloadTimer=setTimeout(()=>refreshAxSubscriptions(true).catch(()=>{}),1500);});
@@ -102,6 +104,7 @@ root.addEventListener('submit',e=>{
  if(axUploadBusy||form.dataset.saved)return;
  if(!axFile){showError(Error('등록할 파일을 선택해 주세요.'));return;}
  const token=runtime.detailLoadToken,target=axVersionTarget,body=new FormData(),metadata=Object.fromEntries(new FormData(form));let errorToken=token;
+ delete metadata.version;
  if(target)metadata.expectedRevision=target.revision;body.append('metadata',JSON.stringify(metadata));body.append('file',axFile);
  axUploadBusy=true;form.querySelectorAll('button,input,textarea,select').forEach(x=>x.disabled=true);
  (async()=>{
