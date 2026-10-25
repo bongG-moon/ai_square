@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import zipfile
@@ -58,6 +59,78 @@ def test_operator_cli_works_without_checkout_and_output_matches_source_packager(
     with zipfile.ZipFile(ready) as archive:
         assert '암호화되지 않은' in archive.read('README.txt').decode()
         assert json.loads(archive.read('connection.json')) == {'schemaVersion': 1, 'baseUrl': 'http://square.company.example'}
+
+
+def _operator_copy(directory, files, *, server=None, output=None):
+    directory.mkdir()
+    for name, data in files.items():
+        if name == 'configure_server.py':
+            source = data.decode('utf-8')
+            for constant, value in [('SERVER_URL', server), ('OUTPUT_ZIP', output)]:
+                if value is not None:
+                    source, count = re.subn(
+                        rf'^{constant}\s*=.*$',
+                        lambda _match: constant + ' = ' + json.dumps(value),
+                        source, flags=re.M)
+                    assert count == 1, 'The operator-editable setting must be available.'
+            data = source.encode('utf-8')
+        (directory / name).write_bytes(data)
+    return directory / 'configure_server.py'
+
+
+def _run_operator(script, cwd, *arguments):
+    return subprocess.run([
+        sys.executable, '-I', '-B', '-X', 'utf8', str(script), *arguments,
+    ], cwd=cwd, capture_output=True, text=True, encoding='utf-8', timeout=20)
+
+
+def test_editable_settings_run_without_arguments_from_another_directory(tmp_path, distribution):
+    _, files = distribution
+    script = _operator_copy(tmp_path / 'operator', files,
+                            server='https://SQUARE.company.example:443/', output='configured.zip')
+    working = tmp_path / 'unrelated-working-directory'
+    working.mkdir()
+    result = _run_operator(script, working)
+    assert result.returncode == 0, result.stderr
+    ready = script.parent / 'configured.zip'
+    assert ready.is_file()
+    assert not list(working.iterdir())
+    with zipfile.ZipFile(io.BytesIO(files['extension-template.zip'])) as before, zipfile.ZipFile(ready) as after:
+        for name in before.namelist():
+            assert before.read(name) == after.read(name)
+        assert json.loads(after.read('connection.json'))['baseUrl'] == 'https://square.company.example'
+    unchanged = ready.read_bytes()
+    repeated = _run_operator(script, working)
+    assert repeated.returncode == 2
+    assert '이미' in repeated.stderr
+    assert ready.read_bytes() == unchanged
+
+
+def test_blank_editable_server_explains_setting_and_writes_nothing(tmp_path, distribution):
+    _, files = distribution
+    script = _operator_copy(tmp_path / 'operator', files)
+    before = {path.name: path.read_bytes() for path in script.parent.iterdir()}
+    result = _run_operator(script, tmp_path)
+    assert result.returncode == 2
+    assert 'SERVER_URL' in result.stderr
+    assert {path.name: path.read_bytes() for path in script.parent.iterdir()} == before
+    assert not (tmp_path / 'PNT-AI-Square-0.1.0-Extension.zip').exists()
+
+
+def test_explicit_cli_values_override_editable_settings_and_keep_cwd_output(tmp_path, distribution):
+    _, files = distribution
+    script = _operator_copy(tmp_path / 'operator', files,
+                            server='https://default.example', output='not-created.zip')
+    working = tmp_path / 'explicit-output-directory'
+    working.mkdir()
+    result = _run_operator(script, working,
+                           '--server-url', 'http://override.example', '--output', 'cli-ready.zip')
+    assert result.returncode == 0, result.stderr
+    assert '암호화되지 않은' in result.stdout
+    assert not (script.parent / 'not-created.zip').exists()
+    assert not (script.parent / 'cli-ready.zip').exists()
+    with zipfile.ZipFile(working / 'cli-ready.zip') as ready:
+        assert json.loads(ready.read('connection.json'))['baseUrl'] == 'http://override.example'
 
 
 def test_rebinding_preserves_manifest_payload_and_refuses_overwrite(tmp_path):

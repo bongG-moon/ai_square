@@ -5,6 +5,19 @@ or personal configuration is accessed. Run from a trusted distribution bundle.
 """
 from __future__ import annotations
 
+# ── 여기 두 항목만 수정한 뒤 `python configure_server.py`로 실행하세요. ──
+# 1. 사용자가 브라우저로 접속하는 웹 서버 주소를 따옴표 안에 입력하세요.
+#    예: "https://square.company.example" 또는 로컬 시험용 "http://127.0.0.1:8000"
+#    서버 실행 주소인 0.0.0.0, 개인 KEY, 비밀번호, /뒤의 페이지 경로는 넣지 않습니다.
+#    HTTP 주소도 가능하지만, 연결 시 KEY가 암호화되지 않으므로 앱에서 확인합니다.
+SERVER_URL = ""
+
+# 2. 완성될 설치용 ZIP 이름입니다. 보통은 아래 이름을 그대로 사용하면 됩니다.
+#    이 Python 파일과 같은 폴더에 생성됩니다. 기존 파일은 덮어쓰지 않습니다.
+#    생성된 ZIP만 사내 웹에 업로드하세요. 사용자는 이 ZIP을 앱에서 가져옵니다.
+OUTPUT_ZIP = "PNT-AI-Square-0.1.0-Extension.zip"
+# ── 아래 코드는 수정하지 않아도 됩니다. ──
+
 import argparse
 import hashlib
 import io
@@ -262,19 +275,24 @@ def configure(template, target, origin, *, expected_sha256=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--server-url', required=True, help='사용자가 접속하는 HTTP(S) 서버 기본 주소')
-    parser.add_argument('--output', type=Path, required=True, help='새로 생성할 사용자 설치 ZIP')
+    parser.add_argument('--server-url', default=SERVER_URL, help='생략하면 파일 상단의 SERVER_URL 사용')
+    parser.add_argument('--output', type=Path, help='생략하면 이 파일 옆에 OUTPUT_ZIP 이름으로 생성')
     parser.add_argument('--template', type=Path, default=Path(__file__).resolve().with_name('extension-template.zip'))
     args = parser.parse_args()
     try:
+        if not args.server_url:
+            raise ValueError('파일 상단의 SERVER_URL = ""에 웹 서버 주소를 입력한 뒤 다시 실행하세요. 예: https://square.company.example')
+        # 명령행 옵션을 쓸 때는 기존 동작을 유지하고, 옵션이 없으면 위 설정을 씁니다.
+        target = args.output if args.output is not None else Path(__file__).resolve().parent / OUTPUT_ZIP
         checksum_path = args.template.with_suffix(args.template.suffix + '.sha256')
         if checksum_path.stat().st_size > 128:
             raise ValueError('template SHA256 파일이 올바르지 않습니다.')
         checksum = checksum_path.read_text(encoding='ascii').strip()
-        result = configure(args.template, args.output, args.server_url, expected_sha256=checksum)
+        result = configure(args.template, target, args.server_url, expected_sha256=checksum)
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
         parser.exit(2, str(error) + '\n')
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    print('생성된 설치 ZIP: ' + str(target.resolve()))
     if result['baseUrl'].startswith('http:'):
         print('주의: HTTP에서는 개인 KEY가 암호화되지 않은 통신으로 전송됩니다. 사용자가 앱에서 확인해야 합니다.')
     print('지정한 서버에 접속하거나 업로드하지 않았습니다. 생성된 ZIP을 직접 등록하세요.')

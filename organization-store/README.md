@@ -41,11 +41,13 @@ P&T AI Square는 스킬과 기능처럼 본문을 사용하는 전용 화면입�
 
 서버 주소는 **배포자**가 `package_for_upload.py --server-url <서버 기본 주소>`로 지정합니다. 확장 코드·`extension.json`·`connection.json`·설치 안내를 한 ZIP으로 만들며 별도 설치 EXE는 포함하지 않습니다. 주소 파일은 `{"schemaVersion": 1, "baseUrl": "http://pntaisquare.company.example"}` 형식입니다. 서버 실행 주소 `0.0.0.0` 대신 사용자가 접속하는 주소를 사용하고 KEY·쿠키·MongoDB 접속 정보를 넣지 않습니다. 사내 주소가 포함된 ZIP은 사내 배포용으로 관리하고 공개 Git에 올리지 않습니다. ZIP 전체를 원본 그대로 등록하세요.
 
-Git 릴리즈에서 받은 **`PNT-AI-Square-0.1.0-Distribution.zip`**은 서버 주소가 없는 관리자용 준비 자료입니다. 전체를 풀고 아래 명령으로 실제 서버 주소를 지정한 **`Extension.zip`**을 만든 다음, 이 최종 ZIP을 웹에 등록합니다. Python 3.10 이상 표준 라이브러리만 사용하며 소스 저장소·vendor·추가 패키지·네이티브 빌드 도구는 필요하지 않습니다.
+Git 릴리즈에서 받은 **`PNT-AI-Square-0.1.0-Distribution.zip`**은 서버 주소가 없는 관리자용 준비 자료입니다. 전체를 풀고 **`configure_server.py` 상단의 `SERVER_URL`**에 실제 서버 주소를 입력하세요. 한국어 주석 아래의 `OUTPUT_ZIP`은 생성할 파일명이며 기본값을 그대로 사용해도 됩니다. 저장한 뒤 아래 한 줄로 **`Extension.zip`**을 만들고 이 최종 ZIP을 웹에 등록합니다. Python 3.10 이상 표준 라이브러리만 사용하며 소스 저장소·vendor·추가 패키지·네이티브 빌드 도구는 필요하지 않습니다.
 
 ```powershell
-python configure_server.py --server-url 'https://square.company.example' --output 'PNT-AI-Square-0.1.0-Extension.zip'
+python configure_server.py
 ```
+
+생성된 ZIP은 Python 파일과 같은 폴더에 놓입니다. 주소를 비워 두면 수정할 위치를 안내하고 종료합니다. 기존 `--server-url`·`--output` 옵션도 유지하며, 지정한 옵션이 파일 상단 설정보다 우선합니다. 명시적으로 `--output`에 상대 경로를 주면 기존처럼 실행한 폴더를 기준으로 합니다.
 
 `Distribution.zip` 자체를 사용자 설치 파일로 올리지 않습니다. 도우미는 동봉 template의 전체 SHA256과 각 payload 파일·경로·빌드 해시를 검증하고, 실행 코드는 그대로 유지한 채 주소·등록 정보·안내만 새 ZIP에 넣습니다. 압축 해제·payload 실행·서버 접속·개인 프로필 변경을 하지 않고 기존 출력 파일을 덮어쓰지 않습니다. HTTP 전송 주의 안내를 최종 ZIP과 실행 결과에 표시합니다. 해시는 전자서명이 아니므로 Git 릴리즈의 출처와 공개 체크섬을 함께 확인하세요. 상세 절차는 [DISTRIBUTION_README.txt](DISTRIBUTION_README.txt)를 따릅니다.
 

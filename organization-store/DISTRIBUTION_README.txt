@@ -1,7 +1,7 @@
 P&T AI Square — 관리자용 확장 배포 자료
 
 이 Distribution.zip은 관리자가 서버 주소를 지정하는 준비 자료입니다.
-사용자가 설치할 파일은 아래 명령으로 생성하는 Extension.zip입니다.
+사용자가 설치할 파일은 아래 절차로 생성하는 Extension.zip입니다.
 이 자료에는 사내 서버 주소, 개인 KEY, MongoDB 접속 정보가 없습니다.
 
 1. 관리자가 준비할 것
@@ -11,9 +11,20 @@ P&T AI Square — 관리자용 확장 배포 자료
 - extension-template.zip과 .sha256은 풀거나 수정하지 않고 그대로 둡니다.
 
 2. 서버 주소를 넣은 최종 ZIP 만들기
-압축을 푼 폴더에서 아래 예시 주소를 실제 접속 주소로 바꾸어 실행하세요.
+configure_server.py를 메모장 또는 VS Code로 열어 파일 상단의 두 항목을 확인하세요.
+한국어 주석이 있는 설정 부분만 수정하면 됩니다.
 
-python configure_server.py --server-url "https://square.company.example" --output "PNT-AI-Square-0.1.0-Extension.zip"
+SERVER_URL = "https://square.company.example"  # 실제로 접속할 웹 서버 주소로 변경
+OUTPUT_ZIP = "PNT-AI-Square-0.1.0-Extension.zip"  # 기본 파일명은 그대로 사용 가능
+
+파일을 저장한 뒤 압축을 푼 폴더에서 아래 한 줄만 실행하세요.
+
+python configure_server.py
+
+- 완성된 Extension.zip은 configure_server.py와 같은 폴더에 생성됩니다.
+- SERVER_URL을 비워 두면 수정할 위치를 안내하고 파일을 만들지 않습니다.
+- 자동화에 쓰던 --server-url 및 --output 옵션도 그대로 지원하며, 지정한 옵션이 파일 상단 설정보다 우선합니다.
+- --output으로 상대 경로를 지정한 경우에는 기존처럼 명령을 실행한 폴더를 기준으로 합니다.
 
 - 서버를 실행할 때 사용하는 0.0.0.0 대신 사용자가 접속하는 주소를 입력합니다.
 - HTTP 또는 HTTPS 기본 주소만 허용합니다. 사용자명, 비밀번호, 경로, 쿼리, KEY를 넣지 않습니다.
