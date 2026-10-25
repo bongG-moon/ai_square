@@ -490,7 +490,7 @@ def grants(tid):
         user=department_access.employee(profile or {'_id':access['user']})
         rows.append(dict(user,requestId=access['_id'],source=access.get('source','신청'),
                          enabled=bool(profile and profile.get('enabled',True)),
-                         inheritedDepartments=[dict(id=rule['id'],name=rule['name'],code=rule['code'])
+                         inheritedDepartments=[{field:rule[field] for field in ('id','name','code','match') if field in rule}
                              for rule in t.get('departmentGrants',[])
                              if profile and department_access.group_matches(rule,profile)]))
     return jsonify(users=rows,departments=department_access.department_rules(t),revision=t['revision'])
@@ -502,10 +502,9 @@ def preview_grants(tid):
         users,unknown=department_access.resolve_employees(department_access.employee_ids(value))
         return jsonify(mode=mode,users=users,unknown=unknown,count=len(users))
     if mode!='department': raise BadRequest('사번 또는 부서 검색을 선택해 주세요.')
-    if len(value)>200: raise BadRequest('부서 이름 또는 코드는 200자 이내로 입력해 주세요.')
-    term=value.casefold()
-    rows=[row for row in department_access.departments() if term in row['name'].casefold() or term in row['code'].casefold()]
-    return jsonify(mode=mode,departments=rows[:30],count=len(rows),truncated=len(rows)>30)
+    input_mode=raw.get('departmentInput','search')
+    rows,count=department_access.preview_departments(value,input_mode)
+    return jsonify(mode=mode,departmentInput=input_mode,departments=rows,count=count,truncated=count>len(rows))
 
 @api.post('/api/tools/<int:tid>/grants/departments')
 def grant_departments(tid):

@@ -246,3 +246,162 @@ def test_department_primary_failure_is_not_hidden_and_followup_failure_is_deferr
     with app.app_context():
         saved = db().tools.find_one({'_id': 1})
         assert saved['departmentGrants'][0]['code'] == 'A' and saved['outbox']
+
+
+def test_department_comma_parser_preserves_interior_spaces_and_case():
+    assert department_access.department_values('  P&T  기술팀 , 장비 팀 ,P&T  기술팀, ', 'name') == ['P&T  기술팀', '장비 팀']
+    assert department_access.department_values(' D  01 , d  01 ', 'code') == ['D  01', 'd  01']
+    assert department_access.department_values('A;B\nC，D', 'name') == ['A;B\nC，D']
+    assert department_access.department_values('A,' * 70, 'code') == ['A']
+    for value, mode in [(', ,', 'name'), ('A', 'invalid'), ('A', {}), ('A', []), (','.join(str(i) for i in range(51)), 'code'),
+                        ('x' * 101, 'code'), ('x' * 201, 'name'), (' ' * 12001, 'name')]:
+        with pytest.raises(BadRequest): department_access.department_values(value, mode)
+
+
+def test_direct_codes_preview_unknown_departments_and_future_login(app):
+    owner, h = setup_private(app)
+    department(app, 'member', '알려진 팀', 'KNOWN')
+    preview = owner.post('/api/tools/1/grants/preview', json={
+        'mode': 'department', 'departmentInput': 'code', 'value': ' KNOWN, FUTURE  01 , KNOWN, '}, headers=h)
+    assert preview.status_code == 200 and preview.json['count'] == 2
+    rows = preview.json['departments']
+    assert [(r['code'], r['name'], r['memberCount'], r['match']) for r in rows] == [
+        ('KNOWN', '알려진 팀', 1, 'code'), ('FUTURE  01', 'FUTURE  01', 0, 'code')]
+    result = owner.post('/api/tools/1/grants/departments', json={'departments': rows}, headers=h)
+    assert result.status_code == 200
+    rules = owner.get('/api/tools/1/grants').json['departments']
+    future = next(r for r in rules if r['code'] == 'FUTURE  01')
+    assert future['match'] == 'code' and future['memberCount'] == 0
+    newcomer, _ = ready(app, 'newcomer')
+    assert newcomer.get('/api/tools/1').status_code == 403
+    department(app, 'newcomer', '새 팀', 'FUTURE  01')
+    assert newcomer.get('/api/tools/1').status_code == 200
+    assert newcomer.get('/download/1/1').status_code == 200
+    changed = next(r for r in owner.get('/api/tools/1/grants').json['departments'] if r['id'] == future['id'])
+    assert changed['name'] == '새 팀' and changed['memberCount'] == 1
+    department(app, 'newcomer', '새 팀', 'future  01')
+    assert newcomer.get('/api/tools/1').status_code == 403
+    department(app, 'newcomer', '새 팀', 'FUTURE 01')
+    assert newcomer.get('/api/tools/1').status_code == 403
+
+
+def test_pre_registered_code_authorizes_first_real_sso_login(app):
+    owner, h = setup_private(app)
+    response = owner.post('/api/tools/1/grants/departments', json={
+        'departments': [{'code': 'FUTURE  01', 'match': 'code'}]}, headers=h)
+    assert response.status_code == 200
+    with app.app_context(): assert db().users.find_one({'_id': 'first-login'}) is None
+    original_factory = app.config['SSO_FACTORY']
+    class FutureDepartmentSSO(original_factory):
+        def get_sso_info(self, cookie):
+            if self.uid == 'first-login':
+                return (self.uid, '새 구성원', '', '새 팀', '', 'FUTURE  01')
+            return super().get_sso_info(cookie)
+    app.config['SSO_FACTORY'] = FutureDepartmentSSO
+    newcomer, _ = ready(app, 'first-login')
+    with app.app_context():
+        profile = db().users.find_one({'_id': 'first-login'})
+        assert profile['dept'] == '새 팀' and profile['dept_cd'] == 'FUTURE  01'
+    assert newcomer.get('/api/tools/1').status_code == 200
+    assert newcomer.get('/download/1/1').status_code == 200
+    assert newcomer.get('/api/bootstrap').json['items'][0]['access'] == 'approved'
+
+
+def test_explicit_name_rule_is_distinct_from_legacy_fallback_and_keeps_match(app):
+    owner, h = setup_private(app)
+    member, _ = ready(app, 'member')
+    other, _ = ready(app, 'other')
+    department(app, 'member', '기술  연구팀', '')
+    department(app, 'other', '기술  연구팀', 'CODE')
+    assert owner.post('/api/tools/1/grants/departments', json={'departments': [{'code': '', 'name': '기술  연구팀'}]}, headers=h).status_code == 200
+    legacy = owner.get('/api/tools/1/grants').json['departments'][0]
+    assert other.get('/api/tools/1').status_code == 403
+    assert other.get('/api/bootstrap').json['items'][0]['access'] == 'none'
+    preview = owner.post('/api/tools/1/grants/preview', json={
+        'mode': 'department', 'departmentInput': 'name', 'value': ' 기술  연구팀 , 미래 팀 '}, headers=h)
+    assert preview.status_code == 200
+    rows = preview.json['departments']
+    assert rows[0]['memberCount'] == 2 and rows[1]['memberCount'] == 0
+    assert rows[0]['id'] != legacy['id'] and all(r['match'] == 'name' for r in rows)
+    owner.post('/api/tools/1/grants/departments', json={'departments': rows}, headers=h)
+    assert other.get('/api/tools/1').status_code == 200
+    catalog = other.get('/api/bootstrap').json['items'][0]
+    assert catalog['access'] == 'approved' and catalog['guide'] == 'SECRET INSTALL GUIDE' and catalog['versions']
+    owner.post('/api/tools/1/grants', json={'user': 'other'}, headers=h)
+    grants = owner.get('/api/tools/1/grants').json
+    assert grants['users'][0]['inheritedDepartments'][0]['match'] == 'name'
+    explicit = next(r for r in grants['departments'] if r.get('match') == 'name' and r['name'] == '기술  연구팀')
+    owner.post('/api/requests/1:other/decision', json={'status': '회수', 'reason': '시험'}, headers=h)
+    assert other.get('/api/tools/1').status_code == 200
+    assert owner.delete('/api/tools/1/grants/departments/'+explicit['id'], headers=h).status_code == 200
+    assert other.get('/api/tools/1').status_code == 403
+    catalog = other.get('/api/bootstrap').json['items'][0]
+    assert catalog['access'] == 'none' and not catalog['guide'] and not catalog['versions']
+    assert member.get('/api/tools/1').status_code == 200
+    department(app, 'other', '미래 팀', 'FUTURE')
+    assert other.get('/api/tools/1').status_code == 200
+    department(app, 'other', '미래  팀', 'FUTURE')
+    assert other.get('/api/tools/1').status_code == 403
+
+
+def test_multiple_department_search_terms_union_candidates_without_writes(app):
+    owner, h = setup_private(app)
+    department(app, 'member', '제조 기술팀', 'D1')
+    department(app, 'other', '분석 연구팀', 'D2')
+    preview = owner.post('/api/tools/1/grants/preview', json={
+        'mode': 'department', 'value': ' 제조 기술 , d2, 제조 기술, 없는팀 '}, headers=h)
+    assert preview.status_code == 200 and preview.json['departmentInput'] == 'search'
+    assert {r['code'] for r in preview.json['departments']} == {'D1', 'D2'}
+    assert preview.json['count'] == 2
+    with app.app_context(): assert not db().tools.find_one({'_id': 1}).get('departmentGrants')
+    assert owner.post('/api/tools/1/grants/departments', json={'departments': [{'code': 'UNKNOWN', 'name': '없음'}]}, headers=h).status_code == 400
+
+
+@pytest.mark.parametrize('item', [
+    {'code': 'A', 'name': '팀', 'match': 'name'},
+    {'code': '', 'name': '', 'match': 'name'},
+    {'code': '', 'name': '팀', 'match': 'code'},
+    {'code': 'A,B', 'match': 'code'},
+    {'name': '팀A,팀B', 'match': 'name'},
+    {'code': 'A', 'match': 'invalid'},
+    {'code': 'A', 'match': None},
+    {'code': 'A', 'match': []},
+    {'code': 'A', 'match': {}},
+    {'code': 'x' * 101, 'match': 'code'},
+    {'name': 'x' * 201, 'match': 'name'},
+])
+def test_direct_department_rule_validation_still_precedes_writes(app, item):
+    owner, h = setup_private(app)
+    result = owner.post('/api/tools/1/grants/departments', json={'departments': [item]}, headers=h)
+    assert result.status_code == 400
+    with app.app_context(): assert not db().tools.find_one({'_id': 1}).get('departmentGrants')
+
+
+def test_direct_department_total_limit_and_revision_remain_enforced(app):
+    owner, h = setup_private(app)
+    rules = [{'code': f'FUTURE-{i}', 'match': 'code'} for i in range(50)]
+    assert owner.post('/api/tools/1/grants/departments', json={'departments': rules, 'expectedRevision': 1}, headers=h).status_code == 200
+    assert len(owner.get('/api/tools/1/grants').json['departments']) == 50
+    extra = {'departments': [{'name': '추가 팀', 'match': 'name'}]}
+    assert owner.post('/api/tools/1/grants/departments', json=extra, headers=h).status_code == 400
+    assert owner.post('/api/tools/1/grants/departments', json={'departments': rules[:1], 'expectedRevision': 1}, headers=h).status_code == 409
+
+
+@pytest.mark.parametrize('mode', [[], {}, None, 1, True])
+def test_invalid_department_input_mode_returns_400(app, mode):
+    owner, h = setup_private(app)
+    result = owner.post('/api/tools/1/grants/preview', json={
+        'mode': 'department', 'departmentInput': mode, 'value': 'TEAM'}, headers=h)
+    assert result.status_code == 400
+
+
+def test_direct_department_rules_still_require_browser_manager_auth(app):
+    owner, h = setup_private(app)
+    other, oh = ready(app, 'other')
+    value = {'departments': [{'code': 'FUTURE', 'match': 'code'}]}
+    assert other.post('/api/tools/1/grants/departments', json=value, headers=oh).status_code == 403
+    assert owner.post('/api/tools/1/grants/departments', json=value).status_code == 403
+    key = owner.post('/api/local-tokens', json={'name': 'test', 'scope': 'publish'}, headers=h).json['token']
+    bearer = {'Authorization': 'Bearer '+key}
+    assert owner.post('/api/tools/1/grants/departments', json=value, headers=bearer).status_code == 403
+    assert owner.post('/api/tools/1/grants/preview', json={'mode': 'department', 'departmentInput': 'code', 'value': 'FUTURE'}, headers=bearer).status_code == 403

@@ -28,11 +28,12 @@ function setup(){
  const state=()=>vm.runInContext('grantState',context);
  function input(value){listeners.input[0]({target:{value,matches:selector=>selector==='[data-grant-input]'}});}
  function select(key,checked=true){listeners.change[0]({target:{checked,dataset:{grantSelect:key},matches:selector=>selector==='[data-grant-select]'}});}
+ function departmentInput(value){listeners.change[0]({target:{value,matches:selector=>selector==='[data-grant-department-input]'}});}
  async function open(result=snapshot){const pending=context.openGrantManager(7);requests.at(-1).resolve(result);await pending;return state();}
  function preview(value){input(value);const pending=context.previewGrantTargets(state());return {pending,request:requests.at(-1)};}
  async function people(rows=employees,unknown=[]){const next=preview(rows.map(row=>row.id).join(', '));next.request.resolve({mode:'users',users:rows,unknown});await next.pending;}
  function replaceDialog(){context.openModal('새 작업','', '<p>NEW DIALOG</p>');}
- return {context,nodes,requests,errors,opened,confirmations,listeners,state,input,select,open,preview,people,replaceDialog,
+ return {context,nodes,requests,errors,opened,confirmations,listeners,state,input,select,departmentInput,open,preview,people,replaceDialog,
   html:()=>nodes['#sq-dialog-body'].innerHTML,saveButton:nodes['#ws-grant-save']};
 }
 
@@ -81,7 +82,7 @@ test('changing mode discards selected people and ignores the previous mode respo
  h.context.actions['grant-mode']({dataset:{mode:'department'}});
  old.request.resolve({mode:'users',users:employees,unknown:[]});await old.pending;
  assert.equal(h.state().mode,'department');assert.equal(h.state().preview,null);assert.equal(h.state().selected.size,0);assert.equal(h.state().value,'');
- assert.equal(h.saveButton.disabled,true);assert.match(h.html(),/팀명 또는 부서 코드/);
+ assert.equal(h.saveButton.disabled,true);assert.match(h.html(),/부서 코드 여러 개/);
 });
 
 test('closed or replaced dialogs ignore late preview success and failure',async()=>{
@@ -130,8 +131,8 @@ test('a late save response cannot alter or close a newer dialog',async()=>{
 });
 
 test('same-name departments start unchecked and only an explicitly selected department code is saved',async()=>{
- const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});const p=h.preview('기술팀');
- assert.deepEqual(plain(p.request.body),{mode:'department',value:'기술팀'});p.request.resolve({mode:'department',departments,count:2,truncated:false});await p.pending;
+ const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});h.departmentInput('search');const p=h.preview('기술팀');
+ assert.deepEqual(plain(p.request.body),{mode:'department',value:'기술팀',departmentInput:'search'});p.request.resolve({mode:'department',departments,count:2,truncated:false});await p.pending;
  assert.equal(h.state().selected.size,0);assert.equal(h.saveButton.disabled,true);assert.match(h.html(),/부서 코드 D1/);assert.match(h.html(),/부서 코드 D2/);
  h.select('code:D2');assert.equal(h.saveButton.disabled,false);assert.equal(h.saveButton.textContent,'선택한 1개 부서 추가');
  const save=h.context.saveGrantTargets(),post=h.requests.at(-1);
@@ -143,6 +144,53 @@ test('same-name departments start unchecked and only an explicitly selected depa
 test('a forged or unselected checkbox value cannot become a grant target',async()=>{
  const h=setup();await h.open();await h.people([employees[0]]);h.select('1001',false);h.select('OTHER');
  assert.equal(h.saveButton.disabled,true);const before=h.requests.length;await h.context.saveGrantTargets();assert.equal(h.requests.length,before);
+});
+
+test('new department codes with no users are reviewed together and saved with their matching mode',async()=>{
+ const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});
+ assert.equal(h.state().departmentInput,'code');
+ const p=h.preview('  D001 ,  D 002  ');
+ assert.deepEqual(plain(p.request.body),{mode:'department',departmentInput:'code',value:'D001 ,  D 002'});
+ const rows=[{id:'a',code:'D001',name:'D001',match:'code',memberCount:0},{id:'b',code:'D 002',name:'D 002',match:'code',memberCount:0}];
+ p.request.resolve({mode:'department',departments:rows,count:2,truncated:false});await p.pending;
+ assert.equal(h.saveButton.disabled,false);assert.equal(h.saveButton.textContent,'선택한 2개 부서 추가');assert.match(h.html(),/플랫폼 등록 0명/);
+ const save=h.context.saveGrantTargets(),post=h.requests.at(-1);
+ assert.deepEqual(plain(post.body),{departments:rows.map(({code,name,match})=>({code,name,match})),expectedRevision:4});
+ // A matching-mode change cannot reinterpret the reviewed batch during a write.
+ h.departmentInput('name');assert.equal(h.state().departmentInput,'code');
+ post.resolve({ok:true,revision:5,departments:rows});await tick();h.requests.at(-1).resolve({...snapshot,revision:5,departments:rows});await save;
+ assert.equal(h.state().preview,null);assert.match(h.html(),/D 002/);assert.equal(h.state().snapshot.revision,5);
+});
+
+test('direct names preserve internal spaces and save exact-name semantics without inferred codes',async()=>{
+ const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});h.departmentInput('name');
+ const p=h.preview(' 제조  기술팀, 품질 분석팀 ');
+ assert.deepEqual(plain(p.request.body),{mode:'department',departmentInput:'name',value:'제조  기술팀, 품질 분석팀'});
+ const rows=[{id:'name-a',code:'',name:'제조  기술팀',match:'name',memberCount:2},{id:'name-b',code:'',name:'품질 분석팀',match:'name',memberCount:0}];
+ p.request.resolve({mode:'department',departments:rows});await p.pending;
+ assert.match(h.html(),/같은 SSO 부서명을 가진 모든 구성원/);assert.match(h.html(),/SSO 부서명 정확히 일치/);
+ h.select('name:품질 분석팀',false);
+ const save=h.context.saveGrantTargets(),post=h.requests.at(-1);
+ assert.deepEqual(plain(post.body),{departments:[{code:'',name:'제조  기술팀',match:'name'}],expectedRevision:4});
+ post.resolve({ok:true,revision:5});await tick();h.requests.at(-1).resolve({...snapshot,revision:5,departments:[rows[0]]});await save;
+ assert.match(h.html(),/제조  기술팀/);assert.match(h.html(),/SSO 부서명 정확히 일치/);
+});
+
+test('switching department input invalidates earlier previews and rejects late success or error',async()=>{
+ for(const failure of [false,true]){
+  const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});
+  const p=h.preview('D001');h.departmentInput('name');
+  failure?p.request.reject(Error('stale result')):p.request.resolve({mode:'department',departments:[{code:'D001',name:'D001',match:'code'}]});await p.pending;
+  assert.equal(h.state().departmentInput,'name');assert.equal(h.state().value,'');assert.equal(h.state().preview,null);assert.equal(h.saveButton.disabled,true);assert.equal(h.state().notice,'');
+ }
+});
+
+test('multiple search terms remain an explicit selection and show truncated result counts',async()=>{
+ const h=setup();await h.open();h.context.actions['grant-mode']({dataset:{mode:'department'}});h.departmentInput('search');
+ const p=h.preview(' 기술팀, 제조 팀 ');
+ assert.deepEqual(plain(p.request.body),{mode:'department',departmentInput:'search',value:'기술팀, 제조 팀'});
+ p.request.resolve({mode:'department',departments,count:80,truncated:true});await p.pending;
+ assert.equal(h.state().selected.size,0);assert.equal(h.saveButton.disabled,true);assert.match(h.html(),/검색 결과 80개 중 2개/);
 });
 
 test('employee, department and error strings are escaped in rendering and data attributes',async()=>{
