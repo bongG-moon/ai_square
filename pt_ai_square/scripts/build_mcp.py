@@ -1,7 +1,8 @@
-"""Build the reviewed local MCP source ZIP without credentials or environments."""
+"""Build the local MCP source ZIP and refresh its web installation guide."""
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 import hashlib
+import shutil
 
 ROOT=Path(__file__).resolve().parents[1]
 source=ROOT/'integrations/pt-square-mcp'
@@ -19,3 +20,6 @@ with ZipFile(target,'w',ZIP_DEFLATED) as archive:
         info.compress_type=ZIP_DEFLATED;info.external_attr=0o100644<<16
         archive.writestr(info,p.read_bytes())
 print(f'Local MCP ZIP: {len(paths)} files · sha256={hashlib.sha256(target.read_bytes()).hexdigest()}')
+guide=ROOT/'docs/MCP_LOCAL_GUIDE.html'
+shutil.copyfile(guide,ROOT/'static/guides/MCP_LOCAL_GUIDE.html')
+print('Local MCP web guide copied from docs/MCP_LOCAL_GUIDE.html')

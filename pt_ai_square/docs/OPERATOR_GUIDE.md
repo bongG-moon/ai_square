@@ -262,7 +262,9 @@ P&T AI Square 연결 확장의 직접 등록 예시는 **배포자: 서버 주�
 
 조회수는 `POST /api/tools/{id}/view`에 빈 JSON `{}`을 보냈을 때 기록합니다. 같은 사번·도구당 웹과 연결 프로그램을 합쳐 30분에 한 번만 집계하며 MongoDB `activity_state`에 사용자·도구별 상태 문서 하나를 유지합니다. 검색·상세 정보 GET·설치 계획 조회는 조회수를 기록하지 않고, 조회수는 좋아요·다운로드 기반 순위 점수에 더하지 않습니다.
 
-웹의 **열쇠 아이콘** 페이지는 먼저 AX Workspace 자료실에서 연결 프로그램을 찾도록 안내합니다. 기존 로컬 MCP와 다운로드용 Skill은 접힌 보조 연결 안내를 펼쳐 사용할 수 있습니다. 그 안의 **로컬 MCP 받기**는 로그인한 사용자의 다운로드 요청에 맞춰 서버 주소가 포함된 ZIP을 제공합니다. `GET /local-access/mcp.zip`과 기존 `/static/guides/pt-square-mcp.zip` 웹 주소는 같은 다운로드 처리를 사용합니다. 저장소에 보관하는 공통 ZIP 자체는 변경하지 않고, 응답 ZIP의 `pt-square-mcp/connection.json`에 `schemaVersion: 1`, `baseUrl`만 추가합니다. KEY·사번·쿠키·MongoDB 접속 정보는 넣지 않습니다. 응답은 개인 캐시에 남지 않도록 `private, no-store`로 제공하며 KEY API의 허용 목록은 늘리지 않습니다.
+웹의 **열쇠 아이콘 → 내 PC에서 시작하기**에는 **확장 프로그램으로 연결하기**와 **MCP로 연결하기**를 위아래로 항상 표시합니다. 확장 프로그램은 관리자 등록 자료가 있는 AX Workspace 탭으로 안내하고, MCP에는 **로컬 MCP 받기**와 **MCP 설치 안내서**를 제공합니다. Skill 연결 안내는 이 페이지에서 제거하지만 웹 상단의 배포 Skill과 기존 Skill 패키지·기능은 유지합니다. MCP 설치는 Python 3.11 이상과 지원 AI 준비 → 웹 ZIP 다운로드·압축 해제 → `Connect.cmd`에서 KEY 연결 → AI에 최초 한 번 MCP 등록 → `connection_status`로 계정 인증 확인 순서이며, Connect가 AI 등록까지 수행하지 않는다는 점을 안내합니다.
+
+**로컬 MCP 받기**는 로그인한 사용자의 다운로드 요청에 맞춰 서버 주소가 포함된 ZIP을 제공합니다. `GET /local-access/mcp.zip`과 기존 `/static/guides/pt-square-mcp.zip` 웹 주소는 같은 다운로드 처리를 사용합니다. 저장소에 보관하는 공통 ZIP 자체는 변경하지 않고, 응답 ZIP의 `pt-square-mcp/connection.json`에 `schemaVersion: 1`, `baseUrl`만 추가합니다. KEY·사번·쿠키·MongoDB 접속 정보는 넣지 않습니다. 응답은 개인 캐시에 남지 않도록 `private, no-store`로 제공하며 KEY API의 허용 목록은 늘리지 않습니다.
 
 기본 연결 주소는 현재 웹 요청의 HTTP(S) 주소를 사용합니다. 다운로드 쿼리나 `X-Forwarded-Host`, `X-Forwarded-Proto` 값을 직접 신뢰하지 않습니다. 역방향 프록시의 내부 주소와 사용자가 접속하는 외부 주소가 다를 때만 운영자가 기존 `runtime_config.py`에 선택 설정 `PTAI_PUBLIC_URL`을 추가합니다. 값에는 실제 사용자 접속 주소의 `http://` 또는 `https://`, 호스트, 필요한 포트까지만 넣고 경로·쿼리·인증정보는 넣지 않습니다. 기본값은 빈 문자열이며 현재 배포 주소가 정상적으로 들어간다면 새 설정은 필요 없습니다. 이 값은 로컬 MCP 다운로드에 포함할 연결 주소를 지정하며 웹 실행 포트나 진입점을 바꾸지 않습니다. AX Workspace 자료실에 등록한 파일에는 적용되지 않습니다.
 

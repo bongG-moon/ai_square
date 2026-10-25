@@ -24,15 +24,25 @@ body{margin:0;color:#1d1d1f}
 .local-card p{color:var(--local-muted);line-height:1.65}
 .local-connect-card{display:flex;flex-direction:column}
 .local-connect-intro{margin-top:12px!important;font-size:13px}
-.local-connect-card .local-app-steps{gap:20px;margin:5px 0 26px}
-.local-connect-card .local-app-steps li{grid-template-columns:26px minmax(0,1fr);gap:12px}
-.local-connect-card .local-app-steps li::before{width:26px;height:26px;font-size:11px;background:#f3f6fc;border-color:#e3e9f4}
-.local-connect-card .local-app-steps strong{font-size:13px}
-.local-connect-card .local-app-steps p{font-size:12px;line-height:1.7}
-.local-other-connections{margin-top:auto;padding-top:22px}
-.local-other-connections>h3{font-size:12px;font-weight:600;color:#747b89}
-.local-mcp-setup{margin-top:18px}
-.local-mcp-setup>p{font-size:12px;margin-top:10px}
+.local-connection-section{margin-top:24px}
+.local-connection-section+.local-connection-section{border-top:1px solid var(--local-line);padding-top:26px;margin-top:26px}
+.local-method-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.local-connect-card .local-method-heading h3{font-size:15px;font-weight:650;line-height:1.5}
+.local-method-heading>span{font-size:10px;color:#6f7d9b;background:#f1f4fa;padding:4px 8px;border-radius:7px}
+.local-method-intro{font-size:12px;margin-top:7px!important}
+.local-prerequisite{font-size:11px;margin-top:13px!important;line-height:1.7}
+.local-prerequisite strong{font-weight:500;color:#555f73;margin-left:6px}
+.local-connect-card .local-connection-section .local-connect-steps{gap:17px;margin:18px 0 0}
+.local-connect-card .local-connection-section .local-connect-steps li{grid-template-columns:24px minmax(0,1fr);gap:11px}
+.local-connect-card .local-connection-section .local-connect-steps li::before{width:24px;height:24px;font-size:10px;background:#f5f7fc;border-color:#e3e9f4}
+.local-connect-card .local-connection-section .local-connect-steps strong{font-size:12px}
+.local-connect-card .local-connection-section .local-connect-steps p{font-size:12px;line-height:1.7}
+.local-guide-link{display:flex;align-items:center;gap:10px;margin-top:22px;padding:13px 14px;border:1px solid #e5e9f2;border-radius:12px;background:#fafbfe}
+.local-guide-link:hover{background:#f3f6fc;border-color:#d8e0f1}
+.local-guide-link>svg{width:20px;height:20px}
+.local-guide-link strong{font-size:12px;font-weight:600;display:block}
+.local-guide-link small{font-size:11px;color:#7b8497;display:block;margin-top:3px}
+.local-connection-note{font-size:11px;margin-top:12px!important}
 .local-key-state,.local-history-state{display:inline-flex;flex:none;align-items:center;gap:6px;padding:5px 10px;border-radius:99px;background:#f4f4f6;color:#74747c;font-size:11px;line-height:1.5;font-weight:500}
 .local-key-state::before{content:'';width:5px;height:5px;background:currentColor;border-radius:50%}
 .local-key-state[data-state=active]{background:#eff3ff;color:#456ace}

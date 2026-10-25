@@ -138,7 +138,7 @@ def test_both_download_paths_use_real_browser_auth_guard(package_app, monkeypatc
         assert token.encode() not in response.data and 'Content-Disposition' not in response.headers
 
 
-def test_key_page_routes_to_workspace_and_keeps_mcp_inside_collapsed_details(package_app):
+def test_key_page_shows_extension_then_mcp_without_expanding_details(package_app):
     app, _ = package_app
     response = app.test_client().get('/local-access')
     assert response.status_code == 200
@@ -147,7 +147,12 @@ def test_key_page_routes_to_workspace_and_keeps_mcp_inside_collapsed_details(pac
     assert '/local-access/workspace-extension.zip' not in html
     assert 'ax-workspace-extension-setup.exe' not in html
     assert 'P&T AI Square 확장 받기' not in html
-    sections = re.findall(r'<details\b([^>]*)>(.*?)</details>', html, re.DOTALL)
-    mcp_section = next((attributes, content) for attributes, content in sections
-                       if '/local-access/mcp.zip' in content)
-    assert not re.search(r'\bopen\b', mcp_section[0])
+    assert html.index('id="extension-title"') < html.index('id="mcp-title"')
+    visible_html = re.sub(r'<details\b[^>]*>.*?</details>', '', html, flags=re.DOTALL)
+    assert 'href="/local-access/mcp.zip"' in visible_html
+    assert 'Connect.cmd' in visible_html
+    assert '처음 한 번, AI에 MCP 등록하기' in visible_html
+    assert 'href="/static/guides/MCP_LOCAL_GUIDE.html"' in visible_html
+    assert 'Skill로 연결하기' not in html
+    assert 'pt-square-receiver.zip' not in html
+    assert 'PT_AI_SQUARE_파일배포_Skill.zip' not in html
