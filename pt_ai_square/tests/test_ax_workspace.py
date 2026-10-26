@@ -111,6 +111,34 @@ def test_catalog_lists_only_admin_uploaded_files_not_static_bundles(app, tmp_pat
         assert db().tools.count_documents({}) == 0
 
 
+def test_catalog_keeps_original_registration_order_after_version_updates(app):
+    admin, headers = ready(app, 'admin')
+    member, _ = ready(app, 'member')
+    registered = []
+    # Insert out of order and include a timestamp tie to exercise both sort keys.
+    for name, created in [('Newest', 300), ('Oldest', 100), ('Tie A', 200), ('Tie B', 200)]:
+        response = upload(admin, headers, name=name)
+        assert response.status_code == 201
+        saved = response.json['file']
+        registered.append((created, saved['id']))
+        with app.app_context():
+            db().workspace_files.update_one({'_id': saved['id']}, {'$set': {'created': created}})
+
+    expected = [file_id for _, file_id in sorted(registered)]
+    assert [row['id'] for row in member.get('/api/ax-workspace').json['files']] == expected
+
+    response = upload(admin, headers, file_id=expected[0], name='Oldest new version', expectedRevision=1)
+    assert response.status_code == 201
+    assert response.json['file']['created'] == 100
+    assert response.json['file']['updated'] > 300
+    assert response.json['file']['release'] == 2
+    listed = member.get('/api/ax-workspace').json['files']
+    assert [row['id'] for row in listed] == expected
+    assert listed[0]['name'] == 'Oldest new version'
+    with app.app_context():
+        assert db().workspace_files.find_one({'_id': expected[0]})['created'] == 100
+
+
 @pytest.mark.parametrize('scope', ['read', 'publish'])
 def test_personal_key_cannot_bypass_workspace_browser_only_scope(app, scope):
     admin, headers = ready(app, 'admin')

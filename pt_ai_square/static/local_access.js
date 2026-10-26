@@ -67,10 +67,35 @@
     }catch(e){status.textContent=e.message;}
     finally{button.disabled=false;}
   };
+  function selectIssuedKey() {
+    const input = $('#secret');
+    input.focus(); input.select(); input.setSelectionRange(0, input.value.length);
+  }
   $('#copy-token').onclick=async()=>{
-    if(!$('#secret').value)return;
-    try{await navigator.clipboard.writeText($('#secret').value);status.textContent='KEY를 복사했습니다.';}
-    catch{status.textContent='KEY 입력란을 선택해 직접 복사하세요.';$('#secret').select();}
+    const input=$('#secret'),button=$('#copy-token'),value=input.value,id=issuedKeyId;
+    if(!value||!id||$('#issued').hidden||button.disabled)return;
+    button.disabled=true;
+    status.textContent='KEY를 복사하고 있습니다.';
+    try{
+      let copied=false;
+      // Remote HTTP origins do not expose the modern Clipboard API. Keep the
+      // legacy copy in the click gesture when that API is unavailable.
+      try{
+        if(window.isSecureContext&&navigator.clipboard?.writeText){
+          await navigator.clipboard.writeText(value);copied=true;
+        }
+      }catch{/* A denied Clipboard request still has the manual selection path. */}
+      // A KEY may have been revoked/replaced while Clipboard permission was pending.
+      if(issuedKeyId!==id||input.value!==value||$('#issued').hidden){
+        if(status.textContent==='KEY를 복사하고 있습니다.')status.textContent='KEY가 변경되었습니다. 최신 KEY를 확인해 주세요.';
+        return;
+      }
+      if(!copied){
+        selectIssuedKey();
+        try{copied=document.execCommand('copy')===true;}catch{copied=false;}
+      }
+      status.textContent=copied?'KEY를 복사했습니다.':'자동 복사가 되지 않았습니다. 선택된 KEY를 Ctrl+C 또는 ⌘C로 복사해 주세요.';
+    }finally{button.disabled=false;}
   };
   refresh().catch(e=>status.textContent=e.message);
 })();

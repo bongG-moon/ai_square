@@ -78,7 +78,7 @@ body{margin:0;color:#1d1d1f}
 .local-issued p,.local-issued small{font-size:11px;color:var(--local-muted);line-height:1.65}
 .local-issued p{margin-top:5px}
 .local-secret-row{display:flex;align-items:center;gap:8px;margin:13px 0 10px}
-.local-secret-row #secret{flex:1;min-width:0;background:#fff}
+.local-secret-row #secret{flex:1;min-width:0;background:#fff;font-family:ui-monospace,Consolas,monospace;-webkit-user-select:text;user-select:text;cursor:text}
 .local-secret-row button{flex:none}
 .local-key-card [hidden]{display:none!important}
 .local-card #status{margin:14px 0 0;color:#4163bd;font-size:12px}

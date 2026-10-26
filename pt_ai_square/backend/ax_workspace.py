@@ -123,8 +123,9 @@ def _subscription_write(file_id, *, enabled=None):
 def catalog():
     # Authentication/CSRF are the same app-wide session rules as other web APIs.
     # These endpoints are deliberately absent from the personal KEY allowlist.
+    # Keep the original registration order even when a new version is published.
     rows = list(db().workspace_files.find({}, {'path': 0, 'outbox': 0, 'versions': 0}).sort(
-        [('created', -1), ('_id', -1)]))
+        [('created', 1), ('_id', 1)]))
     subscribed = {row['file'] for row in db().workspace_subscriptions.find(
         {'user': g.user['id'], 'enabled': True, 'file': {'$in': [row['_id'] for row in rows]}},
         {'file': 1})}

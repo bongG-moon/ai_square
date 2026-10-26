@@ -95,12 +95,12 @@ test('four catalog tabs show extension programs and retain legacy other files un
  assert.deepEqual(tabs,[['all','전체'],['workspace','AX Workspace'],['plugin','확장 프로그램'],['integration','연동 도구']]);
  assert.match(h.workspace.innerHTML,/ws-ax-count">4개 파일/);
  h.context.actions['ax-filter']({dataset:{category:'plugin'}});
- assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2>확장 파일<\/h2>/);assert.doesNotMatch(h.workspace.innerHTML,/<h2>기존 기타 파일<\/h2>/);
+ assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2\b[^>]*>확장 파일<\/h2>/);assert.doesNotMatch(h.workspace.innerHTML,/<h2\b[^>]*>기존 기타 파일<\/h2>/);
  h.context.actions['ax-filter']({dataset:{category:'integration'}});
- assert.match(h.workspace.innerHTML,/ws-ax-count">2개 파일/);assert.match(h.workspace.innerHTML,/<h2>연동 파일<\/h2>/);assert.match(h.workspace.innerHTML,/<h2>기존 기타 파일<\/h2>/);
- assert.doesNotMatch(h.workspace.innerHTML,/<h2>확장 파일<\/h2>/);
+ assert.match(h.workspace.innerHTML,/ws-ax-count">2개 파일/);assert.match(h.workspace.innerHTML,/<h2\b[^>]*>연동 파일<\/h2>/);assert.match(h.workspace.innerHTML,/<h2\b[^>]*>기존 기타 파일<\/h2>/);
+ assert.doesNotMatch(h.workspace.innerHTML,/<h2\b[^>]*>확장 파일<\/h2>/);
  h.context.actions['ax-filter']({dataset:{category:'workspace'}});
- assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2>AX Workspace 설치<\/h2>/);
+ assert.match(h.workspace.innerHTML,/ws-ax-count">1개 파일/);assert.match(h.workspace.innerHTML,/<h2\b[^>]*>AX Workspace 설치<\/h2>/);
 });
 
 test('registration offers three categories and a read-only v1; legacy other editing selects integrations',()=>{
