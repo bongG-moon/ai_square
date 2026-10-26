@@ -2,19 +2,129 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = String(text); return n; };
-  const button = (text, cls, fn) => { const n = el('button', cls, text); n.type = 'button'; n.addEventListener('click', () => busy(n, fn)); return n; };
-  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null };
+  const button = (text, cls, fn, icon) => {
+    const n = el('button', cls, text); n.type = 'button'; n.addEventListener('click', () => busy(n, fn));
+    if (icon === 'web') {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'action-icon');
+      svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z');
+      svg.append(path); n.prepend(svg); n.classList.add('action-link');
+    }
+    return n;
+  };
+  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null, installation: null };
+  const installationActive = () => ['choosing','preparing','review','installing','uncertain'].includes(state.installation?.phase);
+  function installationButton(toolId) {
+    const node = el('button', 'primary', '바로 설치하기'); node.type = 'button'; node.dataset.installTool = String(toolId);
+    node.addEventListener('click', () => { if (!installationActive()) prepare(toolId).catch(error => feedback(error.message, true)); });
+    return node;
+  }
+  function installationState(operation, phase, message) {
+    if (state.installation !== operation) return;
+    Object.assign(operation, {phase, message}); renderInstallation();
+  }
+  function forgetLateInstallation() {
+    for (const [id,pending] of state.pending) if (pending.lateInstallation) { clearTimeout(pending.timer); state.pending.delete(id); }
+  }
+  function clearInstallation() {
+    forgetLateInstallation();
+    state.installation = null; renderInstallation();
+  }
+  function installationComplete(operation, installed) {
+    operation.configured = installed.status === 'configured';
+    const message=installed.notice || (operation.configured ? 'MCP 연결 설정을 저장했어요. 작업이 끝난 뒤 Claude를 다시 연결해 실제 동작을 확인하세요.' : '파일 설치가 끝났어요. 작업이 끝난 뒤 해당 업무의 Claude를 다시 연결해 주세요.');
+    installationState(operation,'done',`${message}\nKEY·서버 주소 등 추가 설정은 등록자의 안내를 확인해 주세요. 실제 기능 실행·연결 시험은 아직 하지 않았습니다.`);
+  }
+  function reconcileInstallation(records) {
+    const operation=state.installation;
+    if (operation?.phase !== 'uncertain' || operation.origin !== state.baseUrl || !operation.plan) return;
+    const path=value=>String(value || '').replace(/\\/g,'/').toLowerCase();
+    const committed=(Array.isArray(records.items)?records.items:[]).find(record=>record.completedPlanId === operation.plan.planId &&
+      String(record.toolId) === String(operation.toolId) && path(record.target) === path(operation.plan.destination) &&
+      String(record.release) === String(operation.plan.release) && ['installed','configured'].includes(record.status));
+    if (committed) { forgetLateInstallation(); installationComplete(operation,{status:committed.status,notice:'저장된 설치 기록에서 이번 설치의 완료를 확인했어요.'}); return; }
+    // The authenticated list is read after installation/recovery under the
+    // worker lock. Let the user finish reviewing an absent receipt explicitly;
+    // neither an old receipt nor an absent one is evidence of this install succeeding.
+    operation.reviewed = !(records.recovery?.blocked || []).length;
+    installationState(operation,'uncertain',operation.reviewed ?
+      '이번 설치의 완료 기록을 확인하지 못했어요. 아래 목록과 상태를 확인한 뒤 확인 마침을 눌러 주세요. 설치를 자동으로 다시 실행하지 않습니다.' :
+      '중단된 설치를 먼저 확인해야 합니다. 아래 설치 기록의 안내에 따라 파일과 보관본을 확인해 주세요.');
+  }
+  function renderInstallation() {
+    const operation = state.installation, active = installationActive();
+    const pending = operation && ['choosing','preparing','installing'].includes(operation.phase);
+    $('connection-button').disabled = active;
+    const labels = {choosing:'설치 준비 중…',preparing:'설치 준비 중…',review:'설치 확인 중',installing:'설치 중…',uncertain:'설치 결과 확인 필요'};
+    for (const node of document.querySelectorAll('[data-install-tool]')) {
+      const same = operation && node.dataset.installTool === String(operation.toolId);
+      node.disabled = active; node.replaceChildren(document.createTextNode(active && same ? labels[operation.phase] : '바로 설치하기'));
+      node.removeAttribute('aria-busy');
+      if (same && pending) { const spinner = el('span','install-spinner'); spinner.setAttribute('aria-hidden','true'); node.prepend(spinner); node.setAttribute('aria-busy','true'); }
+    }
+    const headings = {choosing:'설치 위치 선택',preparing:'설치 준비 중',review:'설치 내용 확인',installing:'설치 중',done:operation?.configured?'연결 설정 저장 완료':'파일 설치 완료',error:'설치하지 못했어요',uncertain:'설치 결과 확인 필요',cancelled:'설치를 취소했어요'};
+    for (const region of [$('installation-status'), $('detail-installation-status')].filter(Boolean)) {
+      const show = operation && (region.id === 'installation-status' || String(region.dataset.toolId) === String(operation.toolId));
+      region.hidden = !show; if (!show) { region.replaceChildren(); delete region.dataset.phase; continue; }
+      region.dataset.phase = operation.phase;
+      const mark = el('span',pending?'install-spinner':'install-state-mark',pending?'':operation.phase==='done'?'✓':operation.phase==='error'||operation.phase==='uncertain'?'!':'·'); mark.setAttribute('aria-hidden','true');
+      const text = el('div','install-status-text');
+      text.append(el('strong','',`${operation.name} · ${headings[operation.phase]}`),el('p','',operation.message));
+      const actions = el('div','install-status-actions');
+      if (['done','uncertain','error'].includes(operation.phase)) actions.append(button('설치된 기능 확인','text-button',()=>loadTab('installed')));
+      if (operation.phase === 'uncertain' && operation.reviewed) actions.append(button('확인 마침','text-button',()=>clearInstallation()));
+      if (operation.phase === 'done') actions.append(button('설정 안내 보기','text-button',async()=>{
+        await detail(operation.toolId);
+        if (String(state.detail?.item?.id) === String(operation.toolId)) { detailPanel('connect'); $('detail-tab-connect').focus(); }
+      }));
+      region.replaceChildren(mark,text,actions);
+    }
+  }
+  const panelAnimations = new WeakMap();
+  function revealPanel(node) {
+    if (!node) return;
+    panelAnimations.get(node)?.cancel();
+    if (!node.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animation = node.animate([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],
+      {duration:300,easing:'cubic-bezier(.2,.7,.2,1)'});
+    panelAnimations.set(node, animation);
+    // Cancelling a superseded transition never delays the next interaction.
+    animation.finished.catch(() => {});
+  }
   function feedback(message, error = false) {
     for (const id of ['feedback', ...($('detail-dialog').open ? ['detail-feedback'] : [])]) { $(id).textContent = message || ''; $(id).hidden = !message; $(id).classList.toggle('error', error); }
     if (error) document.querySelectorAll('.loading').forEach(n => { n.textContent = '불러오지 못했어요. 연결 설정을 확인하거나 다시 시도해 주세요.'; });
   }
-  async function busy(node, fn) { if (node.disabled) return; node.disabled = true; node.setAttribute('aria-busy', 'true'); try { return await fn(); } catch (e) { feedback(e.message || '처리하지 못했습니다. 다시 확인해 주세요.', true); } finally { node.disabled = false; node.removeAttribute('aria-busy'); } }
-  function rpc(action, payload = {}, stillNeeded = () => true) {
+  async function busy(node, fn) {
+    if (node.disabled) return;
+    const hadFocus = document.activeElement === node;
+    node.disabled = true; node.setAttribute('aria-busy', 'true');
+    try { return await fn(); }
+    catch (e) { feedback(e.message || '처리하지 못했습니다. 다시 확인해 주세요.', true); }
+    finally {
+      node.disabled = false; node.removeAttribute('aria-busy');
+      // A dialog cannot return native focus to its temporarily disabled opener.
+      // Restore it after enabling, only if focus did not move to another control.
+      const active = document.activeElement;
+      if (hadFocus && node.isConnected && !document.querySelector('dialog[open]') &&
+          (active === document.body || active?.closest('dialog:not([open])'))) node.focus({preventScroll:true});
+    }
+  }
+  function rpc(action, payload = {}, stillNeeded = () => true, onLateResponse = null) {
     const send = () => new Promise((resolve, reject) => {
       if (!stillNeeded()) return resolve(null);
       if (!state.channel) return reject(new Error('앱과 연결을 확인해 주세요.'));
       const requestId = `store-${++state.seq}`;
-      const timer = setTimeout(() => { state.pending.delete(requestId); reject(new Error('처리 결과를 확인하지 못했습니다. 설치된 기능에서 상태를 확인해 주세요. 같은 설치를 자동으로 다시 실행하지 않습니다.')); }, 130000);
+      const timer = setTimeout(() => {
+        // Keep at most the single uncertain installation's reply handler. A late
+        // receipt can resolve the UI without submitting the installation again.
+        if (onLateResponse) state.pending.set(requestId, {resolve:result=>onLateResponse(null,result),reject:error=>onLateResponse(error),timer:null,lateInstallation:true});
+        else state.pending.delete(requestId);
+        const error = new Error('처리 결과를 확인하지 못했습니다. 설치된 기능에서 상태를 확인해 주세요. 같은 설치를 자동으로 다시 실행하지 않습니다.');
+        error.code = 'response_timeout'; reject(error);
+      }, 130000);
       state.pending.set(requestId, { resolve, reject, timer });
       parent.postMessage({ type: 'ax-extension-request', channel: state.channel, requestId, action, payload }, '*');
     });
@@ -38,8 +148,8 @@
     else pending.reject(new Error(typeof message.error === 'string' ? message.error : message.error?.message || '요청을 완료하지 못했습니다.'));
   });
   window.addEventListener('pagehide', () => { for (const p of state.pending.values()) clearTimeout(p.timer); state.pending.clear(); });
-  function show(view) { for (const id of ['connection-view', 'catalog-view']) $(id).hidden = id !== view; }
-  function connectionView() { ++state.generation; show('connection-view'); $('connection-cancel').hidden = !state.connected; $('disconnect').hidden = !state.connected; }
+  function show(view) { const changed=$(view).hidden; for (const id of ['connection-view', 'catalog-view']) $(id).hidden = id !== view; if(changed)revealPanel($(view)); }
+  function connectionView() { if (installationActive()) return; ++state.generation; show('connection-view'); $('connection-cancel').hidden = !state.connected; $('disconnect').hidden = !state.connected; }
   function httpConsent() {
     let http = false;
     try { http = new URL($('server-url').value.trim()).protocol === 'http:'; } catch (_) { /* Invalid addresses are reported by the form. */ }
@@ -51,7 +161,7 @@
     notice.textContent = message || ''; notice.hidden = !message; notice.classList.toggle('error', error);
   }
   async function connectionAction(node, action) {
-    if (connectionPending || node.disabled) return;
+    if (connectionPending || node.disabled || installationActive()) return;
     connectionPending = true;
     const label = node.textContent;
     feedback(''); connectionMessage('');
@@ -87,6 +197,7 @@
   }
   async function initialize() {
     publication.loaded=false; const result = await rpc('status'); state.connected = result.configured; state.baseUrl = result.baseUrl || '';
+    if (state.installation && (state.installation.origin !== state.baseUrl || !state.connected)) clearInstallation();
     connectionFields(result); $('reuse-connection').hidden = !result.existingConnectionAvailable; $('reuse-help').hidden = !result.existingConnectionAvailable;
     $('connection-button').hidden = !state.connected; $('publish-open').hidden = !state.connected;
     if (!state.connected) return connectionView();
@@ -162,22 +273,52 @@
     clearTimeout(debounce); closeDetail(false); state.tab = tab; show('catalog-view');
     document.querySelectorAll('[data-tab]').forEach(n => n.setAttribute('aria-current', n.dataset.tab === tab ? 'page' : 'false'));
     $('catalog-toolbar').hidden = tab !== 'catalog'; $('more').hidden = true;
+    $('results').classList.toggle('record-list', tab !== 'catalog');
+    $('results-label').textContent = tab === 'installed' ? '설치 기록을 확인하고 있어요.' : tab === 'updates' ? '설치한 기능의 새 버전을 확인하고 있어요.' : '기능을 불러오는 중입니다.';
+    $('catalog-note').textContent = tab === 'installed' ? '이 플랫폼에서 설치한 기능과 설치 위치입니다. 파일 다운로드 기록은 포함하지 않습니다.' : tab === 'updates' ? '지금 설치할 수 있는 새 버전만 표시합니다. 업데이트는 설치 위치와 변경 내용을 확인한 뒤 진행합니다.' : '조회·좋아요·다운로드는 웹의 기록과 연결됩니다. 파일 다운로드와 실제 설치 상태는 구분해서 표시합니다.';
     if (tab === 'catalog') return catalog();
     const generation = ++state.generation; $('results').replaceChildren(el('p', 'loading', tab === 'updates' ? '설치된 기능의 업데이트를 확인하고 있어요…' : '설치 기록을 확인하고 있어요…'));
-    const records = await rpc('installations'); if (generation !== state.generation) return;
-    state.records = records.items || [];
-    const recovery = recoveryCards(records.recovery);
-    if (tab === 'installed') { $('results-label').textContent = `이 플랫폼에서 설치한 기능 ${state.records.length}개`; $('results').replaceChildren(...recovery, ...state.records.map(record => recordCard(record))); if (!state.records.length && !recovery.length) $('results').append(empty('아직 설치한 기능이 없어요.', '둘러보기에서 기능을 선택한 뒤 설치 위치를 확인하세요. 파일 다운로드는 설치 기록에 포함되지 않습니다.')); return; }
+    revealPanel($('results'));
+    if (tab === 'installed') {
+      const records = await rpc('installations'); if (generation !== state.generation) return;
+      reconcileInstallation(records);
+      state.records = Array.isArray(records.items) ? records.items : [];
+      const recovery = recoveryCards(records.recovery);
+      $('results-label').textContent = `설치된 기능 ${state.records.length}개`;
+      $('results').replaceChildren(...recovery, ...state.records.map(record => recordCard(record)));
+      if (!state.records.length && !recovery.length) $('results').append(empty('아직 설치한 기능이 없어요.', '둘러보기에서 기능을 선택한 뒤 설치 위치를 확인하세요. 파일 다운로드는 설치 기록에 포함되지 않습니다.'));
+      revealPanel($('results')); return;
+    }
     const updates = await rpc('checkUpdates'); if (generation !== state.generation) return;
-    $('results-label').textContent = '업데이트 확인 결과 · 자동으로 설치하지 않아요';
-    $('results').replaceChildren(...recovery, ...(updates.items || []).map(row => {
-      const record = state.records.find(r => r.installationId === row.installationId) || row;
-      const card = recordCard(record, false); const result = row.result || {};
-      const notices = {update_available:'새 버전이 있어요. 상세 화면에서 변경 내용과 설치 위치를 확인하세요.', rollback_available:'서버의 현재 배포 버전이 이전 버전으로 변경됐어요. 상세 화면에서 배포 정보를 확인하세요.', current:'현재 배포 버전을 사용하고 있어요.', unknown_release:'설치한 버전을 서버에서 확인하지 못했어요. 상세 화면에서 현재 배포 정보를 확인하세요.'};
-      card.append(el('p', 'muted', result.message || notices[result.status] || '업데이트를 확인하지 못했어요. 연결을 확인해 주세요.'));
-      return card;
-    }));
-    if (!(updates.items || []).length) $('results').append(empty('확인할 설치 기록이 없어요.', '스토어에서 설치한 기능의 업데이트를 이곳에서 확인합니다.'));
+    const checked = Array.isArray(updates.items) ? updates.items : [];
+    const blocked = Array.isArray(updates.recovery?.blocked) ? updates.recovery.blocked : [];
+    const available = blocked.length ? [] : checked.filter(actualUpdate);
+    const unknown = checked.filter(row => !available.includes(row) && row.result?.status !== 'current');
+    const incomplete = updates.complete === false || unknown.length > 0 || blocked.length > 0;
+    state.records = checked;
+    $('results-label').textContent = `업데이트 가능한 기능 ${available.length}개`;
+    $('results').replaceChildren(...available.map(row => recordCard(row, false, row.result)));
+    if (!available.length) $('results').append(empty(incomplete ? '현재 확인된 업데이트가 없어요.' : !checked.length ? '확인할 설치 기록이 없어요.' : '모두 최신 버전이에요.', incomplete ? '일부 기능은 새 버전을 확인하지 못했거나 설치 상태 확인이 필요해요. 아래 확인 결과를 참고하세요.' : !checked.length ? '스토어에서 설치한 기능의 업데이트를 이곳에서 확인합니다.' : '설치한 기능을 그대로 사용하시면 됩니다. 새 버전이 등록되면 이곳에서 확인할 수 있어요.'));
+    if (incomplete) {
+      const summary=el('details','update-summary'), heading=el('summary','','일부 기능은 추가 확인이 필요해요.'), list=el('ul');
+      for(const row of unknown){const result=row.result||{};const line=el('li');line.append(el('strong','',recordName(row)),el('span','',updateNotice(result)));list.append(line);}
+      for(const issue of blocked){if(unknown.some(row=>String(row.toolId)===String(issue.toolId)))continue;const line=el('li');line.append(el('strong','','중단된 설치 확인'),el('span','',issue.message||'설치된 기능에서 파일과 보관본을 확인해 주세요.'));list.append(line);}
+      const counts=updates.summary||{};
+      const parts=[['current','최신'],['attention','상태 확인 필요'],['failed','조회 실패'],['pending','확인 대기']].filter(([key])=>Number.isInteger(counts[key])&&counts[key]>0).map(([key,label])=>`${label} ${counts[key]}개`);
+      summary.append(heading,el('p','muted',parts.length?parts.join(' · '):'사용 권한과 설치 상태에 따라 새 버전 확인이 제한될 수 있어요.'),list,button('설치된 기능에서 확인', 'text-button', () => loadTab('installed')));$('results').append(summary);
+    }
+    revealPanel($('results'));
+  }
+  function actualUpdate(row) {
+    const result=row.result||{}, current=result.installedRelease, next=result.activeRelease;
+    // Older hosts omit the boolean. Their compatibility path still requires a
+    // strictly newer release; paused, recovery and rollback states stay out.
+    return result.status==='update_available' && Number.isSafeInteger(current) && current>0 && Number.isSafeInteger(next) && next>current && !result.updatePaused && (row.updateAvailable===true || row.updateAvailable===undefined);
+  }
+  function updateNotice(result) {
+    if(result.updatePaused)return '새 버전의 배포가 일시 중지되어 있어요.';
+    if(result.message)return result.message;
+    return {rollback_available:'서버의 현재 배포가 설치된 버전보다 이전이에요. 자동으로 이전 버전으로 바꾸지 않습니다.',unknown_release:'현재 설치 버전의 배포 정보를 확인하지 못했어요.',pending:'이번 확인 범위를 넘어 확인 대기 중이에요. 새로고침으로 다시 확인해 주세요.',recovery_required:'중단된 설치 상태를 먼저 확인해 주세요.'}[result.status] || '배포 정보 또는 사용 권한을 다시 확인해 주세요.';
   }
   async function catalog(append = false) {
     const generation = ++state.generation; if (!append) $('results').replaceChildren(el('p', 'loading', '기능을 불러오는 중입니다…'));
@@ -188,6 +329,7 @@
     state.offset = result.nextOffset; $('more').hidden = result.nextOffset == null;
     $('results-label').textContent = `등록된 기능 ${result.total ?? (result.items || []).length}개`;
     if (!append && !(result.items || []).length) $('results').append(empty('조건에 맞는 기능이 없어요.', '검색어나 유형·조직 필터를 바꿔보세요.'));
+    if (!append) revealPanel($('results'));
     if (result.warning) feedback(result.warning);
   }
   function symbol(type) {
@@ -231,24 +373,41 @@
     if (item.access && item.access !== 'approved') card.append(el('span', 'badge access-badge', '사용 승인 필요'));
     card.append(foot); return card;
   }
-  function recordCard(record, controls = true) {
+  function recordName(record) { return record.name || record.toolName || record.title || record.packageName || '이름을 확인할 수 없는 기능'; }
+  function recordType(record) { return record.type || record.toolType || (record.kind === 'skill' ? 'Skill' : record.kind === 'mcp' ? 'MCP/Tool' : ''); }
+  function releaseLabel(value) { if(value===undefined || value===null || value==='')return '버전 미확인'; const text=String(value);return /^v/i.test(text)?text:'v'+text; }
+  function recordCard(record, controls = true, update = null) {
     const statuses = {installed:'파일 설치 완료',configured:'연결 설정 완료', 'verified-file':'설치 파일 확인됨'};
-    const n = el('article', 'tool-card install-record'); n.append(el('span', 'badge accent', statuses[record.status] || '설치 기록'), el('h2', 'tool-title', record.name || `기능 #${record.toolId}`), el('p', 'muted', `${record.release || ''} · ${record.scope === 'project' ? '특정 폴더' : '전체 공간(내 계정)'}`), el('p', 'detail-result', record.target || record.scopeDir || ''));
-    const actions = el('div', 'record-actions'); if (record.toolId) actions.append(button('상세 보기', 'text-button', () => detail(record.toolId)));
+    const n = el('article', 'install-record'); n.dataset.installationId=record.installationId||'';if(update)n.classList.add('update-record');
+    const type=recordType(record), main=el('div','record-main'), heading=el('div','record-heading'), title=el('h2','record-title',recordName(record));title.title=recordName(record);
+    heading.append(title,typeBadge(type));
+    const metadata=el('div','record-meta'), versions=el('span','record-versions');versions.append(el('span','record-version',releaseLabel(record.release??update?.installedRelease)));
+    if(update)versions.append(el('span','record-version-arrow','→'),el('strong','record-new-version',releaseLabel(update.activeRelease)));
+    metadata.append(versions,el('span','record-scope',record.scope==='project'||record.scope==='directory'?'업무 폴더':'공통 · 내 계정'));
+    if(!update) metadata.append(el('span','record-status',statuses[record.status]||'설치 기록'));
+    main.append(heading,metadata);
+    const target=record.target||record.scopeDir;if(target){const location=el('p','record-target',target);location.title=target;main.append(location);}
+    const actions = el('div', 'record-actions'); if (record.toolId) actions.append(button(update?'업데이트 보기':'상세 보기', update?'secondary':'text-button', async () => {await detail(record.toolId);if(update&&String(state.detail?.item?.id)===String(record.toolId))detailPanel('connect');}));
     if (controls) {
-      actions.append(button('상태 확인', 'text-button', async () => { const result = await rpc('verify', { installationId: record.installationId }); const changed = result.filesIntact === false || result.configurationIntact === false; feedback(changed ? '설치 후 파일 또는 설정이 변경되었어요. 현재 내용을 확인한 뒤 복구·재설치를 결정해 주세요.' : result.notice || result.message || '설치 기록을 확인했습니다. Claude 연결 상태는 다음 연결에서 확인하세요.', changed); }));
-      if (record.rollbackAvailable) actions.append(button('이전 상태로 복구', 'text-button', async () => {
+      const verify = button('상태 확인', 'text-button', async () => { const result = await rpc('verify', { installationId: record.installationId }); const changed = result.filesIntact === false || result.configurationIntact === false; feedback(changed ? '설치 후 파일 또는 설정이 변경되었어요. 현재 내용을 확인한 뒤 복구·재설치를 결정해 주세요.' : result.notice || result.message || '설치 기록을 확인했습니다. Claude 연결 상태는 다음 연결에서 확인하세요.', changed); });
+      verify.title = '설치 파일과 MCP 설정을 설치 당시 기록과 비교합니다. 실제 기능 실행이나 서버 연결 시험은 하지 않습니다.';
+      verify.setAttribute('aria-description', verify.title); actions.append(verify);
+      if (record.rollbackAvailable) {
+        const rollback = button('이전 상태로 복구', 'text-button', async () => {
         if (!await confirm('이전 설치 상태로 복구할까요?', [el('p', '', '스토어가 설치한 파일과 설정만 복구합니다. 첫 설치였다면 해당 기능을 제거합니다. 사용자가 변경한 파일이 있으면 복구를 중단합니다.'), el('p', 'detail-result', record.target || record.scopeDir)], '복구하기')) return;
         const result = await rpc('rollback', { installationId: record.installationId, confirmed: true }); feedback(result.notice || '이전 설치 상태로 복구했어요.'); await loadTab('installed');
-      }));
+        });
+        rollback.title = '이 PC의 해당 설치를 되돌립니다. 업데이트는 직전 버전으로 복구하고, 최초 설치는 제거합니다. 변경 범위를 먼저 확인합니다.';
+        rollback.setAttribute('aria-description', rollback.title); actions.append(rollback);
+      }
     }
-    n.append(actions); return n;
+    n.append(symbol(type),main,actions); return n;
   }
   function section(title, text) { const n = el('section', 'detail-section'); n.append(el('h3', '', title), el('p', 'guide-text', text || '등록된 안내가 없습니다.')); return n; }
   function closeDetail(focus = true) {
     ++state.detailGeneration; state.detail = null;
     if (!$('detail-dialog').open) return;
-    $('detail-dialog').close(); $('detail-view').replaceChildren();
+    $('detail-dialog').close();
     if (focus && state.detailOpener?.isConnected) state.detailOpener.focus({preventScroll:true});
     state.detailOpener = null;
   }
@@ -283,6 +442,7 @@
     const item = result.item, panel = $('detail-panel'); state.detailTab = tab;
     document.querySelectorAll('[data-detail-tab]').forEach(n => {const selected = n.dataset.detailTab === tab; n.setAttribute('aria-selected',String(selected)); n.tabIndex=selected?0:-1;});
     panel.setAttribute('aria-labelledby','detail-tab-'+tab); panel.replaceChildren();
+    revealPanel(panel);
     const active = result.manifest?.release ?? item.active;
     const versions = (item.versions || []).filter(v => !v.deleted);
     const currentVersion = versions.find(v => String(v.n) === String(active));
@@ -301,10 +461,12 @@
       if (gated) panel.append(section('사용 권한 확인',item.access==='pending'?'사용 신청을 검토 중입니다. 웹에서 신청 상태를 확인해 주세요.':'이 기능은 사용 승인이 필요합니다. 웹에서 담당자에게 사용 권한을 신청해 주세요.'));
       if (item.environment || item.platform) panel.append(section('실행 환경',item.environment || item.platform));
       const actions=el('div','detail-actions');
-      if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(button('바로 설치하기','primary',()=>prepare(item.id)));
+      if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(installationButton(item.id));
       if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드',result.canInstall||result.canInspectInstall?'secondary':'primary',()=>downloadDetail(result)));
-      if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기 ↗','text-button',()=>rpc('host.openExternal',{url:result.webUrl})));
-      panel.append(actions,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
+      if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
+      const progress = el('section','installation-status'); progress.id='detail-installation-status'; progress.dataset.toolId=String(item.id); progress.setAttribute('aria-live','polite'); progress.setAttribute('aria-label','설치 진행 상태'); progress.hidden=true;
+      panel.append(actions,progress,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
+      renderInstallation();
       if (item.guide) panel.append(section('등록자가 제공한 안내',item.guide));
       if (item.url) panel.append(section('연결 주소',item.url));
       if (currentVersion?.commands) for (const [scope,label] of [['user','전체 공간(내 계정)'],['project','특정 폴더']]) if (currentVersion.commands[scope]) panel.append(section(`${label} 설치 안내`,currentVersion.commands[scope]));
@@ -326,7 +488,7 @@
         if (version.sha256) {const hash=el('details','version-hash');hash.append(el('summary','','파일 검증 정보'),el('code','',`SHA-256: ${version.sha256}`));row.append(hash);}
         panel.append(row);
       }
-      if (result.webUrl) panel.append(button('웹에서 배포 이력 보기 ↗','text-button',()=>rpc('host.openExternal',{url:result.webUrl})));
+      if (result.webUrl) panel.append(button('웹에서 배포 이력 보기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
       return;
     }
     panel.append(el('h3','','함께 개선하는 기능'));
@@ -337,7 +499,7 @@
       panel.append(row);
     }
     if (!item.comments?.length) panel.append(el('p','muted detail-callout','아직 등록된 의견이 없습니다.'));
-    if (result.webUrl) panel.append(button('웹에서 의견 남기기 ↗','text-button',()=>rpc('host.openExternal',{url:result.webUrl})));
+    if (result.webUrl) panel.append(button('웹에서 의견 남기기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
   }
   async function detail(toolId) {
     const generation=++state.detailGeneration, dialog=$('detail-dialog');
@@ -363,8 +525,14 @@
     root.replaceChildren(top,tabs,panel);root.scrollTop=0;detailPanel('intro');updateCard(item);
   }
   async function prepare(toolId) {
+    if (installationActive()) return;
+    const detailSnapshot = state.detail;
+    const operation = {toolId,name:detailSnapshot?.item?.name || '선택한 기능',origin:state.baseUrl};
+    state.installation = operation;
+    feedback(''); installationState(operation,'choosing','설치할 공간을 선택해 주세요. 아직 파일을 변경하지 않았습니다.');
+    try {
     const choices = el('div', 'scope-choices');
-    const scopes = state.detail?.manifest?.installProfile?.scopes || ['project','user'];
+    const scopes = detailSnapshot?.manifest?.installProfile?.scopes || ['project','user'];
     let directory = null, works = [], workError = '';
     if (scopes.includes('project') && state.hostFeatures.includes('workspaces')) {
       try {
@@ -404,7 +572,10 @@
       other.option.append(pick,path);more.append(summary,other.option);choices.append(more);
     }
     const ready=()=>{const value=choices.querySelector('input:checked')?.value;return value==='user'||value==='work'&&!!workSelect?.value||value==='directory'&&!!directory?.directoryToken;};
-    if (!await confirm('어디에서 사용할까요?', [choices, el('p', 'muted', '설치할 공간을 선택하세요. 다음 화면에서 실제 파일·설정 변경 경로를 확인합니다.')], '설치 내용 확인', ready)) return;
+    if (!await confirm('어디에서 사용할까요?', [choices, el('p', 'muted', '설치할 공간을 선택하세요. 다음 화면에서 실제 파일·설정 변경 경로를 확인합니다.')], '설치 내용 확인', ready)) {
+      installationState(operation,'cancelled','파일과 설정은 변경하지 않았습니다.'); return;
+    }
+    installationState(operation,'preparing','설치할 파일을 내려받고 변경 위치를 확인하고 있어요.');
     const choice=choices.querySelector('input:checked')?.value;
     let targetLabel='공통 (내 계정)';
     if(choice==='work'){
@@ -414,17 +585,39 @@
     }else if(choice==='directory'){targetLabel='선택한 폴더';}
     const scope=choice==='user'?'user':'directory';
     const directoryFields=scope==='directory'?{directoryToken:directory.directoryToken}:{};
-    feedback('설치할 파일과 변경 위치를 확인하고 있어요…');
-    const plan = await rpc('prepareInstall', { toolId, scope, ...directoryFields }); if (!plan.canInstall) { feedback(plan.reason || plan.notice || '자동 설치를 지원하지 않는 항목입니다. 웹의 설치 안내를 확인해 주세요.', true); return; }
+    const plan = await rpc('prepareInstall', { toolId, scope, ...directoryFields }); if (!plan.canInstall) {
+      const message=plan.reason || plan.notice || '자동 설치를 지원하지 않는 항목입니다. 등록자의 설치 안내를 확인해 주세요.';
+      installationState(operation,'error',message); feedback(message,true); return;
+    }
+    operation.plan = {planId:plan.planId,destination:plan.destination,release:plan.release};
+    installationState(operation,'review','설치 위치와 변경 내용을 확인한 뒤 설치하기를 눌러 주세요.');
     const details = el('dl', 'plan-summary'); for (const [name, value] of [['설치 대상', targetLabel], ['설치 위치', plan.destination || plan.scopeDir], ['설치 버전', plan.release || plan.releaseId || '플랫폼의 현재 배포 버전']]) { details.append(el('dt', '', name), el('dd', '', value)); }
     if (plan.configurationFile) details.append(el('dt', '', '변경할 설정'), el('dd', '', plan.configurationFile));
     if (Array.isArray(plan.command)) details.append(el('dt', '', '다음 Claude 연결에서 실행할 명령'), el('dd', '', plan.command.join(' ')));
     const notes=[details];if(plan.detectionNotice)notes.push(el('p','detail-callout',plan.detectionNotice));
     notes.push(el('p', 'muted', '파일과 설정을 설치합니다. 진행 중인 대화는 유지하며, Claude 연결은 자동으로 재시작하지 않습니다.'));
-    if (!await confirm('이 내용으로 설치할까요?', notes, '설치하기')) { feedback('설치를 취소했어요.'); return; }
-    feedback('설치 중입니다. 완료 결과가 나올 때까지 기다려 주세요.');
-    const installed = await rpc('install', { planId: plan.planId, approvalDigest: plan.approvalDigest, confirmed: true, ...directoryFields });
-    feedback(installed.notice || (installed.status === 'configured' ? 'MCP 연결 설정을 저장했어요. 작업이 끝난 뒤 Claude를 다시 연결해 실제 동작을 확인하세요.' : '설치가 완료됐어요. 작업이 끝난 뒤 해당 업무의 Claude 연결을 다시 시작하면 기능을 확인할 수 있어요.')); await loadTab('installed');
+    notes.push(el('p','muted','KEY·서버 주소 등 추가 설정이 필요한 기능은 등록자의 안내에 따라 설정해 주세요. 이 설치는 설정 입력창이나 설치 스크립트를 실행하지 않습니다.'));
+    if (!await confirm('이 내용으로 설치할까요?', notes, '설치하기')) { installationState(operation,'cancelled','파일과 설정은 변경하지 않았습니다.'); return; }
+    installationState(operation,'installing','선택한 공간에 파일과 설정을 저장하고 있어요. 완료 결과를 기다려 주세요.');
+    const completed = async (error, installed) => {
+      if (state.installation !== operation) return;
+      if (error) { installationState(operation,'error',error.message || '설치 결과를 확인하지 못했어요. 설치된 기능에서 상태를 확인해 주세요.'); return; }
+      if (!['installed','configured'].includes(installed?.status)) {
+        installationState(operation,'uncertain','완료 여부를 확인하지 못했어요. 설치된 기능에서 상태를 확인해 주세요. 같은 설치를 자동으로 다시 실행하지 않습니다.'); return;
+      }
+      installationComplete(operation,installed);
+      // A list refresh is independent of a confirmed installation receipt.
+      // Its failure must never relabel a completed installation as failed.
+      try { await loadTab('installed'); }
+      catch (refreshError) { feedback(`설치는 완료됐지만 목록을 불러오지 못했어요. 새로고침으로 다시 확인해 주세요.\n${refreshError.message || ''}`,true); }
+    };
+    const installed = await rpc('install', { planId: plan.planId, approvalDigest: plan.approvalDigest, confirmed: true, ...directoryFields },()=>true,
+      (error,result)=>{ completed(error,result).catch(failure=>feedback(failure.message,true)); });
+    await completed(null,installed);
+    } catch (error) {
+      const uncertain = operation.phase === 'installing' && error.code === 'response_timeout';
+      installationState(operation,uncertain?'uncertain':'error',error.message || '설치를 진행하지 못했어요. 다시 확인해 주세요.');
+    }
   }
   // One local select component; no OS-native dropdown, remote library or polling.
   let openFilter = null;

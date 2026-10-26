@@ -15,6 +15,7 @@ import uuid
 import hashlib
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -70,10 +71,52 @@ MAX_INPUT = 128 * 1024
 MAX_OUTPUT = 2 * 1024 * 1024
 MANUAL_NOTICE = '이 항목은 파일을 내려받은 뒤 웹의 설치 안내에 따라 직접 설치하세요. 다운로드만으로 설치되지는 않습니다.'
 INSTALL_METADATA_NOTICE = '등록자가 앱 설치 정보(지원 범위·설치 방식)를 등록해야 앱에서 바로 설치할 수 있어요. 현재는 파일 다운로드와 등록자의 설치 안내를 이용해 주세요.'
+DISPLAY_FIELDS = {'name': 200, 'desc': 1200, 'type': 80, 'platform': 120, 'owner': 120, 'registrantName': 120}
+READ_NOTICES = {
+    'forbidden': '이 도구를 확인할 권한이 없어요. 웹에서 사용 권한을 확인해 주세요.',
+    'not_found': '서버에서 도구를 찾을 수 없어요. 삭제되었거나 공개 범위가 변경되었을 수 있어요.',
+    'offline': '서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 확인해 주세요.',
+    'auth_required': '연결 KEY를 확인해 주세요. 연결 설정에서 다시 연결할 수 있어요.',
+    'invalid_response': '서버의 버전 정보를 확인하지 못했어요. 다시 확인해 주세요.',
+    'unavailable': '지금은 서버의 정보를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.',
+    'pending': '아직 확인하지 못한 항목이에요. 새로고침으로 다시 확인할 수 있어요.',
+    'recovery_required': '중단된 설치를 먼저 확인해 주세요. 기존 파일은 유지됩니다.',
+}
+
+
+class StoreReadError(SquareError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__(READ_NOTICES[status])
 
 
 class StoreClient(Client):
     """Narrow web accounting mutations; no arbitrary remote writes or commands."""
+    def read_installation_json(self, path):
+        # Listing installed items must not spend the normal 30-second timeout
+        # per tool, nor alter views/download counts. Redirects remain disabled
+        # by the canonical client opener; only fixed same-origin GETs qualify.
+        if not isinstance(path, str) or not re.fullmatch(r'/api/tools/[1-9][0-9]*(?:/version-check\?release=[1-9][0-9]*)?', path):
+            raise SquareError('허용되지 않은 설치 정보 조회입니다.')
+        headers = {'Authorization': 'Bearer ' + self.settings.token(), 'Accept': 'application/json',
+                   'User-Agent': 'AX-Organization-Store/1'}
+        try:
+            with self.opener.open(Request(self.url + path, headers=headers, method='GET'), timeout=3) as response:
+                raw = response.read(4 * 1024 * 1024 + 1)
+        except HTTPError as error:
+            code = error.code
+            error.close()
+            raise StoreReadError({401: 'auth_required', 403: 'forbidden', 404: 'not_found'}.get(code, 'unavailable')) from None
+        except (URLError, OSError, TimeoutError):
+            raise StoreReadError('offline') from None
+        try:
+            value = json.loads(raw) if len(raw) <= 4 * 1024 * 1024 else None
+        except (ValueError, UnicodeError):
+            value = None
+        if not isinstance(value, dict):
+            raise StoreReadError('invalid_response')
+        return value
+
     def open(self, path, method='GET', body=None, content_type=None):
         view = method == 'POST' and isinstance(path, str) and re.fullmatch(r'/api/tools/[1-9][0-9]*/view', path)
         if method != 'PUT' and not view:
@@ -301,6 +344,286 @@ class Store:
         return {key: record for key, record in runtime.installer.records().items()
                 if record.get('origin') == runtime.settings.url}
 
+    @staticmethod
+    def display_metadata(value):
+        # Cosmetic snapshots never become installation authority or commands.
+        return {key: re.sub(r'[\x00-\x1f\x7f]', ' ', value[key]).strip()[:limit]
+                for key, limit in DISPLAY_FIELDS.items()
+                if isinstance(value, dict) and isinstance(value.get(key), str) and value[key].strip()}
+
+    def display_path(self, runtime):
+        origin = hashlib.sha256(runtime.settings.url.encode()).hexdigest()
+        return no_links(self.directory / 'display-metadata' / (origin + '.json'))
+
+    def display_cache(self, runtime):
+        try:
+            path = self.display_path(runtime)
+            if not path.is_file() or path.stat().st_size > 1024 * 1024:
+                return {}
+            value = read_json(path)
+            rows = value.get('items')
+            if (value.get('schemaVersion') != 1 or value.get('origin') != runtime.settings.url
+                    or not isinstance(rows, dict) or len(rows) > 512):
+                return {}
+            return {key: dict(self.display_metadata(row), fetchedAt=row.get('fetchedAt', 0),
+                              metadataStatus=row.get('metadataStatus', 'cached'))
+                    for key, row in rows.items() if re.fullmatch(r'[1-9][0-9]{0,8}', key)
+                    and isinstance(row, dict) and type(row.get('fetchedAt', 0)) in (int, float)}
+        except (SquareError, OSError, ValueError):
+            return {}
+
+    def remember_display(self, runtime, changes):
+        if not changes:
+            return
+        try:
+            # Separate from the canonical transaction journal: adding a title
+            # must never invalidate a prepared plan or rollback record digest.
+            with operation_lock(self.directory / 'display-metadata'):
+                rows = self.display_cache(runtime)
+                rows.update(changes)
+                rows = dict(sorted(rows.items(), key=lambda item: item[1].get('fetchedAt', 0), reverse=True)[:512])
+                self.save_read_cache(runtime, self.display_path(runtime), rows)
+        except (SquareError, OSError, ValueError):
+            pass  # Cosmetic cache failure cannot turn an installed tool into an error.
+
+    @staticmethod
+    def save_read_cache(runtime, path, rows):
+        document = dict(schemaVersion=1, origin=runtime.settings.url, items=rows)
+        size = len(json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8'))
+        while size > 900 * 1024 and rows:
+            count = max(0, min(len(rows) - 1, int(len(rows) * 900 * 1024 / size)))
+            rows = dict(list(rows.items())[:count])
+            document['items'] = rows
+            size = len(json.dumps(document, ensure_ascii=False, indent=2).encode('utf-8'))
+        atomic_json(path, document)
+
+    def remember_item(self, runtime, tool_id, value):
+        metadata = self.display_metadata(value)
+        if metadata.get('name'):
+            self.remember_display(runtime, {str(tool_id): dict(metadata, fetchedAt=time.time(), metadataStatus='available')})
+
+    def checks_path(self, runtime):
+        return self.display_path(runtime).with_suffix('.checks.json')
+
+    def check_cache(self, runtime):
+        try:
+            path = no_links(self.checks_path(runtime))
+            if not path.is_file() or path.stat().st_size > 1024 * 1024:
+                return {}
+            value = read_json(path)
+            if value.get('origin') != runtime.settings.url or value.get('schemaVersion') != 1:
+                return {}
+            rows = value.get('items')
+            if not isinstance(rows, dict) or len(rows) > 512:
+                return {}
+            return {key: row for key, row in rows.items()
+                    if re.fullmatch(r'[1-9][0-9]{0,8}:[1-9][0-9]{0,8}', key) and isinstance(row, dict)
+                    and type(row.get('lastAttemptAt')) in (int, float)
+                    and type(row.get('checkedAt', 0)) in (int, float)}
+        except (SquareError, OSError, ValueError):
+            return {}
+
+    def remember_checks(self, runtime, changes):
+        if not changes:
+            return
+        try:
+            with operation_lock(self.directory / 'display-metadata'):
+                rows = self.check_cache(runtime)
+                rows.update(changes)
+                rows = dict(sorted(rows.items(), key=lambda item: item[1]['lastAttemptAt'], reverse=True)[:512])
+                self.save_read_cache(runtime, self.checks_path(runtime), rows)
+        except (SquareError, OSError, ValueError):
+            pass
+
+    @staticmethod
+    def read_installation(runtime, path):
+        try:
+            reader = getattr(runtime.client, 'read_installation_json', runtime.client.json)
+            return {'data': reader(path)}
+        except AuthenticationRequired:
+            return {'error': 'auth_required'}
+        except StoreReadError as error:
+            return {'error': error.status}
+        except (URLError, OSError, TimeoutError):
+            return {'error': 'offline'}
+        except SquareError:
+            return {'error': 'unavailable'}
+
+    def installation_reads(self, runtime, requests, limit, *, started=None):
+        """Deduplicate reads; four at once, with a bounded per-view time budget."""
+        results = {}
+        started = time.monotonic() if started is None else started
+        keys = list(requests)[:limit]
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for offset in range(0, len(keys), 4):
+                if time.monotonic() - started >= 6:
+                    break
+                batch = keys[offset:offset + 4]
+                values = executor.map(lambda key: self.read_installation(runtime, requests[key]), batch)
+                results.update(zip(batch, values))
+                # An offline/expired connection should cost one short batch,
+                # not another timeout for every installed tool.
+                if any(results[key].get('error') in {'offline', 'auth_required'} for key in batch):
+                    break
+        return results
+
+    @staticmethod
+    def completed_plan_id(runtime, record):
+        """Expose only the committed transaction identity, never its backup path."""
+        backup = record.get('backup')
+        if record.get('status') not in {'installed', 'configured'} or not isinstance(backup, str):
+            return None
+        try:
+            path = Path(backup)
+            expected_parent = Path(runtime.settings.state) / 'backups'
+            # Check the lexical parent before resolving so malformed records
+            # cannot trigger reads of arbitrary paths or remote shares.
+            if (not path.is_absolute() or path.parent != expected_parent
+                    or not re.fullmatch(r'[0-9a-f]{32}', path.name)):
+                return None
+            if no_links(path).parent != no_links(expected_parent):
+                return None
+            return path.name
+        except (OSError, ValueError, SquareError):
+            return None
+
+    def installation_items(self, runtime, records, *, fetch_missing=True, started=None):
+        cache = self.display_cache(runtime)
+        requests = {}
+        now = time.time()
+        for record in records.values():
+            tool_id = record.get('toolId')
+            if type(tool_id) is not int or not 1 <= tool_id <= 999999999:
+                continue
+            saved = cache.get(str(tool_id), {})
+            # A successful snapshot works offline. Failed legacy lookups get
+            # a short cooldown; repeated tab switches do not hammer the server.
+            if not saved.get('name') and now - saved.get('fetchedAt', 0) >= 30:
+                requests[tool_id] = f'/api/tools/{tool_id}'
+        changes = {}
+        requests = dict(sorted(requests.items(), key=lambda pair: cache.get(str(pair[0]), {}).get('fetchedAt', 0)))
+        for tool_id, response in (self.installation_reads(runtime, requests, 12, started=started) if fetch_missing else {}).items():
+            value = response.get('data')
+            status = response.get('error', 'invalid_response')
+            metadata = {}
+            if isinstance(value, dict) and type(value.get('id')) is int and value['id'] == tool_id:
+                metadata = self.display_metadata(value)
+                status = 'available' if metadata.get('name') else 'invalid_response'
+            changes[str(tool_id)] = dict(metadata, fetchedAt=now, metadataStatus=status)
+        self.remember_display(runtime, changes)
+        cache.update(changes)
+        fields = ('toolId', 'release', 'scope', 'scopeDir', 'target', 'status', 'created')
+        items = []
+        for key, record in records.items():
+            saved = cache.get(str(record.get('toolId')), {})
+            item = dict({field: record.get(field) for field in fields}, installationId=key,
+                        rollbackAvailable=record.get('status') in {'installed', 'configured'},
+                        **self.display_metadata(saved))
+            completed_plan = self.completed_plan_id(runtime, record)
+            if completed_plan is not None:
+                item['completedPlanId'] = completed_plan
+            item['metadataStatus'] = saved.get('metadataStatus', 'pending' if record.get('toolId') in requests else 'unknown')
+            if saved.get('name') and str(record.get('toolId')) not in changes:
+                item['metadataStatus'] = 'cached'
+            items.append(item)
+        return items
+
+    def check_updates(self, runtime, records, recovery, tool_id=None):
+        started = time.monotonic()
+        selected = {key: record for key, record in records.items()
+                    if record.get('status') in {'installed', 'configured', 'verified-file'}
+                    and (tool_id is None or record.get('toolId') == tool_id)}
+        rows = self.installation_items(runtime, selected, fetch_missing=False)
+        blocked = {row.get('toolId') for row in recovery.get('blocked', [])}
+        if recovery.get('blocked'):
+            # The canonical installer blocks every new prepare until recovery
+            # is resolved, even when a different tool owns the interrupted job.
+            blocked.update(record.get('toolId') for record in selected.values())
+        requests = {}
+        for record in selected.values():
+            try:
+                pair = positive(record.get('toolId')), positive(record.get('release'))
+            except SquareError:
+                continue
+            if pair[0] not in blocked:
+                requests[pair] = f'/api/tools/{pair[0]}/version-check?release={pair[1]}'
+        now, cached_checks = time.time(), self.check_cache(runtime)
+        cache_key = lambda pair: f'{pair[0]}:{pair[1]}'
+        requests = dict(sorted(requests.items(), key=lambda pair: cached_checks.get(cache_key(pair[0]), {}).get('lastAttemptAt', 0)))
+        responses = self.installation_reads(runtime, requests, 32, started=started)
+        changes = {}
+        summary = dict(total=len(rows), checked=0, available=0, current=0, attention=0, failed=0, pending=0, cached=0)
+        for row in rows:
+            pair = row.get('toolId'), row.get('release')
+            response = responses.get(pair, {})
+            cached = cached_checks.get(cache_key(pair), {})
+            from_cache = (not response and pair[0] not in blocked and isinstance(cached.get('result'), dict)
+                          and 0 <= now - cached.get('checkedAt', 0) <= 60)
+            if from_cache:
+                response = {'data': cached['result']}
+            result = response.get('data')
+            status = 'recovery_required' if pair[0] in blocked else response.get('error', 'pending')
+            valid = (isinstance(result, dict) and type(result.get('toolId')) is int and result['toolId'] == pair[0]
+                     and type(result.get('installedRelease')) is int and result['installedRelease'] == pair[1]
+                     and type(result.get('activeRelease')) is int and 1 <= result['activeRelease'] <= 999999999
+                     and isinstance(result.get('status'), str)
+                     and result.get('status') in {'current', 'update_available', 'rollback_available', 'unknown_release'}
+                     and type(result.get('updatePaused', False)) is bool)
+            clean = dict(toolId=pair[0], installedRelease=pair[1])
+            if valid and status != 'recovery_required':
+                status = result['status']
+                active = result['activeRelease']
+                # Treat inconsistent or stale server results as unconfirmed,
+                # never offer a downgrade as an ordinary update.
+                if ((status == 'current' and active != pair[1])
+                        or (status == 'update_available' and active <= pair[1])
+                        or (status == 'rollback_available' and active >= pair[1])):
+                    status = 'invalid_response'
+                else:
+                    clean.update(activeRelease=active, updatePaused=result.get('updatePaused', False))
+                    if isinstance(result.get('message'), str):
+                        clean['message'] = re.sub(r'[\x00-\x1f\x7f]', ' ', result['message'])[:500]
+            elif result is not None and status != 'recovery_required':
+                status = 'invalid_response'
+            available = (status == 'update_available' and clean.get('activeRelease', 0) > (pair[1] or 0)
+                         and not clean.get('updatePaused'))
+            clean['status'] = status
+            if status in READ_NOTICES:
+                clean['message'] = READ_NOTICES[status]
+            row.update(result=clean, updateAvailable=available, updateStatus=status, fromCache=from_cache,
+                       checkedAt=cached.get('checkedAt') if from_cache else now if pair in responses else None,
+                       stale=bool(not response and cached.get('result')))
+            if available:
+                summary['available'] += 1
+            elif status == 'current':
+                summary['current'] += 1
+            elif status == 'pending':
+                summary['pending'] += 1
+            elif status in {'offline', 'auth_required', 'invalid_response', 'unavailable'}:
+                summary['failed'] += 1
+            else:
+                summary['attention'] += 1
+            if valid and status not in {'invalid_response', 'recovery_required'}:
+                summary['checked'] += 1
+                if from_cache:
+                    summary['cached'] += 1
+            if pair in responses:
+                changes[cache_key(pair)] = dict(lastAttemptAt=now, checkedAt=now,
+                                               result=clean if valid and status != 'invalid_response' else None)
+        self.remember_checks(runtime, changes)
+        # Opening Updates first must also resolve legacy titles. Only actionable
+        # rows need metadata here, and share this view's existing time budget.
+        available_records = {row['installationId']: selected[row['installationId']]
+                             for row in rows if row['updateAvailable']}
+        display = {row['installationId']: row for row in self.installation_items(runtime, available_records, started=started)}
+        for row in rows:
+            value = display.get(row['installationId'])
+            if value:
+                row.update(self.display_metadata(value), metadataStatus=value['metadataStatus'])
+        return dict(items=rows, summary=summary, complete=not (summary['failed'] or summary['pending'] or summary['attention']),
+                    recovery=recovery, automaticallyUpdated=False,
+                    notice='새 버전 확인만 수행했어요. 실제 교체는 설치 위치와 변경 내용을 확인한 뒤 진행합니다.')
+
     def receipt_path(self, plan_id):
         if not isinstance(plan_id, str) or not re.fullmatch('[0-9a-f]{32}', plan_id):
             raise SquareError('설치 준비안을 다시 확인하세요.')
@@ -373,6 +696,7 @@ class Store:
         if not supported or plan.get('profile', {}).get('kind') not in {'skill', 'mcp'}:
             raise SquareError(MANUAL_NOTICE)
         result = runtime.installer.install(payload['planId'], payload.get('approvalDigest'), True)
+        self.remember_item(runtime, plan['toolId'], plan['manifest'])
         # The canonical engine consumes the plan after durable commit; a failed
         # cosmetic receipt cleanup must never turn a completed install into error.
         try:
@@ -619,6 +943,8 @@ class Store:
         if action == 'detail':
             tool_id = positive(payload.get('toolId'))
             item, manifest = runtime.get_item(tool_id), client.manifest(tool_id)
+            if type(item.get('id')) is int and item['id'] == tool_id:
+                self.remember_item(runtime, tool_id, item)
             # Only an explicit popup opening counts. GET/refresh/prepare stay
             # read-only; the shared server deduplicates web + extension views.
             if payload.get('recordView') is True:
@@ -638,6 +964,16 @@ class Store:
             if type(payload.get('liked')) is not bool:
                 raise SquareError('좋아요 상태를 확인하세요.')
             return client.json(f'/api/tools/{positive(payload.get("toolId"))}/like', 'PUT', {'liked': payload['liked']})
+        if action in {'installations', 'checkUpdates'}:
+            # Snapshot and recovery need the canonical lock; remote read-only
+            # metadata/version requests do not. Another install can proceed.
+            with operation_lock(settings.state):
+                recovery = runtime.installer.recover()
+                records = self.records(runtime)
+            if action == 'installations':
+                return dict(recovery=recovery, items=self.installation_items(runtime, records))
+            return self.check_updates(runtime, records, recovery,
+                                      positive(payload['toolId']) if 'toolId' in payload else None)
         # Share exactly the canonical MCP lock and installation records. UI reads
         # never hold this lock while searching; local mutations cannot overlap.
         with operation_lock(settings.state):
@@ -653,13 +989,6 @@ class Store:
                              for r in records.values())
                 return dict(runtime.download_item(tool_id, update=update), purpose='update' if update else 'download',
                             installNotice=MANUAL_NOTICE)
-            if action == 'installations':
-                fields = ('toolId', 'release', 'scope', 'scopeDir', 'target', 'status', 'created')
-                return {'recovery': recovery, 'items': [dict({k: r.get(k) for k in fields}, installationId=key,
-                                      rollbackAvailable=r.get('status') in {'installed', 'configured'})
-                                  for key, r in records.items()]}
-            if action == 'checkUpdates':
-                return dict(runtime.check_updates(positive(payload['toolId']) if 'toolId' in payload else None), recovery=recovery)
             installation_id = payload.get('installationId')
             if not isinstance(installation_id, str) or installation_id not in records:
                 raise SquareError('현재 연결의 설치 기록을 찾을 수 없습니다.')

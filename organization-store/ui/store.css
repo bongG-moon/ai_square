@@ -41,3 +41,62 @@ button,input,select,textarea{font-family:inherit;font-size:13px}button{line-heig
 
 .publish-target-search{display:flex;gap:7px}.publish-target-search input{flex:1;min-width:0}.publish-target-search button{font-size:12px;flex:none;min-height:34px}
 .store-header .brand-home{font:inherit;letter-spacing:inherit;line-height:inherit;color:inherit;border:0;background:transparent;padding:0;min-height:0;text-align:left;border-radius:4px}.store-header .brand-home:hover{color:var(--accent);background:transparent}.store-header .brand-home:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.catalog-card{cursor:pointer}.catalog-card:hover{border-color:var(--accent)}.catalog-card:has(.tool-title:focus-visible){outline:2px solid var(--accent);outline-offset:2px}.catalog-card .tool-title:focus-visible{outline:none}
+
+/* Installed tools use a compact identity/location/action row, separate from discovery. */
+#results.record-list{grid-template-columns:minmax(0,1fr);gap:10px}
+.install-record{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:12px;padding:15px 16px;border-radius:12px;min-width:0}
+.install-record>.tool-symbol{width:36px;height:36px;align-self:start;margin-top:3px}
+.record-main{min-width:0}
+.record-heading{display:flex;align-items:center;gap:8px;min-width:0;margin-bottom:4px}
+.record-title{font-size:14px;line-height:1.55;font-weight:650;letter-spacing:-.15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.record-heading .type-badge{flex:none;align-self:center;font-size:10px}
+.record-meta{display:flex;align-items:center;flex-wrap:wrap;gap:3px 9px;color:var(--muted);font-size:11px;line-height:1.65}
+.record-meta>span+span{border-left:1px solid var(--line);padding-left:9px}
+.record-versions{display:inline-flex;align-items:center;gap:7px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.record-version{color:var(--text)}.record-new-version{font-weight:650;color:var(--accent)}.record-version-arrow{color:var(--muted)}
+.record-target{margin-top:3px;font-size:11px;line-height:1.7;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.install-record>.record-actions{margin:0;display:flex;align-items:center;justify-content:flex-end;gap:4px;flex-wrap:wrap;max-width:290px}
+.record-actions button{min-height:30px;font-size:11px;padding:4px 8px;white-space:nowrap}.record-actions .secondary{font-size:12px;padding:5px 11px;color:var(--accent)}
+.update-summary{grid-column:1/-1;border:1px solid var(--line);border-radius:10px;padding:0 15px;background:var(--surface);font-size:12px;color:var(--muted)}
+.update-summary>summary{cursor:pointer;padding:12px 0;color:var(--text);font-weight:500}.update-summary>p{margin:0 0 9px;font-size:11px}
+.update-summary ul{list-style:none;padding:0;margin:0 0 6px}.update-summary li{display:grid;gap:2px;padding:9px 0;border-top:1px solid var(--line);overflow-wrap:anywhere;font-size:11px;line-height:1.7}.update-summary li strong{font-size:12px;font-weight:500;color:var(--text)}
+.update-summary>.text-button{margin:0 0 9px -7px;font-size:12px}
+.tool-card{animation:none}
+@media(max-width:840px){.install-record{grid-template-columns:36px minmax(0,1fr)}.install-record>.record-actions{grid-column:2;justify-content:flex-start;max-width:none;margin-top:-2px}}
+@media(max-width:480px){.install-record{padding:13px 12px;gap:9px 10px}.record-heading{flex-wrap:wrap;gap:4px 7px}.record-title{max-width:100%}.record-heading .type-badge{font-size:9px}.record-meta{gap:2px 7px}.record-meta>span+span{padding-left:7px}.record-actions button{padding:4px 6px}.update-summary{padding:0 12px}}
+
+/* Native close/focus remain immediate. Discrete display/overlay transitions only
+   retain the rendered layer for its fade; there are no deferred interaction timers. */
+dialog{opacity:0;transform:translateY(6px);transition:opacity 300ms cubic-bezier(.2,.7,.2,1),transform 300ms cubic-bezier(.2,.7,.2,1),display 300ms allow-discrete,overlay 300ms allow-discrete}
+dialog[open]{opacity:1;transform:translateY(0)}
+dialog:not([open]),dialog:not([open])::backdrop{pointer-events:none}
+dialog::backdrop{opacity:0;transition:opacity 300ms ease,display 300ms allow-discrete,overlay 300ms allow-discrete}
+dialog[open]::backdrop{opacity:1}
+@starting-style{dialog[open]{opacity:0;transform:translateY(6px)}dialog[open]::backdrop{opacity:0}}
+@media(prefers-reduced-motion:reduce){dialog,dialog::backdrop{transition:none}dialog{transform:none}.tool-card{animation:none}}
+
+/* Semantic action icons match the host app without changing link behaviour. */
+.action-link{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.action-icon{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+
+/* Installation receipts drive these states; there is no simulated percentage
+   or progress polling. Only the small spinner animates while work is pending. */
+[data-install-tool]{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:120px}
+[data-install-tool][aria-busy=true]{opacity:.85}
+.installation-status{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px 11px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:13px 15px;margin:0 0 18px}
+.installation-status[data-phase=installing],.installation-status[data-phase=preparing]{border-color:var(--accent)}
+.installation-status[data-phase=error],.installation-status[data-phase=uncertain]{border-color:var(--danger)}
+.install-status-text{min-width:0}
+.install-status-text strong{display:block;font-size:13px;font-weight:650;overflow-wrap:anywhere}
+.install-status-text p{color:var(--muted);font-size:12px;line-height:1.65;white-space:pre-line;overflow-wrap:anywhere;margin-top:3px}
+.install-status-actions{grid-column:2;display:flex;flex-wrap:wrap;gap:4px 10px}
+.install-status-actions:empty{display:none}
+#detail-installation-status{margin-top:10px}
+.install-status-actions .text-button{padding:2px 0;min-height:28px;font-size:12px}
+.install-state-mark{color:var(--accent);line-height:21px;text-align:center;font-weight:700}
+[data-phase=error]>.install-state-mark,[data-phase=uncertain]>.install-state-mark{color:var(--danger)}
+.install-spinner{display:inline-block;width:15px;height:15px;flex:none;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:install-spin .85s linear infinite}
+.installation-status>.install-spinner{color:var(--accent);margin-top:3px}
+@keyframes install-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.install-spinner{animation:none}}
+@media(max-width:480px){.installation-status{padding:11px 12px;gap:7px 9px}.install-status-actions{gap:4px 12px}}

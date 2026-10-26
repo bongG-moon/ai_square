@@ -10,13 +10,14 @@
     <div class="header-actions"><button id="publish-open" class="secondary" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>도구 등록</button><button id="connection-button" class="connection" type="button" hidden><span class="status-dot"></span><span id="connection-label">연결 설정</span><span aria-hidden="true">›</span></button></div>
   </header>
   <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+  <section id="installation-status" class="installation-status" aria-label="설치 진행 상태" aria-live="polite" hidden></section>
   <section id="connection-view" class="connection-view" aria-labelledby="connection-title" hidden>
     <div class="intro"><span class="intro-icon" aria-hidden="true">◈</span><h2 id="connection-title">플랫폼과 한 번 연결하세요.</h2><p>웹에서 받은 개인 KEY로 연결합니다. 기존 좋아요와 다운로드 기록을 그대로 사용합니다.</p><ol class="steps"><li><b>01</b><span id="connection-server-step">플랫폼 주소 입력</span></li><li><b>02</b><span>웹의 연결 KEY 입력</span></li><li><b>03</b><span>기능을 찾아 다운로드·설치</span></li></ol><p class="muted">새 KEY를 발급할 필요는 없습니다. 기존에 발급받은 유효한 KEY를 사용하세요.</p></div>
     <form id="connection-form" class="connection-form">
       <div class="field-heading server-heading"><label for="server-url">연결할 플랫폼</label><button id="change-server" class="text-button" type="button" aria-controls="server-url" hidden>서버 주소 변경</button></div>
       <input id="server-url" type="url" placeholder="https://플랫폼-서버" autocomplete="url" required maxlength="500" aria-describedby="server-help">
       <p id="server-help" class="field-help">사용 중인 플랫폼의 기본 주소를 입력하세요.</p>
-      <div class="field-heading"><label for="connection-key">개인 연결 KEY</label><button id="key-guide" type="button" class="text-button">웹에서 KEY 확인 ↗</button></div>
+      <div class="field-heading"><label for="connection-key">개인 연결 KEY</label><button id="key-guide" type="button" class="text-button action-link"><svg class="action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="8" cy="9" r="5"/><path d="m12 12 8 8h3v-3l-3-3h-3v-3"/></svg>웹에서 KEY 확인</button></div>
       <input id="connection-key" type="password" placeholder="ptsq_…" autocomplete="off" spellcheck="false" maxlength="80" required>
       <p class="field-help">현재 Windows 계정에 암호화해 보관합니다. 대화나 로그에는 남기지 않습니다.</p>
       <label id="http-warning" class="check-row" hidden><input id="allow-http" type="checkbox"><span>이 서버는 HTTP를 사용해 연결 KEY와 통신 내용이 암호화되지 않습니다. 위 서버 주소를 확인했으며 이 연결을 사용하겠습니다.</span></label>
