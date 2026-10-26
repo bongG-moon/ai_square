@@ -10,6 +10,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 from .storage import db, next_id, audit_event, stage_upload, artifact_path, used_bytes, purge_deleted, admin_ids, all_admin_ids, event, deliver_notifications
 from . import activity
+from . import activity_history as activity_reports
 from .request_files import stage_attachments, attachment_path, public_attachments, cleanup_unreferenced_attachments
 from .package_contract import registration_fields, normalize_workflow
 from .storage_capacity import snapshot as storage_snapshot
@@ -722,10 +723,13 @@ def set_admin(uid):
 
 @api.get('/api/activity')
 def activity_history():
-    admin();rows,cursor=activity.history(request.args.get('before'))
-    for row in rows:
-        t=db().tools.find_one({'_id':row['tool']});row['toolName']=t['data']['name'] if t else '삭제된 기능';row['userName']=name_of(row['user'])
-    return jsonify(events=rows,nextCursor=cursor,backend='mongodb')
+    admin()
+    return jsonify(activity_reports.page(request.args))
+
+@api.get('/api/activity/export')
+def activity_export():
+    admin()
+    return activity_reports.export_csv(request.args)
 
 @api.post('/api/tools/<int:tid>/rollback')
 def rollback(tid):

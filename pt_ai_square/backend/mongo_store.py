@@ -73,6 +73,8 @@ def init_db(app):
         db().local_tokens.create_index([('user', 1), ('expires', -1)])
         db().publish_drafts.create_index([('user', 1), ('status', 1), ('expires', 1)])
         db().activity.create_index([('user', 1), ('kind', 1), ('created', -1)])
+        db().activity.create_index([('created', -1), ('_id', -1)])
+        db().activity.create_index([('kind', 1), ('created', -1), ('_id', -1)])
         db().tools.create_index('versions.apiUsage.user')
         db().tools.create_index('versions.publishRequest.key', unique=True, sparse=True)
         db().tools.create_index([('owner', 1), ('deleted', 1)])

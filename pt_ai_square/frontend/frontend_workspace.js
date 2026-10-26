@@ -209,8 +209,8 @@ async function inbox(loadMore=false){
 Object.assign(actions,{
  'manage':()=>manage(),
  'admin-home':async()=>{work.tab='tools';closeModal();navigate('admin');},
- 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='trash'&&server.user.role==='admin')await loadDeletionJobs();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;if(work.tab==='activity'){const r=await requestAPI('/api/activity');server.activityEvents=r.events;server.activityCursor=r.nextCursor;}renderWorkspace();},
- 'admin-tab':b=>{work.tab=b.dataset.tab==='orgs'?'taxonomy':b.dataset.tab;closeModal();navigate(work.scope==='all'?'admin':'manage');},
+ 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='activity')return openActivityHistory();if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='trash'&&server.user.role==='admin')await loadDeletionJobs();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;renderWorkspace();},
+ 'admin-tab':b=>{work.tab=b.dataset.tab==='orgs'?'taxonomy':b.dataset.tab;closeModal();navigate(work.scope==='all'?'admin':'manage');if(work.tab==='activity')return openActivityHistory();},
  'storage-dialog':()=>originalManage('storage'),
  'access-filter':b=>{work.requestFilter=b.dataset.filter;renderWorkspace();},
  'requests-board':async()=>{await loadIdeas();closeModal();navigate('ideas');},

@@ -3,6 +3,17 @@ from pathlib import Path
 
 BASE=Path(__file__).resolve().parents[1]
 p=BASE/'static/app.js';s=p.read_text(encoding='utf-8')
+# Activity reporting is part of the live management surface. Keep its maintained
+# source in the served bundle without rebuilding the historical base layout.
+activity_start=s.index('function activityPanel(){')
+activity_end=s.index("\nroot.addEventListener('click',event=>",activity_start)
+s=s[:activity_start]+(BASE/'frontend/frontend_activity.js').read_text(encoding='utf-8').rstrip()+'\n'+s[activity_end:]
+# The base handler is superseded by the workspace handler below, but retain
+# source/bundle parity for callers that exercise the base management dialog.
+source_api=(BASE/'frontend/frontend_api.js').read_text(encoding='utf-8')
+admin_line=next(line for line in source_api.splitlines() if line.startswith("actions['admin-tab']="))
+old_admin_line=next(line for line in s.splitlines() if line.startswith("actions['admin-tab']="))
+s=s.replace(old_admin_line,admin_line,1)
 start='// BEGIN WORKSPACE EXTENSION\n';end='// END WORKSPACE EXTENSION\n'
 if start in s:
     a=s.index(start);b=s.index(end,a)+len(end);s=s[:a]+s[b:]
