@@ -33,13 +33,14 @@ def _fake_host(directory, code=0):
     # The fixture only captures the forwarded bytes and exits; no registry/API.
     source.write_text('''using System; using System.IO; class Fixture {
 static int Main(string[] args) {
-if (args.Length != 2 || args[0] != "--import-extension") return 99;
+if (args.Length != 4 || args[0] != "--import-extension" || args[2] != "--state") return 99;
 string root=AppDomain.CurrentDomain.BaseDirectory;
 string id=Guid.NewGuid().ToString("N");
 File.WriteAllText(Path.Combine(root,id+".path"),args[1]);
 File.Copy(args[1],Path.Combine(root,id+".zip"));
 return ''' + str(code) + '''; }}''', encoding='utf-8')
     host = directory / 'AX-Workspace.exe'
+    (directory / 'AX-Workspace.install-id').write_text('AX.Workspace.Desktop', encoding='ascii')
     compiler = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     result = subprocess.run([str(compiler), '/nologo', '/target:exe', '/out:' + str(host), str(source)],
                             capture_output=True, timeout=30)
@@ -47,9 +48,10 @@ return ''' + str(code) + '''; }}''', encoding='utf-8')
     return host
 
 
-def _setup(target, payload, host):
+def _setup(target, payload, host, state=None):
     return exe_builder.compile_installer(target, payload, '0.1.0', compiler=build.nsis_compiler(),
-                                         host_exe_override=host)
+                                         host_exe_override=host,
+                                         state_root_override=state or target.parent / 'isolated-state')
 
 
 def test_actual_exe_forwards_verified_package_without_file_association_and_cleans_temp(tmp_path, payload):

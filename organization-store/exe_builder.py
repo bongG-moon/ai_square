@@ -88,7 +88,7 @@ def _literal(value):
 
 
 def compile_installer(target, package_bytes, version, *, bundle_root=None,
-                      compiler=None, host_exe_override=None):
+                      compiler=None, host_exe_override=None, state_root_override=None):
     """Build, but never launch, setup. The host override is only for test builds."""
     if os.name != 'nt':
         raise ValueError('EXE 설치 파일 생성은 Windows에서 실행해 주세요.')
@@ -101,6 +101,7 @@ def compile_installer(target, package_bytes, version, *, bundle_root=None,
         raise ValueError('EXE 버전 형식이 올바르지 않습니다.')
     root = Path(bundle_root or Path(__file__).resolve().parent)
     script = (root / 'installer/ImportExtension.nsi').read_text('utf-8')
+    resolver = (root / 'installer/ResolveWorkspace.ps1').read_text('utf-8-sig')
     if compiler is None:
         files = _toolchain(root / 'nsis-toolchain.zip', root / 'nsis-toolchain.zip.sha256')
     else:
@@ -114,10 +115,16 @@ def compile_installer(target, package_bytes, version, *, bundle_root=None,
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         (work / 'package.zip').write_bytes(package_bytes)
+        (work / 'ResolveWorkspace.ps1').write_text(resolver, encoding='utf-8-sig')
         definitions = ('!define OUTPUT_FILE "result.exe"\n!define PACKAGE_ZIP "package.zip"\n'
+                       '!define RESOLVER_SCRIPT "ResolveWorkspace.ps1"\n'
                        '!define APP_VERSION "' + version + '"\n')
         if host_exe_override is not None:
             definitions += '!define IMPORT_TEST_HOST "' + _literal(Path(host_exe_override).resolve()) + '"\n'
+        if state_root_override is not None:
+            if host_exe_override is None:
+                raise ValueError('격리 상태 경로는 테스트 실행기와 함께 지정해야 합니다.')
+            definitions += '!define IMPORT_TEST_STATE "' + _literal(Path(state_root_override).resolve()) + '"\n'
         source = work / 'setup.nsi'
         source.write_text(definitions + script, encoding='utf-8-sig')
         environment = dict(os.environ, NSISDIR=str(nsis))
@@ -142,4 +149,5 @@ def compile_installer(target, package_bytes, version, *, bundle_root=None,
             raise ValueError('출력 파일이 이미 있습니다. 새 파일 이름을 지정하세요.') from None
     return {'sha256': hashlib.sha256(built).hexdigest(), 'bytes': len(built),
             'installerExecutableIncluded': True, 'nativeHelperIncluded': False,
-            'fileAssociationRequired': False, 'installerExecuted': False}
+            'fileAssociationRequired': False, 'installerExecuted': False,
+            'updatedHostResolutionIncluded': True}

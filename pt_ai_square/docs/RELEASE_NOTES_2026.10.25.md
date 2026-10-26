@@ -2,6 +2,16 @@
 
 2026-10-25 · 확장 버전 0.1.0
 
+## 2026-10-26 갱신 — 업데이트된 앱으로 확장 설치 연결
+
+- 확장 설치 EXE가 처음 설치한 실행 파일 대신, 앱 내부 업데이트로 활성화된 최신 실행 자료를 확인해 설치 확인창을 엽니다. 구형 실행 파일의 EXE-50 때문에 기본 앱을 재설치해야 했던 경우를 개선했습니다.
+- 설치 소유 표시, 업데이트 기록과 전체 파일 해시를 검증합니다. 요청을 전달한 뒤 응답을 받지 못해도 다른 실행 파일로 자동 재전송하지 않으며 초안·대화·이어 할 일·연결 설정을 변경하지 않습니다.
+- 확장 버전은 **0.1.0**으로 유지합니다. 이번 Distribution ZIP으로 서버 주소를 지정해 Setup.exe를 다시 만들고 웹의 기존 파일을 교체해야 합니다. 이미 배포한 EXE에는 수정이 자동 반영되지 않습니다.
+- 기본 앱은 **0.23.34** 배포본을 그대로 사용합니다. 최신 앱으로 내부 업데이트를 완료했다면 이 수정 때문에 새로 설치할 필요는 없습니다.
+- 실행 경로·빌드·패키징 회귀 63개와 격리된 실제 전달 경로 6개 시나리오를 검증했습니다. 사내 VDI·개인 KEY·V3 허용 여부를 검증한 결과는 아닙니다.
+- 앱이 꺼져 있어 PowerShell 진입점으로 새 창을 여는 경우에는 설정의 실행기 미확인 안내나 작업표시줄 고정 제한이 남을 수 있습니다. 이미 실행 중인 앱으로 전달할 때는 기존 실행기 정보를 유지합니다.
+- 소스 ZIP은 현재 플랫폼의 MCP 채팅 연결·게시, 한글 파일 다운로드, HTTP KEY 복사와 AX 카드 개선도 포함합니다. 기존 운영 설정·MongoDB·업로드 자료는 유지합니다.
+
 ## 공개 배포 ZIP과 운영자 준비 순서
 
 - **ai-square-2026.10.25-source.zip**: 플랫폼과 확장 개발 소스입니다. 기존 운영 설정·MongoDB·업로드 저장소를 유지한 채 웹 소스를 교체합니다.
@@ -10,7 +20,7 @@
 
 Distribution ZIP을 푼 뒤 `configure_server.py` 상단의 `SERVER_URL`을 수정하고 `python configure_server.py`를 실행하세요. 기본 출력은 `PNT-AI-Square-0.1.0-Setup.exe`이며, 사용자는 Python을 실행하거나 압축을 풀지 않습니다. 웹은 업로드된 파일을 그대로 제공하며 주소를 자동 삽입하지 않습니다. 서버 주소를 포함한 확장 파일은 사내 공유 대상으로 보관하고 공개 GitHub에 올리지 않습니다. 기존 네이티브 StoreInstaller.exe 대신 표준 NSIS 진입점이 공통 앱의 검증·설치 확인창을 엽니다. 별도 파일 연결은 필요하지 않습니다.
 
-공통 앱의 사내 GitLab 배포에는 [workspace-local-0.23.32-source.zip](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/workspace-local-0.23.32-source.zip)을 사용합니다. PC 설치에는 [AX Workspace 0.23.32 설치 파일](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.32/AX-Workspace-0.23.32-Setup.exe)을 사용합니다. 이전 동일 버전에는 새 파일 선택·업무 선택 연결부가 없을 수 있으므로 이번 Setup으로 한 번 갱신해야 합니다.
+공통 앱의 사내 GitLab 배포에는 [workspace-local-0.23.34-source.zip](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.34/workspace-local-0.23.34-source.zip)을 사용합니다. PC 신규 설치·복구에는 [AX Workspace 0.23.34 설치 파일](https://github.com/bongG-moon/workspace_local/releases/download/v0.23.34/AX-Workspace-0.23.34-Setup.exe)을 사용합니다. 이번 확장 설치기는 앱 내부 업데이트로 활성화된 파일도 확인합니다.
 
 ## 앱 안에서 설치·등록과 화면 개선
 

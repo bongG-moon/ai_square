@@ -75,6 +75,7 @@ def create_distribution(output, *, source=HERE, vendor=CANONICAL, compiler=None)
         'configure_server.py': (Path(source) / 'configure_server.py').read_bytes(),
         'exe_builder.py': (Path(source) / 'exe_builder.py').read_bytes(),
         'installer/ImportExtension.nsi': (Path(source) / 'installer/ImportExtension.nsi').read_bytes(),
+        'installer/ResolveWorkspace.ps1': (Path(source) / 'installer/ResolveWorkspace.ps1').read_bytes(),
         'nsis-toolchain.zip': nsis_data,
         'nsis-toolchain.zip.sha256': (hashlib.sha256(nsis_data).hexdigest() + '\n').encode('ascii'),
         'licenses/NSIS-COPYING.txt': (Path(source) / 'installer/licenses/NSIS-COPYING.txt').read_bytes(),

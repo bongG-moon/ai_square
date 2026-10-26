@@ -30,7 +30,7 @@ def test_public_bundle_is_neutral_and_only_has_offline_material(distribution):
     report, files = distribution
     assert report['serverPresetIncluded'] is False
     assert report['installerExecutableIncluded'] is False
-    assert set(files) == {'extension-template.zip', 'extension-template.zip.sha256', 'configure_server.py', 'README.txt', 'exe_builder.py', 'installer/ImportExtension.nsi', 'nsis-toolchain.zip', 'nsis-toolchain.zip.sha256', 'licenses/NSIS-COPYING.txt', 'licenses/NSIS-Modern-UI-2.txt'}
+    assert set(files) == {'extension-template.zip', 'extension-template.zip.sha256', 'configure_server.py', 'README.txt', 'exe_builder.py', 'installer/ImportExtension.nsi', 'installer/ResolveWorkspace.ps1', 'nsis-toolchain.zip', 'nsis-toolchain.zip.sha256', 'licenses/NSIS-COPYING.txt', 'licenses/NSIS-Modern-UI-2.txt'}
     assert report['standardCompilerIncluded'] is True
     assert report['nativeHelperIncluded'] is False
     assert hashlib.sha256(files['extension-template.zip']).hexdigest() == report['templateSha256']
