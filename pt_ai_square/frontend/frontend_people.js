@@ -20,14 +20,26 @@ $('#sq-connection-key').addEventListener('click',event=>{
  }
 });
 root.addEventListener('error',event=>{
- if(event.target.matches?.('.sq-profile-photo,.sq-person-photo')){event.target.hidden=true;event.target.closest('.sq-profile-avatar,.sq-person-avatar')?.classList.add('is-fallback');}
+ if(event.target.matches?.('.sq-profile-photo,.sq-person-photo')){event.target.hidden=true;event.target.dataset.photoFailedAt=String(Date.now());delete event.target.dataset.photoRetrying;event.target.closest('.sq-profile-avatar,.sq-person-avatar')?.classList.add('is-fallback');}
 },true);
-function renderProfile(){
+root.addEventListener('load',event=>{
+ if(event.target.matches?.('.sq-profile-photo,.sq-person-photo')){event.target.hidden=false;delete event.target.dataset.photoFailedAt;delete event.target.dataset.photoRetrying;event.target.closest('.sq-profile-avatar,.sq-person-avatar')?.classList.remove('is-fallback');}
+},true);
+function retryFailedProfilePhoto(photo){
+ const image=$('#sq-session .sq-profile-photo');
+ // The server caches failures for 30 seconds. Retry only after a successful
+ // app refresh, never from a timer or ordinary rank/card rendering.
+ if(!photo||!image?.hidden||image.dataset.photoRetrying||!image.dataset.photoFailedAt)return;
+ const failedAt=Number(image.dataset.photoFailedAt);
+ if(!Number.isFinite(failedAt)||Date.now()-failedAt<31000)return;
+ image.dataset.photoRetrying='true';image.src=`${photo}?retry=${Date.now()}`;
+}
+function renderProfile(retryFailedPhoto=false){
  const u=server.user||{},name=u.emp_name||u.name||'사용자',org=u.dept||u.org||'공통';
  const photo=server.dataMode!=='dummy'&&u.photoUrl==='/api/me/photo'?u.photoUrl:'';
  const signature=JSON.stringify([u.id,name,org,photo]);
  // Base refresh writes the session label, so rebuild only if that text replaced the profile.
- if(signature===profileSignature&&$('#sq-session .sq-profile-name'))return;
+ if(signature===profileSignature&&$('#sq-session .sq-profile-name')){if(retryFailedPhoto)retryFailedProfilePhoto(photo);return;}
  profileSignature=signature;
  $('#sq-session').innerHTML=`<span class="sq-profile-copy"><strong class="sq-profile-name">${esc(name)}${/\bTL$/.test(name)?'':' <span>TL</span>'}</strong><small>${esc(org)}</small></span><span class="sq-profile-avatar"><span aria-hidden="true">${esc([...name][0]||'?')}</span>${photo?`<img class="sq-profile-photo" src="${photo}" width="34" height="34" alt="" referrerpolicy="no-referrer">`:''}</span>`;
  $('#sq-session').setAttribute('aria-label',`${name} · ${org}`);
@@ -62,7 +74,9 @@ renderRanks=function(){
 render=function(){basePeopleRender();renderProfile();};
 refresh=async function(){
  if(state.rankMode==='people')await loadPeopleRanks();
- await basePeopleRefresh();
+ const refreshed=await basePeopleRefresh();
+ if(refreshed!==false)renderProfile(true);
+ return refreshed;
 };
 actions['rank-mode']=async b=>{
  const mode=b.dataset.mode;if(!['recent','total','people'].includes(mode)||mode===state.rankMode)return;

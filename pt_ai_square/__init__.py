@@ -56,6 +56,8 @@ def init_app(app, overrides=None):
         app.register_blueprint(people)
         from .backend.ax_workspace import ax_workspace
         app.register_blueprint(ax_workspace)
+    from .backend.distribution_skill import distribution_skill
+    app.register_blueprint(distribution_skill)
     @app.get('/')
     def index():
         return render_template('index.html', **{key: session.get(key) for key in IDENTITY_FIELDS})

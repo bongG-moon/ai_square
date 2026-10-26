@@ -82,6 +82,9 @@ def install_auth(app):
     @app.before_request
     def authenticate():
         if request.endpoint in {'static','health'}: return
+        # This prebuilt guide has the same public visibility as /static. An
+        # explicit personal KEY still follows the unchanged API allowlist.
+        if request.endpoint=='distribution_skill.download' and not request.headers.get('Authorization'): return
         session.setdefault('csrf',secrets.token_urlsafe(32))
         mode=app.config['AUTH_MODE']
         g.user=None

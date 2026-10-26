@@ -62,5 +62,8 @@ for source,name in documents:
     if source == 'OPERATOR_GUIDE.md':
         # Keep the older download filename in sync with the current run guide.
         (OUT/'P&T_AI_SQUARE_실행_사용가이드_v3.html').write_text(result,encoding='utf-8')
-    if source.startswith('USER'):(BASE/'static/guides/PT_AI_SQUARE_등록가이드.html').write_text(result,encoding='utf-8')
+    if source.startswith('USER'):
+        # Public links use ASCII paths; keep the older copy for existing links.
+        for filename in ('pt-ai-square-user-guide.html', 'PT_AI_SQUARE_등록가이드.html'):
+            (BASE/'static/guides'/filename).write_text(result,encoding='utf-8')
     print(name)

@@ -40,6 +40,7 @@ guide_text=guide.read_text(encoding='utf-8').replace('초안 v1','웹 구현 v2.
 guide_text=guide_text.replace('운영 서비스에서는 파일 구조와 배포 규칙 등의 검사를 통과해야 게시됩니다. 현재 HTML 시안에서는 <strong>게시</strong>를 눌러 화면 흐름만 체험합니다.','<strong>게시</strong>를 누르면 서버에서 입력값·크기·기본 파일 형식·ZIP 경로를 검사하고 실제 저장합니다. 악성코드 검사와 실행 검증을 대신하지 않습니다.')
 guide_text=guide_text.replace('현재 배포·복구용·사용 중인 파일은 보존합니다.','현재 배포와 복구용 파일은 보존합니다. PC 설치 현황은 아직 수집하지 않습니다.')
 guide.write_text(guide_text,encoding='utf-8')
+(static/'guides/pt-ai-square-user-guide.html').write_text(guide_text,encoding='utf-8')
 markup=fragment[:fragment.index('<style>')]
 markup=re.sub(r'<link\b[^>]*>','',markup)
 markup=markup.replace('체험 모드','사내 공유')

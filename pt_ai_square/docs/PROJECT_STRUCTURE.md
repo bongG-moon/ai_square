@@ -85,7 +85,7 @@ python scripts/build_docs.py
 
 scripts/build_frontend.py는 초기 화면 생성용 이력입니다. 현재 UI를 보존하는 일반 수정 작업에서 실행하면 안 됩니다. 화면을 수정할 때는 현재 static/app.js와 관련 frontend 모듈의 연결을 확인하고 필요한 빌드만 실행합니다.
 
-문서 HTML은 앱 폴더의 상위 위치 아래 outputs/pt-ai-square-web-20261018에 생성됩니다. 공개 사용자 가이드만 static/guides에 복사하고 운영 가이드는 일반 사용자 다운로드에 넣지 않습니다. 저장소 루트 docs/에는 읽기 쉬운 HTML 배포본을 둡니다.
+문서 HTML은 앱 폴더의 상위 위치 아래 outputs/pt-ai-square-web-20261018에 생성됩니다. 공개 사용자 가이드는 `static/guides/pt-ai-square-user-guide.html`로 제공하고 이전 한글 파일명도 호환본으로 유지합니다. 운영 가이드는 일반 사용자 다운로드에 넣지 않습니다. 기본 배포 Skill의 공개 다운로드 경로는 `/resources/distribution-skill.zip`이며 원본 ZIP은 `static/guides/pt-file-distribution.zip`입니다. 저장소 루트 docs/에는 읽기 쉬운 HTML 배포본을 둡니다.
 
 테스트는 저장소 루트, 즉 pt_ai_square의 상위 폴더에서 실행합니다. 테스트용 MongoDB 주소는 PTAI_TEST_MONGO_URI로 지정하며 기본값은 mongodb://127.0.0.1:27018/입니다. 테스트는 별도의 임시 DB를 만들고 정리합니다.
 

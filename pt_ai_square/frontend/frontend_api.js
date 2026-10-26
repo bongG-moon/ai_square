@@ -106,7 +106,23 @@ actions.approve=b=>ask('사용 신청을 승인할까요?','도구 사용만 승
 actions['cleanup-preview']=async()=>{const data=await requestAPI('/api/storage/candidates');runtime.cleanupServer=data.candidates;openModal('이전 버전 정리','삭제 전 대상 확인',`<div class="sq-callout">현재 배포·복구용 버전은 보호됩니다. 아래 파일은 삭제 후 복구할 수 없습니다.</div><div class="sq-version-list">${data.candidates.map(c=>`<div class="sq-version"><strong>${esc(getItem(c.tool).name)} · v${c.version}</strong><span>${(c.bytes/1048576).toFixed(2)} MB</span></div>`).join('')||'<p>새 정리 대상이 없습니다. 삭제 대기 파일이 있으면 아래 버튼으로 재시도할 수 있습니다.</p>'}</div><div class="sq-actions">${button('admin-tab','돌아가기','sq-secondary','data-tab="storage"')}${button('cleanup-confirm','선택 파일 삭제','sq-primary',data.candidates.length||server.storage?.pending?'':'disabled')}</div>`);};
 actions['cleanup-confirm']=()=>ask('선택한 이전 파일을 삭제할까요?',`${runtime.cleanupServer.length}개 파일을 정리합니다.`,async()=>{const r=await requestAPI('/api/storage/cleanup','POST',{candidates:runtime.cleanupServer});await refresh();manage('storage');announce(r.pending?'일부 파일은 사용 중이어서 삭제 대기 중입니다. 다시 정리하면 재시도합니다.':'파일 정리를 완료했습니다.');},'삭제');
 actions['admin-tab']=async b=>{if(b.dataset.tab==='ideas')server.ideas=(await requestAPI('/api/ideas')).ideas;if(b.dataset.tab==='activity'){const r=await requestAPI('/api/activity');server.activityEvents=r.events;server.activityCursor=r.nextCursor;}manage(b.dataset.tab);};
-actions['download-skill']=()=>location.assign('/static/guides/PT_AI_SQUARE_파일배포_Skill.zip');
-actions['download-guide']=()=>{const a=document.createElement('a');a.href='/static/guides/PT_AI_SQUARE_등록가이드.html';a.download='PT_AI_SQUARE_등록가이드.html';a.click();};
+actions['download-skill']=async()=>{
+ const url='/resources/distribution-skill.zip';let response;
+ try{response=await fetch(url,{method:'HEAD',credentials:'same-origin',redirect:'error',cache:'no-store'});}
+ catch{throw Error('파일 배포 Skill을 받지 못했습니다. 서버 연결과 로그인 상태를 확인한 뒤 다시 시도해 주세요.');}
+ if(!response.ok)throw Error(response.status===401||response.status===403?'로그인 상태 또는 다운로드 권한을 확인해 주세요.':'파일 배포 Skill 파일을 받을 수 없습니다. 운영자에게 최신 배포 파일 반영을 요청해 주세요.');
+ const mime=(response.headers.get('Content-Type')||'').split(';')[0].trim().toLowerCase();
+ if(!['application/zip','application/x-zip-compressed','application/octet-stream'].includes(mime))throw Error('다운로드 파일 대신 다른 화면이 응답했습니다. 로그인 상태와 운영 서버 배포 경로를 확인해 주세요.');
+ const link=document.createElement('a');link.href=url;link.download='pt-file-distribution.zip';link.click();
+};
+actions['download-guide']=async()=>{
+ const url='/static/guides/pt-ai-square-user-guide.html';let response;
+ try{response=await fetch(url,{method:'HEAD',credentials:'same-origin',redirect:'error',cache:'no-store'});}
+ catch{throw Error('등록 가이드를 받지 못했습니다. 서버 연결과 로그인 상태를 확인한 뒤 다시 시도해 주세요.');}
+ if(!response.ok)throw Error(response.status===401||response.status===403?'로그인 상태 또는 다운로드 권한을 확인해 주세요.':'등록 가이드를 받을 수 없습니다. 운영자에게 최신 배포 파일 반영을 요청해 주세요.');
+ const mime=(response.headers.get('Content-Type')||'').split(';')[0].trim().toLowerCase();
+ if(mime!=='text/html')throw Error('등록 가이드 대신 다른 응답이 도착했습니다. 운영 서버 배포 경로를 확인해 주세요.');
+ const link=document.createElement('a');link.href=url;link.download='pt-ai-square-user-guide.html';link.click();
+};
 actions.fullscreen=async()=>{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();};
 actions.logout=()=>ask('로그아웃할까요?',server.authMode==='sso'?'웹 세션을 종료합니다. 회사 SSO 세션이 남아 있으면 다시 접속할 때 자동 인증됩니다.':'현재 웹 로그인 세션을 종료합니다.',async()=>{await requestAPI('/api/logout','POST',{});location.assign('/login');},'로그아웃');

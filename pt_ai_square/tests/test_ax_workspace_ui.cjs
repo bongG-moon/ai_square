@@ -25,7 +25,7 @@ function setup(role='admin',{search='',route='ax'}={}){
  const context={runtime:{detailLoadToken:0},state:{route,rankMode:'recent'},server:{user:{id:'admin',role}},workspace,FormData,now:10000,
   window:{addEventListener:(name,fn)=>(windowListeners[name]??=[]).push(fn)},document:{hidden:false,addEventListener:(name,fn)=>(documentListeners[name]??=[]).push(fn)},Date:{now:()=>context.now},
   setTimeout:(callback,delay)=>{const timer={callback,delay,cancelled:false};timers.push(timer);return timer;},clearTimeout:timer=>{if(timer)timer.cancelled=true;},
-  location:{search},URLSearchParams,items:[],organizations:[],requests:catalogRequests,policy:{},audit:[],render(){},loadPeopleRanks:async()=>{},
+  location:{search},URLSearchParams,items:[],organizations:[],requests:catalogRequests,policy:{},audit:[],render(){},renderProfile(){},loadPeopleRanks:async()=>{},
   actions:{},root:{addEventListener:(name,fn)=>(listeners[name]??=[]).push(fn)},
   $:selector=>selector==='#sq-dialog'?dialog:selector==='#sq-ax-form'?currentForm:selector==='[data-ax-drop]'?area:selector==='#sq-server-error'?pageError:selector==='#sq-session'?session:selector==='.sq-demo'?demo:selector==='[data-action=logout]'?logout:null,
   $$:selector=>selector==='[data-action="ax-subscription"]'?subscriptionButtons:selector==='[data-ax-card]'?cards:[],esc:value=>String(value).replace(/</g,'&lt;').replace(/"/g,'&quot;'),icon:()=>'',mountIcons(){},
