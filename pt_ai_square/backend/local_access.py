@@ -274,17 +274,29 @@ def publish_targets():
     elif q:
         query['$or'] = [{'data.' + key: {'$regex': re.escape(q), '$options': 'i'}}
                         for key in ('name', 'desc', 'workTags')]
+    try:
+        offset, limit = int(request.args.get('offset', '0')), int(request.args.get('limit', '20'))
+    except ValueError:
+        raise BadRequest('목록 범위를 확인하세요.') from None
+    if offset < 0 or not 1 <= limit <= 200:
+        raise BadRequest('목록 범위를 확인하세요.')
     rows = db().tools.find(query).sort('_id', -1)
+    if not package_id:
+        rows = rows.skip(offset).limit(limit + 1)
+    matched = 0 if package_id else offset
     items = []
     for t in rows:
         if package_id and fixed_package_id(t) != package_id:
             continue
+        matched += 1
+        if matched <= offset:
+            continue
         current = next((v for v in t.get('versions', []) if v['n'] == t['active']), None)
         items.append(dict(id=t['_id'], name=t['data']['name'], revision=t['revision'],
                           **identity_fields(t, current.get('package') if current else None)))
-        if len(items) == 20:
+        if len(items) > limit:
             break
-    return jsonify(items=items)
+    return jsonify(items=items[:limit], nextOffset=offset + limit if len(items) > limit else None)
 
 
 @local_access.get('/api/catalog')
@@ -303,4 +315,4 @@ def integration_me():
                    key=dict(id=key_id, scope=scope) if key_id else None,
                    capabilities=dict(search=True, download=True, like=True, view=True,
                                      publishDraft=bool(key_id and scope == 'publish'),
-                                     approvalRequired=True))
+                                     approvalRequired=False, directPublish=True))

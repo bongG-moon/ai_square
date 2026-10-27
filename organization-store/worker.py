@@ -58,7 +58,7 @@ _zip_spec.loader.exec_module(zip_install)
 
 VERSION = '0.1.0'
 ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail',
-                     'like', 'download', 'prepareInstall', 'install', 'installations',
+                     'like', 'download', 'prepareInstallRequest', 'prepareInstall', 'install', 'installations',
                      'checkUpdates', 'verify', 'rollback', 'publishOptions',
                      'inspectPublishSource', 'preparePublish', 'publishStatus', 'publish'})
 PUBLISH_FIELDS = frozenset({'name', 'desc', 'owner', 'platform', 'type', 'guide', 'orgId',
@@ -716,6 +716,24 @@ class Store:
         return identity, {'origin': runtime.settings.url, 'config': str(runtime.settings.path),
                           'userId': user.get('id'), 'keyId': key.get('id')}
 
+    def all_publish_targets(self, runtime, query):
+        items, seen, offset = [], set(), 0
+        for _ in range(100):
+            page = runtime.client.json('/api/publish-targets?' + urlencode({'q': query, 'offset': offset, 'limit': 200}))
+            rows = page.get('items', [])
+            if not isinstance(rows, list):
+                raise SquareError('내 도구 목록을 확인하지 못했습니다.')
+            for row in rows:
+                if isinstance(row, dict) and type(row.get('id')) is int and row['id'] not in seen:
+                    seen.add(row['id']); items.append(row)
+            following = page.get('nextOffset')
+            if following is None:
+                return items
+            if type(following) is not int or following <= offset:
+                raise SquareError('내 도구 목록의 다음 페이지를 확인하지 못했습니다.')
+            offset = following
+        raise SquareError('내 도구가 많습니다. 이름으로 검색해 주세요.')
+
     def publish_options(self, runtime, payload):
         identity, _ = self.publish_identity(runtime, required=False)
         query = payload.get('q', '')
@@ -724,7 +742,7 @@ class Store:
         can_publish = identity.get('capabilities', {}).get('publishDraft') is True
         result = dict(canPublish=can_publish, user=identity.get('user', {}),
                       options=runtime.client.json('/api/catalog/options'),
-                      candidates=runtime.client.json('/api/publish-targets?' + urlencode({'q': query})).get('items', []) if can_publish else [],
+                      candidates=self.all_publish_targets(runtime, query) if can_publish else [],
                       keyGuideUrl=runtime.settings.url + '/local-access')
         if payload.get('toolId') is not None:
             self.publish_identity(runtime)
@@ -885,10 +903,9 @@ class Store:
             if result.get('ready') is False:
                 return result
             result = self.publish_result(runtime, result)
-            result['notice'] = ('웹 검토 화면에서 파일·등록 내용·공개 범위를 확인하고 승인하세요. '
-                                '앱으로 돌아와 등록 완료를 누르면 동일한 초안으로 게시합니다.')
+            result['notice'] = '선택한 등록 대상과 공개 범위로 앱에서 등록합니다.'
             draft_id = result['id']
-            atomic_json(self.publish_receipt(draft_id), dict(identity, created=time.time(), requestId=request_id))
+            atomic_json(self.publish_receipt(draft_id), dict(identity, created=time.time(), requestId=request_id, reviewDigest=result.get('reviewDigest')))
             atomic_json(request_path, dict(request_record, draftId=draft_id))
             return result
 
@@ -901,11 +918,16 @@ class Store:
         status = self.publish_result(runtime, runtime.get_publish_status(draft_id))
         if not commit:
             return status
-        if status.get('status') not in {'approved', 'committing', 'committed'}:
-            return dict(status, published=False, notice='웹 검토 화면에서 승인한 뒤 등록 완료를 눌러 주세요.')
-        # The server independently checks owner, KEY, digest, revision and human
-        # browser approval. Client booleans cannot grant or substitute approval.
-        result = runtime.publish_item(draft_id)
+        if payload.get('confirmed') is True:
+            expected = receipt.get('reviewDigest')
+            if (not isinstance(expected, str) or not re.fullmatch(r'[a-f0-9]{64}', expected)
+                    or payload.get('reviewDigest') != expected or status.get('reviewDigest') != expected):
+                raise SquareError('등록 내용이 변경되었거나 플랫폼이 앱 등록을 지원하지 않습니다. 내용을 다시 준비하고 플랫폼 버전을 확인하세요.')
+            result = runtime.publish_item(draft_id, review_digest=expected, confirmed=True)
+        else:
+            if status.get('status') not in {'approved', 'committing', 'committed'}:
+                return dict(status, published=False, notice='앱에서 등록 대상과 공개 범위를 확인한 뒤 등록하기를 눌러 주세요.')
+            result = runtime.publish_item(draft_id)
         return dict(result, published=True, status='committed')
 
     def dispatch(self, action, payload=None):
@@ -960,6 +982,19 @@ class Store:
                         canInspectInstall=inspect_zip,
                         inspectionNotice=zip_install.INSPECTION_NOTICE if inspect_zip else None,
                         webUrl=settings.url + '/')
+        if action == 'prepareInstallRequest':
+            raw = self.context.get('installRequestDirectory')
+            if not isinstance(raw, str) or not Path(raw).is_absolute():
+                raise SquareError('앱에서 설치 요청을 처리할 업무를 선택하세요.')
+            directory = no_links(raw)
+            if not directory.is_dir():
+                raise SquareError('설치 자료 폴더를 찾을 수 없습니다.')
+            tool_id = positive(payload.get('toolId'))
+            item = runtime.get_item(tool_id)
+            runtime.settings.roots = [directory]
+            result = runtime.download_item(tool_id, output_directory=str(directory))
+            return dict(result, name=str(item.get('name') or '선택한 도구')[:200],
+                        guide=str(item.get('guide') or '')[:12000])
         if action == 'like':
             if type(payload.get('liked')) is not bool:
                 raise SquareError('좋아요 상태를 확인하세요.')

@@ -15,7 +15,7 @@
     return n;
   };
   const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null, installation: null };
-  const installationActive = () => ['choosing','preparing','review','installing','uncertain'].includes(state.installation?.phase);
+  const installationActive = () => ['choosing','preparing','review','installing','uncertain','request-uncertain'].includes(state.installation?.phase);
   function installationButton(toolId) {
     const node = el('button', 'primary', '바로 설치하기'); node.type = 'button'; node.dataset.installTool = String(toolId);
     node.addEventListener('click', () => { if (!installationActive()) prepare(toolId).catch(error => feedback(error.message, true)); });
@@ -64,7 +64,7 @@
       node.removeAttribute('aria-busy');
       if (same && pending) { const spinner = el('span','install-spinner'); spinner.setAttribute('aria-hidden','true'); node.prepend(spinner); node.setAttribute('aria-busy','true'); }
     }
-    const headings = {choosing:'설치 위치 선택',preparing:'설치 준비 중',review:'설치 내용 확인',installing:'설치 중',done:operation?.configured?'연결 설정 저장 완료':'파일 설치 완료',error:'설치하지 못했어요',uncertain:'설치 결과 확인 필요',cancelled:'설치를 취소했어요'};
+    const headings = {choosing:'설치 위치 선택',preparing:'설치 준비 중',review:'설치 내용 확인',installing:'설치 중',done:operation?.configured?'연결 설정 저장 완료':'파일 설치 완료',error:'설치하지 못했어요',uncertain:'설치 결과 확인 필요',cancelled:'설치를 취소했어요',requested:'설치 요청 전달 완료','request-uncertain':'설치 요청 결과 확인 필요'};
     for (const region of [$('installation-status'), $('detail-installation-status')].filter(Boolean)) {
       const show = operation && (region.id === 'installation-status' || String(region.dataset.toolId) === String(operation.toolId));
       region.hidden = !show; if (!show) { region.replaceChildren(); delete region.dataset.phase; continue; }
@@ -79,20 +79,38 @@
         await detail(operation.toolId);
         if (String(state.detail?.item?.id) === String(operation.toolId)) { detailPanel('connect'); $('detail-tab-connect').focus(); }
       }));
+      if(operation.phase==='request-uncertain')actions.append(button('요청 결과 확인','text-button',async()=>{
+        const result=await rpc('host.requestInstall',operation.requestPayload);
+        installationState(operation,'requested',`${result.title} 업무 대화에서 설치 진행과 추가 질문을 확인하세요.`);
+      }));
+      if(operation.phase==='requested')actions.append(button('확인','text-button',clearInstallation));
       region.replaceChildren(mark,text,actions);
     }
   }
-  const panelAnimations = new WeakMap();
+  const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const panelAnimations = new WeakMap(), activePanelAnimations = new Set();
   function revealPanel(node) {
     if (!node) return;
     panelAnimations.get(node)?.cancel();
-    if (!node.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const animation = node.animate([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],
-      {duration:300,easing:'cubic-bezier(.2,.7,.2,1)'});
-    panelAnimations.set(node, animation);
-    // Cancelling a superseded transition never delays the next interaction.
-    animation.finished.catch(() => {});
+    if (!node.animate || motionPreference.matches || node.closest('[hidden]')) return;
+    // A parent already entering covers content that arrives in the same frame.
+    // Avoid multiplying opacity and motion on nested panels.
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      if (activePanelAnimations.has(panelAnimations.get(parent))) return;
+    }
+    const animation = node.animate([{opacity:0,transform:'translateY(8px)'},{opacity:1,transform:'translateY(0)'}],
+      {duration:300,easing:'cubic-bezier(.22,.61,.36,1)'});
+    panelAnimations.set(node, animation); activePanelAnimations.add(animation);
+    // Only live animations are retained. Superseding a view never delays input
+    // or holds an old result in a detached DOM snapshot.
+    const release = () => {
+      activePanelAnimations.delete(animation);
+      if (panelAnimations.get(node) === animation) panelAnimations.delete(node);
+    };
+    animation.finished.then(release, release);
   }
+  const cancelPanelAnimations = () => { for (const animation of activePanelAnimations) animation.cancel(); activePanelAnimations.clear(); };
+  motionPreference.addEventListener('change', () => { if (motionPreference.matches) cancelPanelAnimations(); });
   function feedback(message, error = false) {
     for (const id of ['feedback', ...($('detail-dialog').open ? ['detail-feedback'] : [])]) { $(id).textContent = message || ''; $(id).hidden = !message; $(id).classList.toggle('error', error); }
     if (error) document.querySelectorAll('.loading').forEach(n => { n.textContent = '불러오지 못했어요. 연결 설정을 확인하거나 다시 시도해 주세요.'; });
@@ -136,6 +154,7 @@
     if (message.type === 'ax-extension-init' && !state.channel && typeof message.channel === 'string') {
       state.channel = message.channel; state.context = message.context || {}; state.hostFeatures = Array.isArray(message.hostFeatures) ? message.hostFeatures : [];
       document.documentElement.dataset.theme = message.theme === 'dark' ? 'dark' : 'light';
+      revealPanel(document.querySelector('.store-header'));
       $('workspace-context').textContent = state.context.workspace ? `현재 업무: ${state.context.title || state.context.workspace}` : '전체 공간(내 계정) 또는 선택한 폴더에 설치할 수 있어요.';
       initialize().catch(e => { connectionView(); feedback(e.message, true); }); return;
     }
@@ -147,7 +166,7 @@
     if (message.ok) pending.resolve(message.result);
     else pending.reject(new Error(typeof message.error === 'string' ? message.error : message.error?.message || '요청을 완료하지 못했습니다.'));
   });
-  window.addEventListener('pagehide', () => { for (const p of state.pending.values()) clearTimeout(p.timer); state.pending.clear(); });
+  window.addEventListener('pagehide', () => { cancelPanelAnimations(); for (const p of state.pending.values()) clearTimeout(p.timer); state.pending.clear(); });
   function show(view) { const changed=$(view).hidden; for (const id of ['connection-view', 'catalog-view']) $(id).hidden = id !== view; if(changed)revealPanel($(view)); }
   function connectionView() { if (installationActive()) return; ++state.generation; show('connection-view'); $('connection-cancel').hidden = !state.connected; $('disconnect').hidden = !state.connected; }
   function httpConsent() {
@@ -278,9 +297,8 @@
     $('catalog-note').textContent = tab === 'installed' ? '이 플랫폼에서 설치한 기능과 설치 위치입니다. 파일 다운로드 기록은 포함하지 않습니다.' : tab === 'updates' ? '지금 설치할 수 있는 새 버전만 표시합니다. 업데이트는 설치 위치와 변경 내용을 확인한 뒤 진행합니다.' : '조회·좋아요·다운로드는 웹의 기록과 연결됩니다. 파일 다운로드와 실제 설치 상태는 구분해서 표시합니다.';
     if (tab === 'catalog') return catalog();
     const generation = ++state.generation; $('results').replaceChildren(el('p', 'loading', tab === 'updates' ? '설치된 기능의 업데이트를 확인하고 있어요…' : '설치 기록을 확인하고 있어요…'));
-    revealPanel($('results'));
     if (tab === 'installed') {
-      const records = await rpc('installations'); if (generation !== state.generation) return;
+      const records = await rpc('installations',{},()=>generation===state.generation); if (generation !== state.generation) return;
       reconcileInstallation(records);
       state.records = Array.isArray(records.items) ? records.items : [];
       const recovery = recoveryCards(records.recovery);
@@ -289,7 +307,7 @@
       if (!state.records.length && !recovery.length) $('results').append(empty('아직 설치한 기능이 없어요.', '둘러보기에서 기능을 선택한 뒤 설치 위치를 확인하세요. 파일 다운로드는 설치 기록에 포함되지 않습니다.'));
       revealPanel($('results')); return;
     }
-    const updates = await rpc('checkUpdates'); if (generation !== state.generation) return;
+    const updates = await rpc('checkUpdates',{},()=>generation===state.generation); if (generation !== state.generation) return;
     const checked = Array.isArray(updates.items) ? updates.items : [];
     const blocked = Array.isArray(updates.recovery?.blocked) ? updates.recovery.blocked : [];
     const available = blocked.length ? [] : checked.filter(actualUpdate);
@@ -431,18 +449,55 @@
     for (const step of steps) {const row=el('li'),copy=el('div');copy.append(el('strong','',step.title || '단계'));if(step.description)copy.append(el('p','',step.description));row.append(copy);list.append(row);}
     details.append(heading,list,el('p','workflow-note','등록자가 정리한 동작 순서입니다. 실제 실행 상태를 표시하지 않습니다.')); return details;
   }
+  async function requestAiInstall(result) {
+    if(installationActive())return;
+    if(!state.hostFeatures.includes('installRequests'))throw Error('AI 설치 요청을 사용하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.');
+    const operation={toolId:result.item.id,name:result.item.name||'선택한 도구',origin:state.baseUrl};
+    state.installation=operation;installationState(operation,'choosing','설치 범위와 요청을 처리할 업무를 선택하세요.');
+    try {
+      const listed=await rpc('host.listWorkspaces'), works=listed.items||[];
+      if(!works.length)throw Error('먼저 업무를 만들고 폴더 접근을 확인해 주세요. 그 업무의 권한과 승인 모드로 설치를 요청합니다.');
+      const box=el('div','scope-options'),scope=el('select'),select=el('select');
+      scope.id='ai-install-scope';select.id='ai-install-work';
+      scope.setAttribute('aria-label','설치 범위');scope.append(new Option('공통으로 사용 · 내 계정','user'),new Option('선택한 업무 폴더','work'));
+      select.setAttribute('aria-label','요청을 처리할 업무 위치');
+      for(const row of works)select.append(new Option(row.title||'이름 없는 업무',row.id));
+      const current=works.find(row=>row.workspace===state.context.workspace);if(current)select.value=current.id;
+      for(const [control,label] of [[scope,'설치 범위'],[select,'요청을 처리할 업무 위치']]){
+        const field=el('div','scope-field'),caption=el('label','',label);caption.htmlFor=control.id;
+        field.append(caption,control);box.append(field);
+      }
+      const scopeHint=el('p','muted scope-hint');
+      const describeScope=()=>{scopeHint.textContent=scope.value==='user'?'내 계정의 모든 업무에서 쓸 수 있게 설치해요. 설치 과정은 선택한 업무에 기록돼요.':'선택한 업무 폴더에 설치해요. 설치 과정도 같은 업무에서 확인할 수 있어요.';};
+      scope.onchange=describeScope;describeScope();box.append(scopeHint);
+      filterSelect(scope);filterSelect(select);
+      const navigates=state.hostFeatures.includes('installRequestNavigation');
+      const help=el('div','install-request-help');
+      help.append(el('p','muted','작업이 없으면 바로 시작하고, 작업 중이면 끝난 뒤 설치해요.'),el('p','muted','추가 설정은 업무 대화에서 안내해요. 중지된 업무는 먼저 이어 실행해 주세요.'));
+      if(!await confirm('AI에게 설치를 요청할까요?',[box,help],navigates?'설치 요청하고 업무로 이동':'설치 요청 보내기')){
+        installationState(operation,'cancelled','설치 요청을 보내지 않았습니다.');return;
+      }
+      installationState(operation,'preparing','설치 자료를 내려받고 업무에 요청을 전달하고 있어요.');
+      operation.requestPayload={requestId:crypto.randomUUID(),scope:scope.value,sessionId:select.value,action:'prepareInstallRequest',payload:{toolId:result.item.id},confirmed:true};
+      const response=await rpc('host.requestInstall',operation.requestPayload);
+      installationState(operation,'requested',`${response.title} 업무 대화에서 설치 진행과 추가 질문을 확인하세요.${response.paused?' 해당 업무의 이어 할 일 안내를 확인한 뒤 이어 실행해 주세요.':''}`);
+      feedback('설치 요청을 전달했어요. 설치 완료 여부와 추가 질문은 선택한 업무 대화에서 확인하세요.');
+    } catch(error) {
+      installationState(operation,error.code==='response_timeout'?'request-uncertain':'error',error.message);throw error;
+    }
+  }
   async function downloadDetail(result) {
     const downloaded = await rpc('download', {toolId:result.item.id});
     result.downloadedFile = downloaded.file;
     feedback('파일을 내려받았어요. 다운로드만으로 설치되지는 않습니다.');
     if (state.detail === result && state.detailTab === 'connect') detailPanel('connect');
   }
-  function detailPanel(tab) {
+  function detailPanel(tab, animate = true) {
     const result = state.detail; if (!result) return;
     const item = result.item, panel = $('detail-panel'); state.detailTab = tab;
     document.querySelectorAll('[data-detail-tab]').forEach(n => {const selected = n.dataset.detailTab === tab; n.setAttribute('aria-selected',String(selected)); n.tabIndex=selected?0:-1;});
     panel.setAttribute('aria-labelledby','detail-tab-'+tab); panel.replaceChildren();
-    revealPanel(panel);
+    if (animate) revealPanel(panel);
     const active = result.manifest?.release ?? item.active;
     const versions = (item.versions || []).filter(v => !v.deleted);
     const currentVersion = versions.find(v => String(v.n) === String(active));
@@ -462,7 +517,8 @@
       if (item.environment || item.platform) panel.append(section('실행 환경',item.environment || item.platform));
       const actions=el('div','detail-actions');
       if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(installationButton(item.id));
-      if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드',result.canInstall||result.canInspectInstall?'secondary':'primary',()=>downloadDetail(result)));
+      if (!gated && !result.canInstall && result.manifest?.downloadUrl) actions.append(button('AI에게 설치 요청',result.canInspectInstall?'secondary':'primary',()=>requestAiInstall(result),'install'));
+      if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드','secondary',()=>downloadDetail(result)));
       if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
       const progress = el('section','installation-status'); progress.id='detail-installation-status'; progress.dataset.toolId=String(item.id); progress.setAttribute('aria-live','polite'); progress.setAttribute('aria-label','설치 진행 상태'); progress.hidden=true;
       panel.append(actions,progress,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
@@ -522,7 +578,7 @@
     for(const [id,title] of [['intro','소개'],['connect','설치·연결'],['versions','버전'],['comments','의견']]){const tab=el('button','',title);tab.type='button';tab.addEventListener('click',()=>detailPanel(id));tab.id='detail-tab-'+id;tab.dataset.detailTab=id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','detail-panel');tabs.append(tab);}
     tabs.addEventListener('keydown',event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const items=[...tabs.children],index=items.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowRight'?1:-1)+items.length)%items.length;detailPanel(items[next].dataset.detailTab);items[next].focus();});
     const panel=el('section','detail-panel');panel.id='detail-panel';panel.setAttribute('role','tabpanel');panel.tabIndex=0;
-    root.replaceChildren(top,tabs,panel);root.scrollTop=0;detailPanel('intro');updateCard(item);
+    root.replaceChildren(top,tabs,panel);root.scrollTop=0;detailPanel('intro', false);revealPanel(root);updateCard(item);
   }
   async function prepare(toolId) {
     if (installationActive()) return;
@@ -653,6 +709,7 @@
       const rect=trigger.getBoundingClientRect(),below=Math.max(0,bottom-rect.bottom-7),above=Math.max(0,rect.top-top-7);
       const desired=Math.min(250,menu.scrollHeight),flip=below<desired&&above>below;
       menu.style.top=flip?'auto':'calc(100% + 6px)';menu.style.bottom=flip?'calc(100% + 6px)':'auto';
+      menu.style.setProperty('--menu-offset',flip?'4px':'-4px');
       menu.style.maxHeight=Math.max(40,Math.min(250,flip?above:below))+'px';
       trigger.setAttribute('aria-expanded','true'); openFilter={wrap,close}; focusOption(menu.querySelector('[aria-selected=true]')||menu.firstElementChild);
     };
@@ -667,8 +724,8 @@
     };
     select.addEventListener('change',update); select.addEventListener('optionschanged',update); update(); wrap.append(trigger,menu); select.after(wrap);
   }
-  // Registration reuses the platform's immutable draft + human web-review flow.
-  // No automatic approval, upload retry, background polling or command execution.
+  // Registration confirms the exact immutable draft from the explicit app submit.
+  // Owner, KEY scope, digest, revision and duplicate checks stay on the server.
   const publication = { loaded: false, allowed: false, busy: false, file: null, draft: null, requestId: null, extra: {}, existingExtra: {}, fileExtra: {}, fileFields: {}, existingFields: {}, manualFields: new Set(), fileSourceSelected: false, opener: null, origin: '' };
   const publishFields = {name:'publish-name',desc:'publish-desc',platform:'publish-platform',type:'publish-type',guide:'publish-guide',orgId:'publish-org',categoryId:'publish-category',changes:'publish-changes',url:'publish-url',commandProject:'publish-command-project',commandUser:'publish-command-user'};
   const publishFileFields = ['name','desc','platform','type','guide','changes'];
@@ -679,13 +736,17 @@
   function publishChanged() { publication.requestId=null; publication.draft=null; }
   function publishControls() {
     const draft=publication.draft, committed=draft?.status==='committed';
+    const visiblePanel=draft ? $('publish-review') : $('publish-form');
+    const changed=visiblePanel.hidden;
     $('publish-form').hidden=!!draft; $('publish-form').inert=publication.busy||!publication.allowed;
     $('publish-review').hidden=!draft; $('publish-prepare').hidden=!!draft; $('publish-commit').hidden=!draft||committed;
     for(const id of publishActionIds) $(id).disabled=publication.busy||!publication.allowed;
-    $('publish-commit').disabled=publication.busy||!publication.allowed||!['approved','committing'].includes(draft?.status);
+    $('publish-commit').disabled=publication.busy||!publication.allowed||!['pending','approved','committing'].includes(draft?.status);
     $('publish-pick-file').disabled=publication.busy||!publication.allowed||!state.hostFeatures.includes('publishFiles');
-    $('publish-status').hidden=committed; $('publish-review-open').hidden=committed; $('publish-edit').textContent=committed?'다른 도구 등록':'내용 수정';
+    $('publish-status').hidden=committed; $('publish-review-open').hidden=true;
+    $('publish-edit').textContent=committed?'다른 도구 등록':'내용 수정';
     $('publish-dialog').setAttribute('aria-busy',String(publication.busy));
+    if (changed && $('publish-dialog').open) revealPanel(visiblePanel);
   }
   async function publishAction(fn) {
     if(publication.busy)return;
@@ -772,11 +833,17 @@
     for(const id of publishSelects)$(id).dispatchEvent(new Event('optionschanged'));
     publishInstallInfo();publishMode();
   }
+  async function refreshMyTools() {
+    $('publish-target-search').value='';
+    const result=await rpc('publishOptions');
+    publishOptions($('publish-existing'),result.candidates,'기존 도구 선택');
+    publication.allowed=result.canPublish===true;
+  }
   $('publish-open').addEventListener('click',()=>{
     publication.opener=document.activeElement;
     if(publication.origin!==state.baseUrl){resetPublish();publication.loaded=false;publication.origin=state.baseUrl;}
     $('publish-dialog').showModal();$('publish-close').focus();
-    if(publication.loaded){publishControls();return;}
+    if(publication.loaded){publishControls();publishAction(refreshMyTools);return;}
     publishAction(async()=>{
       publishMessage('등록 권한과 분류를 확인하고 있어요…');
       const result=await rpc('publishOptions');publication.allowed=result.canPublish===true;publication.loaded=true;
@@ -802,7 +869,7 @@
   }
   $('publish-form').addEventListener('input',publishFormChanged);
   $('publish-form').addEventListener('change',publishFormChanged);
-  $('publish-target').addEventListener('change',()=>{publishMode();if($('publish-target').value==='new'){publication.existingExtra={};publication.existingFields={};updatePublishExtra();$('publish-existing').value='';$('publish-existing').dispatchEvent(new Event('optionschanged'));}});
+  $('publish-target').addEventListener('change',()=>{publishMode();if($('publish-target').value==='update')publishAction(refreshMyTools);if($('publish-target').value==='new'){publication.existingExtra={};publication.existingFields={};updatePublishExtra();$('publish-existing').value='';$('publish-existing').dispatchEvent(new Event('optionschanged'));}});
   $('publish-mode').addEventListener('change',publishMode);
   $('publish-target-find').addEventListener('click',()=>publishAction(async()=>{
     const result=await rpc('publishOptions',{q:$('publish-target-search').value.trim()});
@@ -816,8 +883,9 @@
     if(publication.file)$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
     publishMessage('기존 도구의 설정을 불러왔어요. 새 자료·변경 내용과 공개 범위를 확인하세요.');
   }));
-  $('publish-pick-file').addEventListener('click',()=>publishAction(async()=>{
-    const selected=await rpc('host.pickFile');if(selected.cancelled)return;
+  async function selectPublishFile(file) {
+    publishMessage(file?'파일을 앱으로 전송하고 있어요…':'등록할 파일을 선택해 주세요.');
+    const selected=file?await rpc('host.uploadFile',{file}):await rpc('host.pickFile');if(selected.cancelled)return;
     // A new picker choice revokes the old capability. Preserve all written
     // metadata, but never keep a now-unusable file selection after inspection fails.
     publication.file=null;publication.fileSourceSelected=true;publication.fileExtra={};updatePublishExtra();publishChanged();
@@ -832,11 +900,32 @@
     $('publish-file-help').textContent=size?`${size} · 파일 내용은 등록 준비 시 업로드합니다.`:'파일 내용은 등록 준비 시 업로드합니다.';
     const filled=fillFileMetadata(inspected.metadata||{});$('publish-mode').value='file';$('publish-mode').dispatchEvent(new Event('optionschanged'));publishMode();
     if(inspected.options){publishOptions($('publish-org'),inspected.options.organizations,'조직 선택');publishOptions($('publish-category'),inspected.options.categories,'업무 분류 선택');}
-    if(inspected.candidates)publishOptions($('publish-existing'),inspected.candidates,'기존 도구 선택');
+    // ZIP matches are suggestions only; never replace all tools owned by this user.
+    if(inspected.candidates?.length&&!$('publish-existing').value&&$('publish-target').value==='update')publishMessage('ZIP과 연결된 기존 도구가 있어요. 전체 목록에서 등록 대상을 선택해 주세요.');
     const packaged=!!inspected.metadata?.packageId;
     const notice=packaged?(filled?'ZIP에서 이름·설명·사용 안내 등을 자동으로 불러왔어요. 직접 작성한 설명은 유지하고 프로그램·유형은 ZIP에 맞췄습니다. 내용과 분류·공개 범위를 확인해 주세요.':'ZIP의 배포 정보를 확인했어요. 직접 작성한 설명은 유지했습니다. 내용과 분류·공개 범위를 확인해 주세요.'):'자동으로 채울 배포 정보가 없는 파일이에요. 이름·설명·사용 안내와 분류를 직접 입력해 주세요.';
     publishMessage(inspected.packageWarning||notice,!!inspected.packageWarning);
-  }));
+  }
+  $('publish-pick-file').addEventListener('click',()=>{
+    if(state.hostFeatures.includes('publishUpload'))$('publish-file-input').click();
+    else publishAction(()=>selectPublishFile());
+  });
+  $('publish-file-input').addEventListener('change',event=>{
+    const file=event.target.files?.[0];event.target.value='';if(file)publishAction(()=>selectPublishFile(file));
+  });
+  const publishDrop=$('publish-file-panel');
+  for(const type of ['dragenter','dragover'])publishDrop.addEventListener(type,event=>{
+    if(![...(event.dataTransfer?.types||[])].includes('Files'))return;
+    event.preventDefault();if(!publication.busy&&state.hostFeatures.includes('publishUpload'))publishDrop.classList.add('drag-over');
+  });
+  publishDrop.addEventListener('dragleave',event=>{if(!publishDrop.contains(event.relatedTarget))publishDrop.classList.remove('drag-over');});
+  publishDrop.addEventListener('drop',event=>{
+    event.preventDefault();publishDrop.classList.remove('drag-over');
+    if(publication.busy)return;
+    if(!state.hostFeatures.includes('publishUpload'))return publishMessage('끌어놓기로 등록하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.',true);
+    if(event.dataTransfer.files.length!==1)return publishMessage('배포 파일 한 개를 놓아 주세요.',true);
+    const file=event.dataTransfer.files[0];publishAction(()=>selectPublishFile(file));
+  });
   $('publish-file-reapply').addEventListener('click',()=>{
     if(publication.busy||!publication.file||!publication.fileExtra.packageId)return;
     for(const key of publishFileFields)publication.manualFields.delete(key);
@@ -875,10 +964,10 @@
   }
   function showPublishDraft(draft) {
     publication.draft=draft;const status=draft.status,committed=status==='committed';
-    const labels={pending:'웹 확인 대기',approved:'승인 완료',committing:'등록 결과 확인 필요',committed:'등록 완료',expired:'확인 기한 만료'};
+    const labels={pending:'등록 준비 완료',approved:'등록 준비 완료',committing:'등록 결과 확인 필요',committed:'등록 완료',expired:'확인 기한 만료'};
     $('publish-review-label').textContent=labels[status]||'등록 상태 확인 필요';
-    $('publish-review-title').textContent=committed?'플랫폼에 등록했어요.':status==='approved'?'웹에서 내용을 승인했어요.':status==='expired'?'새 등록 내용을 준비해 주세요.':'등록 내용이 준비됐어요.';
-    $('publish-review-text').textContent=committed?'웹과 앱에서 같은 도구를 확인할 수 있어요.':status==='approved'?'아래 등록 완료하기를 눌러 게시하세요.':status==='expired'?'내용 수정을 누른 뒤 다시 확인하면 새 검토 링크를 만들 수 있어요.':'웹에서 파일·내용·공개 범위를 확인하고 승인한 뒤, 이 창에서 등록을 완료하세요.';
+    $('publish-review-title').textContent=committed?'플랫폼에 등록했어요.':status==='approved'?'등록할 내용을 확인했어요.':status==='expired'?'새 등록 내용을 준비해 주세요.':'등록 내용이 준비됐어요.';
+    $('publish-review-text').textContent=committed?'웹과 앱에서 같은 도구를 확인할 수 있어요.':status==='approved'?'등록하기를 눌러 게시하세요.':status==='expired'?'내용 수정을 누른 뒤 다시 확인하면 새 검토 링크를 만들 수 있어요.':'선택한 대상과 공개 범위로 등록합니다. 결과 확인이 필요하면 등록 결과 확인을 눌러 주세요.';
     const metadata=draft.metadata||{},summary=$('publish-summary');summary.replaceChildren();
     for(const [label,value]of[['도구 이름',metadata.name||$('publish-name').value],['등록 대상',draft.toolId?`기존 도구 #${draft.toolId} · 새 버전`:'새 도구'],['배포 자료',draft.artifact?.name||metadata.url||(metadata.mode==='command'?'설치 명령어 안내':publication.file?.name)],['공개 범위',metadata.approval===true?'조회 승인 필요':metadata.approval===false?'전체 사용자':undefined],['등록 결과',committed&&draft.result?`도구 #${draft.result.id} · 버전 ${draft.result.version}`:undefined]])if(value)summary.append(el('dt','',label),el('dd','',value));
     publishControls();$('publish-review').scrollIntoView({block:'start'});
@@ -888,28 +977,28 @@
     const result=await rpc('preparePublish',payload);
     if(result.ready===false)throw Error('필수 내용을 확인해 주세요: '+(result.missing||[]).join(', '));
     if(!result.id)throw Error('등록 초안 번호를 확인하지 못했어요. 같은 내용으로 다시 확인해 주세요.');
-    showPublishDraft(result);publishMessage('아직 게시되지 않았습니다. 웹에서 승인 후 등록을 완료하세요.');
+    showPublishDraft(result);await commitPublication();
   }));
-  $('publish-review-open').addEventListener('click',()=>publishAction(()=>rpc('host.openExternal',{url:reviewUrl(publication.draft)})));
   $('publish-status').addEventListener('click',()=>publishAction(async()=>{
     const result=await rpc('publishStatus',{draftId:publication.draft.id});showPublishDraft({...publication.draft,...result});
-    publishMessage(result.status==='approved'?'승인을 확인했어요. 등록 완료하기를 눌러 주세요.':result.status==='committed'?'등록 완료 상태를 확인했어요.':result.status==='expired'?'검토 기한이 지났어요. 내용을 다시 준비해 주세요.':'웹에서 승인 후 다시 확인해 주세요. 자동으로 반복 조회하지 않습니다.');
+    publishMessage(result.status==='committed'?'등록 완료 상태를 확인했어요.':result.status==='expired'?'등록 기한이 지났어요. 내용을 다시 준비해 주세요.':'등록이 완료되지 않았어요. 내용을 확인한 뒤 등록하기를 눌러 주세요.');
   }));
-  $('publish-commit').addEventListener('click',()=>publishAction(async()=>{
-    if(!['approved','committing'].includes(publication.draft?.status))return;
-    publishMessage('등록 결과를 확인하고 있어요…');
-    const result=await rpc('publish',{draftId:publication.draft.id});
-    if(result.published!==true||result.status!=='committed'){
-      showPublishDraft({...publication.draft,...result});
-      publishMessage(result.notice||'등록이 완료되지 않았어요. 웹 승인 상태를 다시 확인하세요.',true);return;
-    }
-    showPublishDraft({...publication.draft,status:'committed',result});
-    publishMessage(result.pending?'등록됐어요. 일부 후속 처리는 플랫폼에서 확인해 주세요.':'플랫폼에 등록했어요. 목록을 새로고침하면 확인할 수 있습니다.');
-  }));
+  async function commitPublication() {
+    const draft=publication.draft;
+    if(!['pending','approved','committing'].includes(draft?.status))return;
+    if(!/^[a-f0-9]{64}$/.test(draft.reviewDigest||''))throw Error('플랫폼을 앱 등록이 지원되는 버전으로 업데이트해 주세요. 작성한 내용은 유지됩니다.');
+    publishMessage('선택한 내용과 공개 범위로 등록하고 있어요…');
+    const result=await rpc('publish',{draftId:draft.id,reviewDigest:draft.reviewDigest,confirmed:true});
+    if(result.published!==true||result.status!=='committed'){showPublishDraft({...draft,...result});throw Error(result.notice||'등록 결과를 확인해 주세요.');}
+    showPublishDraft({...draft,status:'committed',result});
+    publishMessage('등록했어요. 웹과 앱에서 같은 도구를 확인할 수 있습니다.');
+    await refreshMyTools();
+  }
+  $('publish-commit').addEventListener('click',()=>publishAction(commitPublication));
   $('publish-edit').addEventListener('click',()=>{
     if(publication.busy)return;
     if(publication.draft?.status==='committed')resetPublish();else publishChanged();
-    publishControls();publishMessage('내용을 변경하면 새 검토가 필요합니다. 이전 초안은 자동으로 게시되지 않습니다.');$('publish-target').nextElementSibling?.querySelector('button')?.focus();
+    publishControls();publishMessage('내용을 수정한 뒤 등록하기를 누르면 선택한 설정으로 등록합니다.');$('publish-target').nextElementSibling?.querySelector('button')?.focus();
   });
   for(const id of ['type-filter','org-filter','sort',...publishSelects]) filterSelect($(id));
   document.addEventListener('pointerdown',event=>{if(openFilter&&!openFilter.wrap.contains(event.target))openFilter.close(false);});

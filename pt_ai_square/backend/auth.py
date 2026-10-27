@@ -81,6 +81,11 @@ def install_auth(app):
 
     @app.before_request
     def authenticate():
+        # Credential attribution belongs to this request, including when an
+        # embedding host/test keeps a Flask app context alive across requests.
+        # A browser cookie must never inherit a preceding personal KEY identity.
+        g.pop('api_token_id', None)
+        g.pop('api_token_scope', None)
         if request.endpoint in {'static','health'}: return
         # This prebuilt guide has the same public visibility as /static. An
         # explicit personal KEY still follows the unchanged API allowlist.

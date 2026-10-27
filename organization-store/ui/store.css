@@ -65,15 +65,22 @@ button,input,select,textarea{font-family:inherit;font-size:13px}button{line-heig
 @media(max-width:840px){.install-record{grid-template-columns:36px minmax(0,1fr)}.install-record>.record-actions{grid-column:2;justify-content:flex-start;max-width:none;margin-top:-2px}}
 @media(max-width:480px){.install-record{padding:13px 12px;gap:9px 10px}.record-heading{flex-wrap:wrap;gap:4px 7px}.record-title{max-width:100%}.record-heading .type-badge{font-size:9px}.record-meta{gap:2px 7px}.record-meta>span+span{padding-left:7px}.record-actions button{padding:4px 6px}.update-summary{padding:0 12px}}
 
-/* Native close/focus remain immediate. Discrete display/overlay transitions only
-   retain the rendered layer for its fade; there are no deferred interaction timers. */
-dialog{opacity:0;transform:translateY(6px);transition:opacity 300ms cubic-bezier(.2,.7,.2,1),transform 300ms cubic-bezier(.2,.7,.2,1),display 300ms allow-discrete,overlay 300ms allow-discrete}
-dialog[open]{opacity:1;transform:translateY(0)}
+/* Native close/focus remain immediate. Only the rendered layer stays for the
+   fade; no delayed close, content clone, retained layer hint or animation loop.
+   Older runtimes can still fade in and fall back to their immediate close. */
+:root{--motion-duration:300ms;--motion-enter:cubic-bezier(.22,.61,.36,1);--motion-exit:cubic-bezier(.4,0,.6,1)}
+/* display:flex remains during the discrete close transition. Keep its layout
+   outside [open] too, so the header and body do not switch to a row on exit. */
+.detail-dialog,.publish-dialog{flex-direction:column}
+dialog{opacity:0;transform:translateY(8px) scale(.985);transform-origin:center center;transition:opacity var(--motion-duration) var(--motion-exit),transform var(--motion-duration) var(--motion-exit),display var(--motion-duration) allow-discrete,overlay var(--motion-duration) allow-discrete}
+dialog[open]{opacity:1;transform:translateY(0) scale(1);transition-timing-function:var(--motion-enter),var(--motion-enter),linear,linear}
 dialog:not([open]),dialog:not([open])::backdrop{pointer-events:none}
-dialog::backdrop{opacity:0;transition:opacity 300ms ease,display 300ms allow-discrete,overlay 300ms allow-discrete}
+dialog::backdrop{opacity:0;transition:opacity var(--motion-duration) ease,display var(--motion-duration) allow-discrete,overlay var(--motion-duration) allow-discrete}
 dialog[open]::backdrop{opacity:1}
-@starting-style{dialog[open]{opacity:0;transform:translateY(6px)}dialog[open]::backdrop{opacity:0}}
-@media(prefers-reduced-motion:reduce){dialog,dialog::backdrop{transition:none}dialog{transform:none}.tool-card{animation:none}}
+.filter-menu{opacity:1;transform:translateY(0);transition:opacity 200ms var(--motion-enter),transform 200ms var(--motion-enter),display 200ms allow-discrete}
+.filter-menu[hidden]{opacity:0;transform:translateY(var(--menu-offset,-4px));pointer-events:none}
+@starting-style{dialog[open]{opacity:0;transform:translateY(8px) scale(.985)}dialog[open]::backdrop{opacity:0}.filter-menu:not([hidden]){opacity:0;transform:translateY(var(--menu-offset,-4px))}}
+@media(prefers-reduced-motion:reduce){dialog,dialog::backdrop,.filter-menu{transition:none}dialog,.filter-menu{transform:none}.tool-card{animation:none}}
 
 /* Semantic action icons match the host app without changing link behaviour. */
 .action-link{display:inline-flex;align-items:center;justify-content:center;gap:6px}
@@ -100,3 +107,15 @@ dialog[open]::backdrop{opacity:1}
 @keyframes install-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.install-spinner{animation:none}}
 @media(max-width:480px){.installation-status{padding:11px 12px;gap:7px 9px}.install-status-actions{gap:4px 12px}}
+
+.publish-file{transition:border-color .18s,background-color .18s}.publish-file.drag-over{border-color:var(--accent);background:var(--selected,#eeecfa);outline:2px solid var(--accent);outline-offset:3px}.publish-file strong{font-size:15px}.publish-file p{font-size:12px}
+
+.scope-options{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px 16px}
+.scope-field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.scope-field>label{margin:0;font-size:13px;font-weight:600}
+.scope-options .filter-select{width:100%;min-width:0;max-width:none;flex:none}
+.scope-options .filter-menu{left:0;right:0;min-width:0;max-width:none}
+.scope-options .filter-option{white-space:normal;overflow-wrap:anywhere}
+.scope-options>.scope-hint{grid-column:1 / -1;margin:0}
+.install-request-help{margin-top:10px}.install-request-help p+p{margin-top:4px}
+@media(max-width:480px){.scope-options{grid-template-columns:minmax(0,1fr)}}

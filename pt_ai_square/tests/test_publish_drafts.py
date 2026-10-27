@@ -312,6 +312,13 @@ def test_publish_candidates_support_name_or_no_package_id_and_are_bounded(app):
     latest = api.get('/api/publish-targets', headers=auth)
     assert latest.status_code == 200 and len(latest.json['items']) == 20
     assert latest.json['items'][0]['id'] == 124
+    assert latest.json['nextOffset'] == 20
+    following = api.get('/api/publish-targets?offset=20', headers=auth).json
+    assert len(following['items']) == 6 and following['nextOffset'] is None
+    assert len({row['id'] for row in latest.json['items'] + following['items']}) == 26
+    assert 2 not in {row['id'] for row in latest.json['items'] + following['items']}
+    assert api.get('/api/publish-targets?limit=200', headers=auth).json['nextOffset'] is None
+    assert api.get('/api/publish-targets?offset=-1', headers=auth).status_code == 400
 
 
 def test_invalid_web_publish_request_id_cleans_staged_file(app):

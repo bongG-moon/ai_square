@@ -44,10 +44,10 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
      }
      if(m.action==='preparePublish'){
       if(window.failPrepare){window.failPrepare=false;error='응답을 확인하지 못했습니다. 다시 확인하세요.';}
-      else {draft={id:'a'.repeat(32),status:'pending',reviewUrl:'https://square.example.test/publish-review/'+'a'.repeat(32),metadata:m.payload.metadata,toolId:m.payload.toolId,artifact:{name:m.payload.metadata.mode==='file'?'weekly.zip':''}};result=draft;}
+      else {draft={id:'a'.repeat(32),reviewDigest:'b'.repeat(64),status:'pending',reviewUrl:'https://square.example.test/publish-review/'+'a'.repeat(32),metadata:m.payload.metadata,toolId:m.payload.toolId,artifact:{name:m.payload.metadata.mode==='file'?'weekly.zip':''}};result=draft;}
      }
      if(m.action==='publishStatus')result={...draft,status:window.approved?'approved':'pending'};
-     if(m.action==='publish')result=window.expireCommit?{...draft,status:'expired',published:false,notice:'웹 승인 기한이 지났습니다. 다시 준비하세요.'}:{id:7,version:1,published:true,status:'committed'};
+     if(m.action==='publish')result=window.expireCommit?{...draft,status:'expired',published:false,notice:'등록 기한이 지났습니다. 다시 준비하세요.'}:{id:7,version:1,published:true,status:'committed'};
      window.postMessage({type:'ax-extension-response',channel:m.channel,requestId:m.requestId,ok:!error,result,error},'*');
     });
    },config);
@@ -81,18 +81,16 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
   await page.evaluate(()=>window.failPrepare=true);await page.locator('#publish-prepare').click();await page.waitForFunction(()=>!document.querySelector('#publish-prepare').disabled);await page.locator('#publish-message').filter({hasText:'응답을 확인하지 못했습니다.'}).waitFor();
   await page.locator('#publish-prepare').click();await page.locator('#publish-review').waitFor({state:'visible'});
   const requestIds=await page.evaluate(()=>requests.filter(r=>r.action==='preparePublish').map(r=>r.payload.requestId));assert.equal(requestIds[0],requestIds[1]);
-  assert.equal(await page.locator('#publish-commit').isDisabled(),true);assert.equal(await count('publish'),0);
-  await page.locator('#publish-review-open').click();await page.waitForFunction(()=>requests.some(r=>r.action==='host.openExternal'));assert.equal(await count('host.openExternal'),1);
-  await page.locator('#publish-status').click();await page.waitForFunction(()=>!document.querySelector('#publish-status').disabled);assert.equal(await page.locator('#publish-commit').isDisabled(),true);
-  await page.evaluate(()=>window.approved=true);await page.locator('#publish-status').click();await page.waitForFunction(()=>!document.querySelector('#publish-commit').disabled);
+  await page.locator('#publish-review-title').filter({hasText:'플랫폼에 등록했어요.'}).waitFor();assert.equal(await count('publish'),1);
+  assert.equal(await page.locator('#publish-review-open').isVisible(),false);assert.equal(await count('host.openExternal'),0);
+  const committed=await page.evaluate(()=>requests.find(r=>r.action==='publish').payload);assert.equal(committed.confirmed,true);assert.equal(committed.reviewDigest,'b'.repeat(64));
   await page.screenshot({path:path.join(output,'04-register-reviewed.png'),animations:'disabled'});
-  await page.locator('#publish-commit').click();await page.locator('#publish-review-title').filter({hasText:'플랫폼에 등록했어요.'}).waitFor();assert.equal(await count('publish'),1);
   await page.locator('#publish-edit').click();assert.equal(await page.locator('#publish-name').inputValue(),'');
   await page.locator('#publish-pick-file').click();await page.locator('#publish-install-info').waitFor({state:'visible'});
   await page.evaluate(()=>window.sourceProfile=false);await page.locator('#publish-pick-file').click();await page.locator('#publish-file-name').filter({hasText:'other.md'}).waitFor();assert.equal(await page.locator('#publish-install-info').isVisible(),false);
-  await fillRequired();await page.locator('#publish-prepare').click();await page.locator('#publish-review').waitFor({state:'visible'});
+  await fillRequired();await page.evaluate(()=>window.expireCommit=true);await page.locator('#publish-prepare').click();await page.locator('#publish-review').waitFor({state:'visible'});
   const latest=await page.evaluate(()=>requests.filter(r=>r.action==='preparePublish').at(-1).payload);assert.equal('installProfile' in latest.metadata,false);assert.equal('packageId' in latest.metadata,false);
-  await page.locator('#publish-status').click();await page.evaluate(()=>window.expireCommit=true);await page.locator('#publish-commit').click();await page.locator('#publish-review-label').filter({hasText:'확인 기한 만료'}).waitFor();assert.equal(await page.locator('#publish-commit').isDisabled(),true);
+  await page.locator('#publish-review-label').filter({hasText:'확인 기한 만료'}).waitFor();assert.equal(await page.locator('#publish-commit').isDisabled(),true);
   await page.locator('#publish-edit').click();await page.evaluate(()=>window.inspectFail=true);await page.locator('#publish-pick-file').click();await page.locator('#publish-file-name').filter({hasText:'배포할 파일을 다시 선택하세요'}).waitFor();
   assert.equal(await page.locator('#publish-name').inputValue(),'주간 보고서 정리');const before=await count('preparePublish');await page.locator('#publish-prepare').click();await page.locator('#publish-message').filter({hasText:'배포할 파일을 선택해 주세요.'}).waitFor();assert.equal(await count('preparePublish'),before);
   await select('등록 방식','내 도구의 새 버전 등록');await select('기존 도구','기존 보고서 도구');await page.locator('#publish-message').filter({hasText:'기존 도구의 설정을 불러왔어요.'}).waitFor();
@@ -108,7 +106,7 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
   const narrowBounds=await page.locator('#publish-category-menu').evaluate(n=>{const rect=n.getBoundingClientRect(),area=n.closest('.publish-scroll').getBoundingClientRect();return {top:rect.top,bottom:rect.bottom,areaTop:area.top,areaBottom:area.bottom};});assert.ok(narrowBounds.top>=narrowBounds.areaTop&&narrowBounds.bottom<=narrowBounds.areaBottom);await page.keyboard.press('Escape');
   await page.locator('.publish-scroll').evaluate(n=>n.scrollTop=0);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(output,'07-register-narrow.png'),animations:'disabled'});
   await page.locator('#publish-close').click();assert.equal(await page.locator('.card-grid').evaluate(n=>getComputedStyle(n).gridTemplateColumns.split(' ').length),1);await page.screenshot({path:path.join(output,'08-catalog-narrow.png'),animations:'disabled'});
-  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({passed:true,layout,checks:['three columns and compact cards','description clamp and full detail','Noto font loaded','connection label','file prepare/review/commit','no automatic publish or polling','dialog preserves form','cancel preserves selected file','network retry reuses request id','new file clears stale profile','expired approval never reports success','failed inspection clears revoked selection','existing-tool command update and visibility','legacy host URL publishing','read-only key blocks preparation','dark/narrow layout'],errors},null,2));
+  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({passed:true,layout,checks:['three columns and compact cards','description clamp and full detail','Noto font loaded','connection label','file prepare/review/commit','explicit in-app publish without web approval or polling','dialog preserves form','cancel preserves selected file','network retry reuses request id','new file clears stale profile','expired draft never reports success','failed inspection clears revoked selection','existing-tool command update and visibility','legacy host URL publishing','read-only key blocks preparation','dark/narrow layout'],errors},null,2));
   console.log('PASS: registration lifecycle, file capability UX, compact cards, detail, dark/narrow layouts.');
  }finally{
   if(process.platform==='win32')require('node:child_process').spawnSync('taskkill.exe',['/PID',String(server.process().pid),'/T','/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});

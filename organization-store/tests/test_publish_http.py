@@ -66,12 +66,14 @@ def service():
                 draft_id = str(uuid.uuid5(uuid.NAMESPACE_URL, values['clientRequestId']))
                 state['uploads'].append(artifact)
                 state['drafts'].setdefault(draft_id, dict(id=draft_id, status='pending', metadata=values,
-                    reviewUrl='/publish-review/' + draft_id, reviewDigest='test-digest',
+                    reviewUrl='/publish-review/' + draft_id, reviewDigest='a' * 64,
                     artifact=dict(bytes=len(artifact), sha256=hashlib.sha256(artifact).hexdigest())))
                 return self.reply(state['drafts'][draft_id], 201)
             if self.path.endswith('/commit'):
-                self.rfile.read(int(self.headers['Content-Length']))
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 draft = state['drafts'][self.path.split('/')[3]]
+                if body.get('confirmed') is True and body.get('reviewDigest') == draft['reviewDigest']:
+                    draft['status'] = 'approved'
                 if draft['status'] not in {'approved', 'committed'}:
                     return self.reply({'error': 'browser approval required'}, 409)
                 if draft['status'] != 'committed': state['commits'] += 1
@@ -137,11 +139,10 @@ def test_registration_fresh_workers_native_file_context_http_browser_review(serv
     assert pending['status'] == 'pending' and state['uploads'] == [source.read_bytes()]
     for key, value in metadata.items():
         assert pending['metadata'][key] == value
-    assert call('publish', {'draftId': pending['id'], 'confirmed': True}, selected=False)['published'] is False
+    assert call('publish', {'draftId': pending['id']}, selected=False)['published'] is False
     assert state['commits'] == 0
-    state['drafts'][pending['id']]['status'] = 'approved'  # Browser-side fixture approval only.
-    assert call('publishStatus', {'draftId': pending['id']}, selected=False)['status'] == 'approved'
-    assert call('publish', {'draftId': pending['id']}, selected=False)['id'] == 55
+    assert call('publishStatus', {'draftId': pending['id']}, selected=False)['status'] == 'pending'
+    assert call('publish', {'draftId': pending['id'], 'confirmed': True, 'reviewDigest': pending['reviewDigest']}, selected=False)['id'] == 55
     assert call('publish', {'draftId': pending['id']}, selected=False)['version'] == 1
     assert state['commits'] == 1 and not any(path.endswith('/approve') for _, path in state['requests'])
     assert not any((data / 'publish-staging').iterdir())

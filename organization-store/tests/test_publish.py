@@ -108,8 +108,9 @@ def test_file_preparation_browser_approval_commit_and_retry(ready):
     assert not any((store.directory / 'publish-staging').iterdir())
     assert client.draft_calls[0][1] == source.read_bytes()
     assert 'preparedFile' not in pending
-    denied = store.dispatch('publish', {'draftId': pending['id'], 'confirmed': True})
-    assert denied['published'] is False and not client.commits
+    with pytest.raises(worker.SquareError, match='등록 내용'):
+        store.dispatch('publish', {'draftId': pending['id'], 'confirmed': True})
+    assert not client.commits
     # Only the test server's browser-side approval changes status.
     client.drafts[pending['id']]['status'] = 'approved'
     assert store.dispatch('publishStatus', {'draftId': pending['id']})['status'] == 'approved'
@@ -390,3 +391,41 @@ def test_visibility_and_target_must_be_explicit(ready):
         with pytest.raises(worker.SquareError):
             prepare(store, **changes)
     assert not client.draft_calls
+
+
+def test_direct_publish_requires_exact_prepared_digest_without_browser(ready):
+    store, client, _ = ready
+    original_draft=client.draft
+    def draft(values, artifact=None):
+        result=original_draft(values, artifact)
+        client.drafts[result['id']]['reviewDigest']='a'*64
+        return copy.deepcopy(client.drafts[result['id']])
+    client.draft=draft
+    original_json=client.json
+    def direct(path, method='GET', data=None):
+        if method=='POST' and path.endswith('/commit'):
+            assert data=={'confirmed':True,'reviewDigest':'a'*64}
+            client.drafts[path.split('/')[3]]['status']='approved'
+        return original_json(path, method, data)
+    client.json=direct
+    pending=prepare(store)
+    with pytest.raises(worker.SquareError):
+        store.dispatch('publish',{'draftId':pending['id'],'confirmed':True,'reviewDigest':'b'*64})
+    result=store.dispatch('publish',{'draftId':pending['id'],'confirmed':True,'reviewDigest':'a'*64})
+    assert result['published'] and client.commits==1
+    assert not any('/approve' in path for path,_,_ in client.calls)
+
+
+def test_my_tools_reads_all_pages_and_preserves_owner_selection(ready):
+    from urllib.parse import urlsplit, parse_qs
+    store, client, _=ready
+    original=client.json
+    def pages(path,method='GET',data=None):
+        if path.startswith('/api/publish-targets?'):
+            offset=int(parse_qs(urlsplit(path).query).get('offset',['0'])[0])
+            return {'items':[{'id':i,'name':f'내 도구 {i}'} for i in range(offset+1,min(offset+200,237)+1)],'nextOffset':200 if offset==0 else None}
+        return original(path,method,data)
+    client.json=pages
+    result=store.dispatch('publishOptions')
+    assert len(result['candidates'])==237
+    assert len({row['id'] for row in result['candidates']})==237
