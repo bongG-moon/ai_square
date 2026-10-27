@@ -289,6 +289,40 @@ def test_candidate_cap_keeps_exact_and_strong_lexical_matches(search_app, monkey
     assert [row['id'] for row in data['items']] == [99, 100]
 
 
+def test_conversational_subject_ranking_precedes_popularity_and_candidate_cap(search_app, monkeypatch):
+    seed(search_app, 1, '폴더 정리', data={
+        'desc': '폴더 내용을 정리합니다.', 'workTags': ['파일 정리'], 'category': '공통 업무'})
+    seed(search_app, 99, '회의록 만들기', data={
+        'desc': '회의에서 결정한 일을 정리합니다.', 'workTags': ['회의 기록'], 'category': '공통 업무'})
+    department(search_app, 1, 8)
+    c, _ = client(search_app)
+    query = {'q': '회의 내용을 정리해 줘'}
+    results = c.get('/api/catalog', query_string=query).json
+    assert [row['id'] for row in results['items']] == [99, 1]
+    monkeypatch.setattr(catalog, 'CANDIDATE_LIMIT', 1)
+    limited = c.get('/api/catalog', query_string=query).json
+    assert limited['total'] == 2 and limited['complete'] is False
+    assert [row['id'] for row in limited['items']] == [99]
+
+
+@pytest.mark.parametrize('query, name', [
+    ('엑셀 파일을 하나로 합치고 싶어', 'Excel 병합'),
+    ('PPT 발표 자료 만들기', 'PowerPoint 제작'),
+    ('전에 하던 업무를 이어서 하고 싶어', '업무 이어하기'),
+    ('meeting minutes', '회의록'),
+    ('코드에서', '코드에서'),
+])
+def test_conversational_and_literal_queries_reach_the_database_candidates(search_app, query, name):
+    seed(search_app, 42, name, data={'desc': '등록 설명', 'workTags': [], 'category': '분류'})
+    c, h = client(search_app)
+    key = c.post('/api/local-tokens', headers=h, json={'name': '일상 표현 검색'}).json['token']
+    for caller, headers in [(c, {}), (search_app.test_client(), {'Authorization': 'Bearer ' + key})]:
+        response = caller.get('/api/catalog', query_string={'q': query}, headers=headers)
+        assert response.status_code == 200
+        assert [row['id'] for row in response.json['items']] == [42]
+        assert response.json['items'][0]['reasons']
+
+
 def test_catalog_bulk_lookups_are_not_per_tool(search_app, monkeypatch):
     for tid in range(1, 31):
         seed(search_app, tid)

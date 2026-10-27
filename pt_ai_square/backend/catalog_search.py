@@ -23,14 +23,36 @@ QUERY_FIELDS = ('name', 'workTags', 'desc', 'category', 'owner')
 FIELD_WEIGHTS = {'name': 8, 'workTags': 6, 'desc': 2, 'category': 4, 'owner': 4, 'registrant': 5}
 SYNONYM_GROUPS = (
     ('메일', '이메일', 'email', 'e-mail', 'mail'),
-    ('회의록', '회의메모', 'meeting minutes'),
-    ('엑셀', 'excel', '스프레드시트'),
+    ('회의록', '회의메모', '회의 메모', 'meeting minutes'),
+    ('엑셀', 'excel', '스프레드시트', 'spreadsheet'),
     ('요약', 'summarize', 'summary'),
     ('조회', '검색', 'search', 'lookup'),
     ('보고서', 'report'),
+    ('ppt', 'powerpoint', '파워포인트', '슬라이드', '발표자료', '발표 자료'),
+    ('병합', '합치기', '합치', '합쳐', 'merge'),
+    ('업무 기록', '작업 기록', '업무기록', '작업기록'),
+    ('이어하기', '이어서', '재개', 'resume'),
+    ('만들기', '만들', '생성', '작성', '제작', 'create'),
 )
 STOP_WORDS = {'도구', '기능', 'tool', 'tools', '찾아줘', '추천', '추천해줘',
-              '우리', '우리팀', '팀', '부서', '쓸', '사용할', '알려줘'}
+              '우리', '우리팀', '팀', '부서', '쓸', '사용할', '알려줘',
+              '좀', '줘', '주세요', '싶어', '싶어요', '싶습니다', '하고',
+              '해', '할', '수', '있는', '있어', '있나요', '있을까',
+              '전에', '하던', '했던', '하나로'}
+# Explicit everyday action forms, not an unrestricted Korean stemmer. Keep the
+# original token too, so a literal tool/registrant name remains discoverable.
+ACTION_FORMS = {
+    '합치는': '병합', '합치고': '병합', '합칠': '병합',
+    '합쳐줘': '병합', '합쳐주세요': '병합',
+    '만드는': '만들기', '만들어': '만들기', '만들고': '만들기',
+    '만들어줘': '만들기', '만들어주세요': '만들기',
+    '이어갈': '이어하기', '이어가고': '이어하기',
+}
+# Generic words may help, but must not outweigh the subject of a longer request
+# (e.g. 회의 in "회의 내용을 정리해 줘"). Apply this both before and after the
+# candidate cap; popularity is still only a tie-break for text relevance.
+GENERIC_TERMS = {'파일', '자료', '내용', '업무', '작업', '정리',
+                 '만들기', '만들', '생성', '작성', '제작', 'create'}
 SORT_ALIASES = {'recent': 'realtime', 'all': 'cumulative', 'total': 'cumulative'}
 
 
@@ -38,24 +60,48 @@ def normalize(value):
     return unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
 
 
+def _query_stem(term):
+    if term in ACTION_FORMS:
+        return ACTION_FORMS[term]
+    stem = re.sub(r'(?:해주는|해주세요|해줘|하는|하기|하고|해|으로|에서|을|를)$', '', term)
+    return stem if len(stem) >= 2 else term
+
+
 def query_groups(query):
     terms = re.findall(r'[\w]+(?:-[\w]+)*', normalize(query), flags=re.UNICODE)
-    groups = []
-    for term in terms:
-        if term in STOP_WORDS:
-            continue
-        # Remove common Korean request particles, not arbitrary word suffixes.
-        stem = re.sub(r'(?:하는|해주는|해줘|해주세요|을|를|으로|에서)$', '', term)
-        term = stem if len(stem) >= 2 else term
-        if term in STOP_WORDS:
-            continue
-        group = next((values for values in SYNONYM_GROUPS if term in values), (term,))
-        if group not in groups:
-            groups.append(group)
+    groups, index = {}, 0
+    phrases = [(value.split(), values) for values in SYNONYM_GROUPS
+               for value in values if ' ' in value]
+    while index < len(terms):
+        term, count = terms[index], 1
+        stem = _query_stem(term)
+        # Recognize spaced phrases as one concept (PPT / 발표 자료), avoiding
+        # duplicate relevance points from several names for the same thing.
+        group = None
+        for words, values in phrases:
+            if index + len(words) <= len(terms) and all(
+                    word in {actual, _query_stem(actual)}
+                    for word, actual in zip(words, terms[index:index + len(words)])):
+                group, count = values, len(words)
+                term = ' '.join(terms[index:index + count])
+                break
+        index += count
+        if group is None:
+            if term in STOP_WORDS or stem in STOP_WORDS:
+                continue
+            group = next((values for values in SYNONYM_GROUPS
+                          if term in values or stem in values), (stem,))
+        variants = groups.setdefault(group, list(group))
+        if term not in variants:
+            variants.append(term)
     if len(groups) > 12:
         raise BadRequest('검색 핵심 단어는 12개 이내로 입력하세요.')
     # Punctuation is literal; a query such as .* must not match the catalog.
-    return (groups or [(normalize(query),)]) if query else []
+    return ([tuple(variants) for variants in groups.values()] or [(normalize(query),)]) if query else []
+
+
+def group_importance(variants):
+    return 1 if any(word in GENERIC_TERMS for word in variants) else 4
 
 
 def relevance(row, query, groups, registrant_name=''):
@@ -71,7 +117,7 @@ def relevance(row, query, groups, registrant_name=''):
         hits = [key for key, texts in values.items()
                 if any(variant in text for variant in variants for text in texts)]
         if hits:
-            matched += 1
+            matched += group_importance(variants)
             weight += max(FIELD_WEIGHTS[key] for key in hits)
             fields.update(hits)
     return exact, matched, weight, sorted(fields)
@@ -190,7 +236,7 @@ def _candidates(query, projection, q, groups, registrant_matches):
         matching_ids = [uid for uid, name in registrant_matches.items()
                         if any(variant in normalize(name) for variant in variants)]
         hits['registrant'] = {'$in': ['$owner', {'$literal': matching_ids}]}
-        group_hits.append({'$cond': [{'$or': list(hits.values())}, 1, 0]})
+        group_hits.append({'$cond': [{'$or': list(hits.values())}, group_importance(variants), 0]})
         group_weights.append({'$max': [{'$cond': [hit, FIELD_WEIGHTS[key], 0]} for key, hit in hits.items()]})
     return list(db().tools.aggregate([
         {'$match': query}, {'$project': projection},
@@ -308,7 +354,7 @@ def search_catalog():
         if exact:
             reasons.append('이름 또는 항목 번호가 정확히 일치합니다.')
         elif fields:
-            reasons.append('검색어가 ' + '·'.join(labels[f] for f in fields) + '에 포함됩니다.')
+            reasons.append('검색어 또는 비슷한 업무 표현이 ' + '·'.join(labels[f] for f in fields) + '에 포함됩니다.')
         if signal:
             reasons.append(f'최근 {DEPARTMENT_DAYS}일 같은 부서 구성원 {signal["distinctUsers"]}명이 좋아요 또는 최초 다운로드로 활용했습니다.')
         if mode in {'realtime', 'cumulative'}:

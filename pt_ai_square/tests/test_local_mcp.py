@@ -554,6 +554,54 @@ def test_search_sorts_and_version_check_do_not_install(settings,tmp_path):
     assert runtime.check_updates()=={'items':[],'automaticallyUpdated':False,'notice':'버전 확인만 수행했습니다. 실제 교체는 새 설치 준비안과 범위 확인 후 진행합니다.'}
 
 
+def test_mcp_search_preserves_user_terms_and_filters_without_actions(settings,monkeypatch):
+    """Editorial guidance must not silently rewrite names or broaden actions."""
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    client=FakeClient()
+    runtime=Runtime(settings,client)
+    monkeypatch.setattr(server,'Runtime',lambda config:runtime)
+    mcp=server.make_server(settings.path)
+    query='김하늘 엑셀 파일 합치기'
+    asyncio.run(mcp.call_tool('search_items',{
+        'query':query,'sort':'recommended','organization':'org',
+        'platform':'Claude','kind':'Skill','offset':10,'limit':5}))
+    assert len(client.calls)==1
+    path,method,body=client.calls[0]
+    assert method=='GET' and body is None
+    assert parse_qs(urlsplit(path).query)=={
+        'q':[query],'type':['Skill'],'sort':['recommended'],'orgId':['org'],
+        'platform':['Claude'],'offset':['10'],'limit':['5']}
+    assert not client.drafts and not client.downloads
+    assert not (settings.state/'publish').exists()
+
+
+def test_mcp_draft_preserves_confirmed_copy_identity_and_source(settings,monkeypatch):
+    """The AI writes plain copy; the MCP does not rename approved products."""
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    client=FakeClient()
+    runtime=Runtime(settings,client)
+    monkeypatch.setattr(server,'Runtime',lambda config:runtime)
+    source=settings.roots[0]/'SKILL.md'
+    original=b'# Existing source\n'
+    source.write_bytes(original)
+    values=metadata()
+    values.update(name='CUBE Mail',
+                  desc='메일을 제목과 보낸 사람으로 찾습니다. 이전에 받은 자료를 다시 찾을 때 씁니다.',
+                  workTags=['메일 검색','받은 메일','발신자 찾기'],
+                  guide='사내 메일 조회 권한이 필요합니다. KEY는 포함하지 않습니다.')
+    before=copy.deepcopy(values)
+    asyncio.run(server.make_server(settings.path).call_tool('prepare_publish',{
+        'metadata':values,'source_path':str(source),'target':'new'}))
+    posted,raw=client.drafts[0]
+    for key in ('name','desc','workTags','guide','packageId','orgId','categoryId','approval'):
+        assert posted[key]==before[key]
+    assert values==before and source.read_bytes()==original and raw==original
+    assert not any('/commit' in route for route,_,_ in client.calls)
+    assert not client.downloads
+
+
 @pytest.fixture
 def api_server():
     calls=[];payload=b'# downloaded Skill\n'
