@@ -38,6 +38,12 @@ def test_public_bundle_is_neutral_and_only_has_offline_material(distribution):
     with zipfile.ZipFile(io.BytesIO(files['extension-template.zip'])) as archive:
         manifest = json.loads(archive.read('extension.json'))
         assert set(archive.namelist()) == set(manifest['files']) | {'extension.json'}
+        assert 'publishUpdateAccess' in manifest['actions']
+        assert b'publishUpdateAccess' in archive.read(manifest['entrypoint'])
+        assert 'requestAccess' in manifest['actions']
+        assert b'requestAccess' in archive.read(manifest['entrypoint'])
+        assert 'cancelAccessRequest' in manifest['actions']
+        assert b'cancelAccessRequest' in archive.read(manifest['entrypoint'])
     assert b'from build import' not in files['configure_server.py']
 
 

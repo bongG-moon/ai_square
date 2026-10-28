@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import uuid
 import zipfile
 
@@ -32,6 +33,9 @@ class Platform:
         self.item = dict(id=7, ownerId='owner', revision=2, name='기존 도구', active=1, mode='zip',
                          versions=[dict(n=1, installProfile={'schemaVersion': 1, 'kind': 'skill', 'host': 'claude',
                                       'slug': 'memo-skill', 'entrypoint': 'SKILL.md', 'scopes': ['user']})])
+
+    def read_publish_access_json(self, path):
+        return self.json(path)
 
     def json(self, path, method='GET', data=None):
         self.calls.append((path, method, data))
@@ -121,6 +125,89 @@ def test_file_preparation_browser_approval_commit_and_retry(ready):
     assert prepare(store, requestId=request_id)['status'] == 'committed'
     assert len(client.draft_calls) == 1
     assert not any('/approve' in call[0] for call in client.calls)
+
+
+def test_publish_update_access_checks_current_key_and_exact_owner_only(ready):
+    store, client, _ = ready
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': True}
+    assert [call[0] for call in client.calls] == ['/api/integration/me', '/api/tools/7']
+    assert not client.draft_calls
+    client.calls.clear()
+    client.item['ownerId'] = 'someone-else'
+    client.item['canManage'] = True  # An administrator is not the registrant.
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    assert [call[0] for call in client.calls] == ['/api/integration/me', '/api/tools/7']
+    client.item['ownerId'] = 'owner'
+    client.item['id'] = 8  # Never authorize a server response for another tool.
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    client.item.update(id=7, deleted=True)
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    client.item.update(deleted=False, purgePending=True)
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+
+
+@pytest.mark.parametrize('identity_change', [
+    {'capabilities': {'publishDraft': False}},
+    {'capabilities': {'publishDraft': 'true'}},
+    {'user': {}},
+    {'key': {}},
+    {'user': ['owner']},
+    {'key': 'key-one'},
+    {'capabilities': None},
+])
+def test_publish_update_access_fails_closed_without_upload_identity(ready, identity_change):
+    store, client, _ = ready
+    client.identity.update(identity_change)
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    assert [call[0] for call in client.calls] == ['/api/integration/me']
+    assert not client.draft_calls
+
+
+@pytest.mark.parametrize('payload', [{}, {'toolId': 0}, {'toolId': True}, {'toolId': '7'},
+                                    {'toolId': 7, 'ownerId': 'owner'}])
+def test_publish_update_access_rejects_untrusted_identifiers(ready, payload):
+    store, client, _ = ready
+    with pytest.raises(worker.SquareError):
+        store.dispatch('publishUpdateAccess', payload)
+    assert not client.calls and not client.draft_calls
+
+
+def test_timed_out_identity_never_starts_late_tool_request(ready, monkeypatch):
+    store, client, _ = ready
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def stalled(path):
+        calls.append(path)
+        if path == '/api/integration/me':
+            entered.set()
+            assert release.wait(2)
+        return client.json(path)
+    client.read_publish_access_json = stalled
+    monkeypatch.setattr(worker, 'PUBLISH_ACCESS_DEADLINE', .1)
+    try:
+        with pytest.raises(worker.SquareError, match='등록 권한을 확인하지 못했어요'):
+            store.dispatch('publishUpdateAccess', {'toolId': 7})
+        assert entered.is_set()
+        pending = [thread for thread in threading.enumerate()
+                   if thread.name == 'store-publish-access' and thread.is_alive()]
+        assert len(pending) == 1
+    finally:
+        release.set()
+    pending[0].join(2)
+    assert not pending[0].is_alive()
+    assert calls == ['/api/integration/me']
+    assert not client.draft_calls
+
+
+def test_publish_update_access_rechecks_identity_and_owner_after_connection_changes(ready):
+    store, client, _ = ready
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': True}
+    client.identity['user']['id'] = 'different-user'
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    client.identity['user']['id'] = 'owner'
+    client.identity['capabilities']['publishDraft'] = False
+    assert store.dispatch('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    assert not client.draft_calls
 
 
 def test_read_only_key_never_uploads_and_offers_reconnect(ready):

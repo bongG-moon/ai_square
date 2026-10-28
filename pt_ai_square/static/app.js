@@ -300,7 +300,7 @@ const actions={
  rollback:b=>{const x=getItem(runtime.detailId),n=+b.dataset.version;ask(`v${n}으로 되돌릴까요?`,`${x.name}\n현재 v${x.active} 대신 v${n}을 배포합니다. 문제가 있던 현재 버전은 배포를 중단하고 자동 업데이트를 보류합니다.\n이미 설치된 PC는 연동 앱의 복구 지원 여부에 따라 별도로 처리합니다.`,()=>{const old=Core.rollback(x,n);audit.unshift(`${x.name} v${old} → v${n} 복구`);render();versionManager(x.id);},'이 버전으로 복구');},
  'delete-version':b=>{const x=getItem(runtime.detailId),v=x.versions.find(v=>v.n===+b.dataset.version);if(!v||!Core.canDelete(x,v))return;ask(`v${v.n} 파일을 삭제할까요?`,`${x.name} · ${v.size} MB\n파일을 삭제하면 이 버전으로 복구하거나 내려받을 수 없습니다. 변경 이력은 유지합니다.`,()=>{if(!Core.canDelete(x,v))return;v.deleted=true;audit.unshift(`${x.name} v${v.n} 파일 삭제`);versionManager(x.id);},'파일 삭제');},
  approve:b=>{const r=requests.find(r=>r.id===+b.dataset.request);ask('사용 신청을 승인할까요?',`${r.who}\n${r.name}\n도구 사용 권한만 승인하며 원본 데이터 권한은 변경하지 않습니다.`,()=>{r.status='승인';getItem(r.itemId).access='approved';manage('requests');},'승인');},
- reject:b=>{const r=requests.find(r=>r.id===+b.dataset.request);openModal('사용 신청 반려',r.name,`<form id="sq-reject-form" data-request="${r.id}"><label class="sq-field"><span>반려 사유</span><textarea name="reason" required placeholder="신청자가 보완할 내용을 적어주세요."></textarea></label><div class="sq-actions">${button('admin-tab','취소','sq-secondary','data-tab="requests"')}<button class="sq-primary cursor-interaction">사유를 남기고 반려</button></div></form>`);},
+ reject:b=>{const r=requests.find(r=>String(r.id)===b.dataset.request);if(!r)return;openModal('사용 신청 반려',r.name,`<form id="sq-reject-form" data-request="${r.id}" data-request-revision="${esc(r.requestRevision||'')}"><label class="sq-field"><span>반려 사유</span><textarea name="reason" required placeholder="신청자가 보완할 내용을 적어주세요."></textarea></label><div class="sq-actions">${button('admin-tab','취소','sq-secondary','data-tab="requests"')}<button class="sq-primary cursor-interaction">사유를 남기고 반려</button></div></form>`);},
  'add-org':()=>editOrg(-1),
  'edit-org':b=>editOrg(+b.dataset.orgIndex),
  'cleanup-preview':cleanupPreview,
@@ -411,7 +411,7 @@ actions['connection-check']=()=>detail(runtime.detailId,'connect');
 actions['toggle-hidden']=b=>{const x=getItem(b.dataset.id);ask(x.hidden?'다시 공개할까요?':'공개를 중단할까요?',x.name+' · 설치된 PC의 파일은 변경하지 않습니다.',()=>mutate(`/api/tools/${x.id}`,'PATCH',{hidden:!x.hidden,expectedRevision:x.revision},()=>manage()));};
 actions.rollback=b=>{const x=getItem(runtime.detailId),n=+b.dataset.version;ask(`v${n}으로 복구할까요?`,`${x.name}의 현재 배포를 중단하고 선택한 버전을 배포합니다. PC 자동 복구는 아직 지원하지 않습니다.`,()=>mutate(`/api/tools/${x.id}/rollback`,'POST',{version:n,expectedRevision:x.revision},()=>versionManager(x.id)),'이 버전으로 복구');};
 actions['delete-version']=b=>{const x=getItem(runtime.detailId),n=+b.dataset.version;ask(`v${n} 파일을 삭제할까요?`,'파일 삭제는 되돌릴 수 없습니다. 배포 이력은 보존합니다.',()=>mutate(`/api/tools/${x.id}/versions/${n}`,'DELETE',null,()=>versionManager(x.id)),'파일 삭제');};
-actions.approve=b=>ask('사용 신청을 승인할까요?','도구 사용만 승인합니다. 원본 데이터 권한은 별도입니다.',()=>mutate(`/api/requests/${b.dataset.request}/decision`,'POST',{status:'승인',reason:''},()=>manage('requests')),'승인');
+actions.approve=b=>{const expectedRevision=requests.find(r=>String(r.id)===b.dataset.request)?.requestRevision;return ask('사용 신청을 승인할까요?','도구 사용만 승인합니다. 원본 데이터 권한은 별도입니다.',()=>mutate(`/api/requests/${b.dataset.request}/decision`,'POST',{status:'승인',reason:'',expectedRevision},()=>manage('requests')),'승인');};
 actions['cleanup-preview']=async()=>{const data=await requestAPI('/api/storage/candidates');runtime.cleanupServer=data.candidates;openModal('이전 버전 정리','삭제 전 대상 확인',`<div class="sq-callout">현재 배포·복구용 버전은 보호됩니다. 아래 파일은 삭제 후 복구할 수 없습니다.</div><div class="sq-version-list">${data.candidates.map(c=>`<div class="sq-version"><strong>${esc(getItem(c.tool).name)} · v${c.version}</strong><span>${(c.bytes/1048576).toFixed(2)} MB</span></div>`).join('')||'<p>새 정리 대상이 없습니다. 삭제 대기 파일이 있으면 아래 버튼으로 재시도할 수 있습니다.</p>'}</div><div class="sq-actions">${button('admin-tab','돌아가기','sq-secondary','data-tab="storage"')}${button('cleanup-confirm','선택 파일 삭제','sq-primary',data.candidates.length||server.storage?.pending?'':'disabled')}</div>`);};
 actions['cleanup-confirm']=()=>ask('선택한 이전 파일을 삭제할까요?',`${runtime.cleanupServer.length}개 파일을 정리합니다.`,async()=>{const r=await requestAPI('/api/storage/cleanup','POST',{candidates:runtime.cleanupServer});await refresh();manage('storage');announce(r.pending?'일부 파일은 사용 중이어서 삭제 대기 중입니다. 다시 정리하면 재시도합니다.':'파일 정리를 완료했습니다.');},'삭제');
 actions['admin-tab']=async b=>{if(b.dataset.tab==='ideas')server.ideas=(await requestAPI('/api/ideas')).ideas;manage(b.dataset.tab);if(b.dataset.tab==='activity')return openActivityHistory();};
@@ -551,16 +551,16 @@ root.addEventListener('click',event=>{const b=event.target.closest('button');if(
 root.addEventListener('submit',event=>{
  event.preventDefault();const form=event.target;if(form.dataset.busy)return;const values=new FormData(form),data=Object.fromEntries(values);
  if(form.id==='sq-search-form'){clearTimeout(runtime.searchTimer);state.query=$('#sq-query').value.trim();if(state.route==='home'){state.type='전체';state.category='모든 업무';state.org='전체 조직';}navigate('browse','discovery');return;}
+ if(form.id==='sq-access-form'){void submitAccessRequest(form,data.reason);return;}
  if(form.id==='sq-register-form'){captureDraft();const error=packageBlockingError(runtime.draft)||Core.validate(runtime.draft,runtime.step);if(error){$('#sq-register-error').textContent=error;return;}if(runtime.step===3)return;runtime.step++;wizard();return;}
  form.dataset.busy='true';form.querySelectorAll('button').forEach(b=>b.disabled=true);
  (async()=>{
   const id=runtime.detailId;
   if(form.id==='sq-comment-form'){await requestAPI(`/api/tools/${id}/comments`,'POST',{kind:data.kind,text:data.comment});await refresh();detail(id,'comments');}
-  if(form.id==='sq-access-form'){await requestAPI(`/api/tools/${id}/requests`,'POST',{reason:data.reason});await refresh();detail(id,'connect');}
   if(form.id==='sq-policy-form'){await requestAPI('/api/storage/policy','PUT',{keep:+data.keep,days:+data.days});await refresh();manage('storage');}
   if(form.id==='sq-edit-tool-form'){await requestAPI(`/api/tools/${id}`,'PATCH',{...data,approval:form.elements.approval.checked,audience:values.getAll('audience'),expectedRevision:getItem(id).revision});await refresh();manage();}
   if(form.id==='sq-org-form'){await requestAPI('/api/organizations','POST',{...data,previous:organizations[runtime.orgIndex]?.name});await refresh();manage('orgs');}
-  if(form.id==='sq-reject-form'){await requestAPI(`/api/requests/${form.dataset.request}/decision`,'POST',{status:'반려',reason:data.reason});await refresh();manage('requests');}
+  if(form.id==='sq-reject-form'){await requestAPI(`/api/requests/${form.dataset.request}/decision`,'POST',{status:'반려',reason:data.reason,expectedRevision:form.dataset.requestRevision});await refresh();manage('requests');}
   if(form.id==='sq-idea-form'){await requestAPI('/api/ideas','POST',data);openModal('아이디어를 남겼습니다.','제안 등록 완료',`<div class="sq-success"><h3>${esc(data.name)}</h3><p>운영 관리의 아이디어 목록에 저장했습니다.</p>${button('close-dialog','확인','sq-primary')}</div>`);}
  })().catch(showError).finally(()=>{delete form.dataset.busy;form.querySelectorAll('button').forEach(b=>b.disabled=false);});
 });
@@ -740,7 +740,89 @@ detail=async function(id,tab='intro'){
   tabs.insertAdjacentHTML('afterend',`<div class="ws-feedback-list">${x.comments.map(c=>`<article class="ws-feedback"><div class="ws-feedback-head"><div><strong>${esc(c.author)}</strong><small>${dated(c.created)} · ${esc(c.kind)}</small></div>${badge(c.status)}</div><p>${esc(c.text)}</p>${c.replies.map(r=>`<div class="ws-reply"><strong>${esc(r.author)}</strong><small>${dated(r.created)} · ${esc(r.status||'답변')}</small><p>${esc(r.text||'처리 상태를 변경했습니다.')}</p></div>`).join('')}${x.canManage||c.user===server.user.id?button('feedback-reply','답변·상태 변경','sq-link',`data-id="${c.id}"`):''}</article>`).join('')||blank('message-circle','첫 번째 의견을 남겨주세요.','사용 경험이나 개선할 점을 나눠주세요.')}</div><form id="sq-comment-form" class="ws-compose"><label class="sq-field"><span>피드백 종류</span><select name="kind">${options(['개선 의견','사용 후기','오류 제보','아이디어 제안'],'개선 의견')}</select></label><label class="sq-field"><span>의견</span><textarea name="comment" required maxlength="4000" placeholder="사용해 보니 어떤 점이 좋았나요? 개선이 필요한 부분도 알려주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">피드백 등록</button></div></form>`);
  }mountIcons();enhanceSelects();return true;
 };
-function lockedDetail(x){runtime.detailId=x.id;openModal('조회 권한이 필요합니다.',x.name,`<div class="ws-lock"><span class="ws-lock-icon">${icon('lock-keyhole')}</span><h3>${x.access==='pending'?'신청을 검토하고 있습니다.':'승인 후 상세 내용을 볼 수 있어요.'}</h3><p>목록은 누구나 볼 수 있지만, 상세 내용과 배포 파일은<br>등록자 또는 관리자의 승인 후 이용할 수 있습니다.</p>${x.accessDecision?`<div class="sq-callout">${esc(x.accessDecision)}</div>`:''}<div class="sq-actions">${x.access==='pending'?badge('승인 대기'):button('request-access','조회 권한 신청','sq-primary')}</div><small>처리 결과는 내 알림에서 알려드릴게요.</small></div>`);}
+// Mutations belong to one account/tool, independently of which dialog is open.
+// A failed write is reconciled read-only before offering another request.
+const accessRequestOperations=new Map(),accessRequestDrafts=new Map();
+let accessRequestView=null;
+const accessRequestKey=id=>`${server.user.id||''}:${id}`;
+const accessBusy=operation=>['sending','cancelling','checking'].includes(operation?.phase);
+function accessRequestLive(operation){return server.user.id===operation.user&&$('#sq-dialog').open&&accessRequestView?.id===operation.id&&accessRequestView.user===operation.user&&accessRequestView.token===runtime.detailLoadToken;}
+function accessRequestControls(x){
+ const operation=accessRequestOperations.get(accessRequestKey(x.id)),attrs=`data-id="${x.id}"`;
+ if(accessBusy(operation))return `<button class="sq-secondary" disabled aria-busy="true">${({sending:'신청 중…',cancelling:'취소 중…',checking:'상태 확인 중…'})[operation.phase]}</button>`;
+ if(operation?.phase==='uncertain')return button('access-status-check','신청 상태 확인','sq-secondary',attrs);
+ if(x.access==='pending')return `${badge('승인 대기')} ${x.canCancel&&x.requestRevision?button('cancel-access-request','신청 취소','sq-secondary',attrs):''} ${button('access-status-check','상태 새로고침','sq-link',attrs)}`;
+ return button('request-access','권한 신청하기','sq-primary',attrs);
+}
+function lockedDetail(x){
+ runtime.detailId=x.id;
+ const operation=accessRequestOperations.get(accessRequestKey(x.id));
+ const title=operation?.phase==='sending'?'신청을 보내고 있어요.':operation?.phase==='cancelling'?'신청을 취소하고 있어요.':x.access==='pending'?'신청을 검토하고 있습니다.':x.requestStatus==='cancelled'?'신청을 취소했어요.':'승인 후 상세 내용을 볼 수 있어요.';
+ openModal('조회 권한이 필요합니다.',x.name,`<div class="ws-lock"><span class="ws-lock-icon">${icon('lock-keyhole')}</span><h3>${title}</h3><p>상세 내용과 배포 파일은 담당자 승인 후 이용할 수 있어요.<br>승인 대기 중인 신청은 직접 취소할 수 있어요.</p>${operation?.notice?`<div class="sq-callout" role="status">${esc(operation.notice)}</div>`:''}${x.accessDecision&&x.access!=='pending'?`<div class="sq-callout">${esc(x.accessDecision)}</div>`:''}<div class="sq-actions">${accessRequestControls(x)}</div><small>처리 결과는 내 알림에서 알려드릴게요.</small></div>`);
+ accessRequestView={id:x.id,user:server.user.id,token:runtime.detailLoadToken};
+}
+requestAccess=function(){
+ const x=getItem(runtime.detailId);if(!x)return;
+ const key=accessRequestKey(x.id),operation=accessRequestOperations.get(key);
+ if(x.access==='approved')return detail(x.id,'connect');
+ if(x.access==='pending'||operation){lockedDetail(x);return;}
+ openModal('사용 권한 신청',x.name,`<div class="sq-callout">신청 도구: <strong>${esc(x.name)}</strong><br>승인 담당: ${esc(x.org)} / ${esc(x.owner)}</div><form id="sq-access-form" data-tool-id="${x.id}"><label class="sq-field"><span>사용 목적</span><textarea name="reason" required maxlength="2000" placeholder="어떤 업무에 활용할지 간단히 적어 주세요.">${esc(accessRequestDrafts.get(key)||'')}</textarea></label><p class="sq-note">담당자 승인 후 사용할 수 있어요. 승인 대기 중에는 신청을 취소할 수 있어요.</p><div class="sq-actions">${button('detail','돌아가기','sq-secondary',`data-id="${x.id}"`)}<button type="submit" class="sq-primary cursor-interaction">신청하기</button></div></form>`);
+ accessRequestView={id:x.id,user:server.user.id,token:runtime.detailLoadToken};
+};
+actions['request-access']=requestAccess;
+function applyAccessRequestState(id,response){
+ if(!response||response.toolId!==id||!['pending','approved','none'].includes(response.access))throw Error('권한 처리 결과를 확인하지 못했어요.');
+ const x=getItem(id);if(!x)return null;
+ for(const name of ['access','accessDecision','requestRevision','requestStatus','canCancel'])x[name]=response[name]??(name==='canCancel'?false:null);
+ return x;
+}
+async function runAccessRequest(id,kind,{reason,expectedRevision,form}={}){
+ const key=accessRequestKey(id),previous=accessRequestOperations.get(key);
+ if(accessBusy(previous))return;
+ const operation={id,user:server.user.id,phase:kind==='request'?'sending':kind==='cancel'?'cancelling':'checking'};
+ accessRequestOperations.set(key,operation);
+ if(form){form.dataset.busy='true';const submit=form.querySelector('[type=submit]');if(submit){submit.disabled=true;submit.textContent='신청 중…';submit.setAttribute('aria-busy','true');}form.elements.reason.disabled=true;}
+ else if(accessRequestLive(operation))lockedDetail(getItem(id));
+ let current;
+ try{
+  const path=`/api/tools/${id}/${kind==='check'?'access-status':kind==='cancel'?'requests/cancel':'requests'}`;
+  const response=await requestAPI(path,kind==='check'?'GET':'POST',kind==='check'?undefined:kind==='cancel'?{expectedRevision}:{reason},{timeoutMs:15000,redirectOnAuth:false});
+  if(server.user.id!==operation.user)return;
+  if(kind!=='check'&&response?.ok!==true)throw Error('권한 처리 결과를 확인하지 못했어요.');
+  current=applyAccessRequestState(id,response);accessRequestOperations.delete(key);
+  if(kind!=='check'||response.access!=='none')accessRequestDrafts.delete(key);
+ }catch(error){
+  if(server.user.id!==operation.user)return;
+  operation.phase='uncertain';operation.notice=kind==='check'?'신청 상태를 확인하지 못했어요. 연결을 확인한 뒤 다시 확인해 주세요.':kind==='cancel'?'취소 결과를 확인하지 못했어요. 신청 상태를 확인한 뒤 다시 진행해 주세요.':'신청 결과를 확인하지 못했어요. 다시 신청하기 전에 신청 상태를 확인해 주세요.';
+  accessRequestOperations.set(key,operation);
+  if(accessRequestLive(operation))lockedDetail(getItem(id));
+  return;
+ }finally{if(form){delete form.dataset.busy;}}
+ if(current&&accessRequestLive(operation)){
+  if(current.access==='approved'){
+   // The state is confirmed. A failed detail read must not imply a failed write.
+   const reading=detail(id,'connect'),token=runtime.detailLoadToken;
+   try{await reading;}catch(error){if(server.user.id===operation.user&&token===runtime.detailLoadToken&&$('#sq-dialog').open)openModal('사용 권한을 확인했어요.',current.name,`<div class="sq-callout" role="status">상세 내용을 불러오지 못했어요. 연결을 확인한 뒤 다시 열어 주세요.</div><div class="sq-actions">${button('detail','상세 다시 열기','sq-primary',`data-id="${id}"`)}</div>`);}
+  }else lockedDetail(current);
+ }
+}
+async function submitAccessRequest(form,reason){
+ const id=Number(form.dataset.toolId),x=getItem(id);
+ if(!x||form.dataset.busy||accessBusy(accessRequestOperations.get(accessRequestKey(id))))return;
+ reason=String(reason||'').trim();if(!reason||reason.length>2000){showError(Error('사용 목적을 2,000자 이내로 적어 주세요.'));return;}
+ accessRequestDrafts.set(accessRequestKey(id),reason);
+ return runAccessRequest(id,'request',{reason,form});
+}
+actions['access-status-check']=b=>runAccessRequest(Number(b.dataset.id),'check');
+actions['cancel-access-request']=b=>{
+ const id=Number(b.dataset.id),x=getItem(id),user=server.user.id;
+ if(!x||x.access!=='pending'||!x.canCancel||!x.requestRevision||accessBusy(accessRequestOperations.get(accessRequestKey(id))))return;
+ const expectedRevision=x.requestRevision,viewToken=runtime.detailLoadToken;
+ ask('사용 권한 신청을 취소할까요?','대기 중인 신청만 취소합니다. 필요하면 다시 신청할 수 있어요.',()=>{
+  if(server.user.id!==user||viewToken!==runtime.detailLoadToken)return;
+  return runAccessRequest(id,'cancel',{expectedRevision});
+ },'신청 취소');
+};
 function renderIdeas(){
  const rows=(work.ideas||[]).filter(i=>work.ideaFilter==='전체'||i.status===work.ideaFilter);
  workspace.innerHTML=`<div class="ws-board-head"><div class="ws-segment">${['전체','접수 대기','개발 중','구현 완료'].map(s=>button('idea-filter',s,'',`data-filter="${s}" aria-pressed="${s===work.ideaFilter}"`)).join('')}</div>${button('idea',icon('plus')+' 새 기능 요청','sq-primary')}</div><div class="ws-idea-grid">${rows.map(i=>`<button class="ws-idea-card" data-action="idea-open" data-id="${i.id}"><div class="ws-idea-top">${badge(i.status)}<span>${esc(i.category)}</span></div><h2>${esc(i.name)}</h2><p>${esc(i.body)}</p><div class="ws-idea-foot"><span>${i.assigneeName?'담당 '+esc(i.assigneeName):'함께 만들 동료를 기다려요'}</span>${icon('app-window')}</div></button>`).join('')||blank('lightbulb','작은 불편함에서 좋은 도구가 시작됩니다.','필요한 기능을 요청하고 동료들과 함께 만들어 보세요.')}</div>`;mountIcons();
@@ -807,7 +889,7 @@ Object.assign(actions,{
  'purge-tool':b=>{const x=getItem(b.dataset.id);if(server.user.role!=='admin'||!x?.deleted)return;ask('이 기능을 영구 삭제할까요?',x.name+' · 모든 배포 버전과 파일, 좋아요·다운로드 이력, 권한·피드백이 삭제됩니다. 삭제 후 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/tools/${x.id}/purge`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능을 영구 삭제했습니다.');},'영구 삭제');},
  'idea-delete':b=>{const i=work.idea;if(server.user.role!=='admin'||!i)return;ask('이 기능 요청을 삭제할까요?',i.name+' · 요청 내용, 답변, 첨부파일이 삭제되며 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/ideas/${i.id}`,'DELETE',{expectedRevision:i.revision});closeModal();await afterWorkspaceSave(async()=>{await loadIdeas();navigate('ideas');});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 요청 상세 또는 관리자 → 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능 요청을 삭제했습니다.');},'요청 삭제');},
  'taxonomy-edit':b=>{const kind=b.dataset.kind,x=[...organizations,...server.categories].find(x=>x.id===b.dataset.id);work.taxonomy={kind,id:x?.id};openModal(x?'분류 수정':'분류 추가',kind==='organization'?'조직 설정':'업무 설정',`<form data-work-form="taxonomy"><div class="sq-form-grid"><label class="sq-field wide"><span>이름</span><input name="name" value="${esc(x?.name||'')}" required maxlength="80"></label><label class="sq-field"><span>표시 순서</span><input name="order" type="number" min="0" max="999" value="${x?.order??10}" required></label><label class="sq-field"><span>사용 여부</span><select name="enabled"><option value="true" ${x?.enabled!==false?'selected':''}>사용</option><option value="false" ${x?.enabled===false?'selected':''}>사용 중지</option></select></label><label class="sq-field wide"><span>안내 담당자 (선택)</span><input name="owner" maxlength="100" value="${esc(x?.owner||'')}"></label></div><div class="sq-callout">이름을 바꿔도 기존 기능과의 연결은 유지됩니다. 사용 중지한 항목은 새로 선택할 수 없습니다.</div><div class="sq-actions"><button class="sq-primary">저장</button></div></form>`);},
- 'access-decision':b=>{work.access={id:b.dataset.request,status:b.dataset.status};openModal('조회 권한 '+b.dataset.status,'신청 처리',`<form data-work-form="access"><label class="sq-field"><span>처리 사유 ${b.dataset.status==='승인'?'(선택)':''}</span><textarea name="reason" maxlength="2000" ${b.dataset.status==='승인'?'':'required'} placeholder="신청자에게 안내할 내용을 적어주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">${b.dataset.status}</button></div></form>`);},
+ 'access-decision':b=>{const reviewed=requests.find(r=>String(r.id)===b.dataset.request);if(!reviewed)return;work.access={id:b.dataset.request,status:b.dataset.status,expectedRevision:reviewed.requestRevision};openModal('조회 권한 '+b.dataset.status,'신청 처리',`<form data-work-form="access"><label class="sq-field"><span>처리 사유 ${b.dataset.status==='승인'?'(선택)':''}</span><textarea name="reason" maxlength="2000" ${b.dataset.status==='승인'?'':'required'} placeholder="신청자에게 안내할 내용을 적어주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">${b.dataset.status}</button></div></form>`);},
  'access-history':b=>{const r=requests.find(r=>r.id===b.dataset.request);openModal('권한 처리 이력',r.name,`<div class="ws-timeline">${r.history.map(h=>`<article><strong>${esc(h.status)}</strong><small>${esc(h.actor)} · ${dated(h.at)}</small><p>${esc(h.reason||'')}</p></article>`).join('')}</div>`);},
  'grant-users':b=>{work.grantTool=+b.dataset.id;userPicker('grant');},
  'add-admin':()=>userPicker('admin'),
@@ -849,7 +931,7 @@ root.addEventListener('submit',event=>{
    case 'idea-reply':{const i=work.idea;await requestAPI(`/api/ideas/${i.id}`,'PATCH',{...data,tool:data.tool?+data.tool:null,expectedRevision:i.revision});await afterWorkspaceSave(async()=>{await ideaDetail(i.id);await loadIdeas();if(state.route==='ideas')renderIdeas();},form);break;}
    case 'feedback':{const c=work.feedback;await requestAPI(`/api/feedback/${c.id}/reply`,'POST',data);await afterWorkspaceSave(async()=>{await refresh();await detail(c.tool,'comments');},form);break;}
    case 'taxonomy':await requestAPI('/api/taxonomy','POST',{...data,...work.taxonomy,order:+data.order,enabled:data.enabled==='true'});closeModal();await afterWorkspaceSave(()=>refresh(),form);break;
-   case 'access':await requestAPI(`/api/requests/${encodeURIComponent(work.access.id)}/decision`,'POST',{status:work.access.status,reason:data.reason});closeModal();await afterWorkspaceSave(()=>refresh(),form);break;
+   case 'access':await requestAPI(`/api/requests/${encodeURIComponent(work.access.id)}/decision`,'POST',{status:work.access.status,reason:data.reason,...(work.access.status==='회수'?{}:{expectedRevision:work.access.expectedRevision})});closeModal();await afterWorkspaceSave(()=>refresh(),form);break;
    case 'user-search':await actions['user-search']();break;
   }
  })().catch(error=>{

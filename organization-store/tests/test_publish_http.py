@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
 import uuid
 import zipfile
 
@@ -20,7 +21,7 @@ TOKEN = 'ptsq_' + 'T' * 43
 
 @pytest.fixture
 def service():
-    state = {'drafts': {}, 'uploads': [], 'commits': 0, 'requests': [], 'canPublish': True}
+    state = {'drafts': {}, 'uploads': [], 'commits': 0, 'requests': [], 'canPublish': True, 'owner': 'owner', 'slowIdentity': False}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
 
@@ -41,12 +42,25 @@ def service():
         def do_GET(self):
             if not self.authorized(): return
             if self.path == '/api/integration/me':
-                return self.reply(dict(user={'id': 'owner', 'name': '등록자'}, key={'id': 'test-key', 'scope': 'publish'},
-                                       capabilities={'publishDraft': state['canPublish']}))
+                identity = dict(user={'id': 'owner', 'name': '등록자'}, key={'id': 'test-key', 'scope': 'publish'},
+                                capabilities={'publishDraft': state['canPublish']})
+                if state['slowIdentity']:
+                    content = json.dumps(identity).encode()
+                    self.send_response(200); self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(content))); self.end_headers()
+                    try:
+                        for byte in content:
+                            self.wfile.write(bytes([byte])); self.wfile.flush(); time.sleep(.1)
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    return
+                return self.reply(identity)
             if self.path == '/api/catalog/options':
                 return self.reply(dict(organizations=[{'id': 'org', 'name': '조직'}], categories=[{'id': 'work', 'name': '업무'}]))
             if self.path.startswith('/api/publish-targets?'):
                 return self.reply({'items': []})
+            if self.path == '/api/tools/7':
+                return self.reply({'id': 7, 'ownerId': state['owner'], 'canManage': True})
             if self.path.startswith('/api/publish-drafts/'):
                 return self.reply(state['drafts'][self.path.split('/')[3]])
             return self.reply({'error': 'missing'}, 404)
@@ -146,3 +160,63 @@ def test_registration_fresh_workers_native_file_context_http_browser_review(serv
     assert call('publish', {'draftId': pending['id']}, selected=False)['version'] == 1
     assert state['commits'] == 1 and not any(path.endswith('/approve') for _, path in state['requests'])
     assert not any((data / 'publish-staging').iterdir())
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows account DPAPI connection persistence')
+def test_publish_update_access_stdio_http_checks_live_identity_and_owner(service, tmp_path):
+    url, state = service
+    data = tmp_path / 'data'
+    def call(action, payload):
+        request = dict(protocol=1, action=action, payload=payload, dataDirectory=str(data), context={})
+        env = {key: value for key, value in os.environ.items() if key not in {'PTAI_API_TOKEN', 'CLAUDE_CONFIG_DIR'}}
+        proc = subprocess.run([sys.executable, '-I', '-B', '-X', 'utf8', str(SCRIPT)],
+                              input=json.dumps(request).encode(), capture_output=True, timeout=20, env=env)
+        assert proc.returncode == 0 and not proc.stderr
+        assert TOKEN.encode() not in proc.stdout
+        response = json.loads(proc.stdout)
+        assert response['ok'], response
+        return response['result']
+    assert call('connect', {'url': url, 'key': TOKEN, 'allowHttp': True})['configured']
+    state['requests'].clear()
+    assert call('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': True}
+    assert state['requests'] == [('GET', '/api/integration/me'), ('GET', '/api/tools/7')]
+    state['owner'] = 'other-person'  # Even a platform administrator is not the owner.
+    assert call('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    state['owner'] = 'owner'
+    state['canPublish'] = False
+    state['requests'].clear()
+    assert call('publishUpdateAccess', {'toolId': 7}) == {'canUpdate': False}
+    assert state['requests'] == [('GET', '/api/integration/me')]
+    assert not state['uploads'] and state['commits'] == 0
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows account DPAPI connection persistence')
+@pytest.mark.parametrize('slow_mode', ['dns', 'stream'])
+def test_publish_access_stdio_has_wall_deadline_even_when_dns_or_stream_stalls(service, tmp_path, slow_mode):
+    url, state = service
+    data = tmp_path / 'data'
+    env = {key: value for key, value in os.environ.items() if key not in {'PTAI_API_TOKEN', 'CLAUDE_CONFIG_DIR'}}
+    def request(action, payload):
+        return json.dumps(dict(protocol=1, action=action, payload=payload,
+                               dataDirectory=str(data), context={})).encode()
+    setup = subprocess.run([sys.executable, '-I', '-B', '-X', 'utf8', str(SCRIPT)],
+                           input=request('connect', {'url': url, 'key': TOKEN, 'allowHttp': True}),
+                           capture_output=True, timeout=20, env=env)
+    assert setup.returncode == 0 and json.loads(setup.stdout)['ok']
+    if slow_mode == 'dns':
+        # Simulate a DNS resolver blocked well past the deadline; no real DNS.
+        code = "import socket,time,runpy; socket.getaddrinfo=lambda *a,**k:time.sleep(30); runpy.run_path(" + repr(str(SCRIPT)) + ",run_name='__main__')"
+        command = [sys.executable, '-I', '-B', '-X', 'utf8', '-c', code]
+    else:
+        state['slowIdentity'] = True  # One byte every 100ms avoids a socket idle timeout.
+        command = [sys.executable, '-I', '-B', '-X', 'utf8', str(SCRIPT)]
+    started = time.monotonic()
+    proc = subprocess.run(command, input=request('publishUpdateAccess', {'toolId': 7}),
+                          capture_output=True, timeout=10, env=env)
+    elapsed = time.monotonic() - started
+    assert proc.returncode == 0 and not proc.stderr
+    assert TOKEN.encode() not in proc.stdout
+    response = json.loads(proc.stdout)
+    assert response['ok'] is False and '확인하지 못했어요' in response['error']
+    assert 5.5 <= elapsed < 9, (slow_mode, elapsed)
+    assert not state['uploads'] and state['commits'] == 0

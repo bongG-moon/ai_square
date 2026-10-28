@@ -11,10 +11,12 @@ import os
 import re
 import sys
 import time
+import threading
 import uuid
 import hashlib
 import tempfile
 import zipfile
+from http.client import HTTPException
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,9 +59,10 @@ zip_install = importlib.util.module_from_spec(_zip_spec)
 _zip_spec.loader.exec_module(zip_install)
 
 VERSION = '0.1.0'
-ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail',
+PUBLISH_ACCESS_DEADLINE = 6.0
+ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail', 'requestAccess', 'cancelAccessRequest',
                      'like', 'download', 'prepareInstallRequest', 'prepareInstall', 'install', 'installations',
-                     'checkUpdates', 'verify', 'rollback', 'publishOptions',
+                     'checkUpdates', 'verify', 'rollback', 'publishOptions', 'publishUpdateAccess',
                      'inspectPublishSource', 'preparePublish', 'publishStatus', 'publish'})
 PUBLISH_FIELDS = frozenset({'name', 'desc', 'owner', 'platform', 'type', 'guide', 'orgId',
                            'categoryId', 'approval', 'workTags', 'environment', 'changes',
@@ -69,6 +72,10 @@ MAX_PUBLISH_BYTES = 64 * 1024 * 1024
 PUBLISH_SUFFIXES = {'.zip', '.md', '.axextension', '.exe', '.msi', '.ps1'}
 MAX_INPUT = 128 * 1024
 MAX_OUTPUT = 2 * 1024 * 1024
+ACCESS_REQUEST_REASON = 'AX Workspace에서 이 도구의 사용 권한을 신청합니다.'
+ACCESS_REQUEST_UNCERTAIN = '신청 결과를 확인하지 못했어요. 신청 상태를 먼저 확인해 주세요. 자동으로 다시 신청하지 않습니다.'
+ACCESS_CANCEL_UNCERTAIN = '신청 취소 결과를 확인하지 못했어요. 신청 상태를 먼저 확인해 주세요. 자동으로 다시 취소하지 않습니다.'
+ACCESS_REVISION_RE = re.compile(r'(?:[0-9a-f]{32}|[0-9a-f]{64})\Z')
 MANUAL_NOTICE = '이 항목은 파일을 내려받은 뒤 웹의 설치 안내에 따라 직접 설치하세요. 다운로드만으로 설치되지는 않습니다.'
 INSTALL_METADATA_NOTICE = '등록자가 앱 설치 정보(지원 범위·설치 방식)를 등록해야 앱에서 바로 설치할 수 있어요. 현재는 파일 다운로드와 등록자의 설치 안내를 이용해 주세요.'
 DISPLAY_FIELDS = {'name': 200, 'desc': 1200, 'type': 80, 'platform': 120, 'owner': 120, 'registrantName': 120}
@@ -92,6 +99,145 @@ class StoreReadError(SquareError):
 
 class StoreClient(Client):
     """Narrow web accounting mutations; no arbitrary remote writes or commands."""
+    def access_status(self, tool_id):
+        return self._access_json(positive(tool_id), submit=False)
+
+    def request_access(self, tool_id):
+        return self._access_json(positive(tool_id), submit=True)
+
+    def cancel_access_request(self, tool_id, expected_revision):
+        tool_id = positive(tool_id)
+        if not isinstance(expected_revision, str) or not ACCESS_REVISION_RE.fullmatch(expected_revision):
+            raise SquareError('취소할 신청 상태를 새로 확인해 주세요.')
+        return self._access_json(tool_id, submit=True, expected_revision=expected_revision)
+
+    @staticmethod
+    def access_fields(value):
+        """Carry attempt identity without trusting server UI eligibility alone."""
+        revision = value.get('requestRevision')
+        revision = revision if isinstance(revision, str) and ACCESS_REVISION_RE.fullmatch(revision) else None
+        status = value.get('requestStatus')
+        if status not in {'pending', 'cancelled', 'approved', 'rejected', 'revoked', 'none'}:
+            status = value.get('access') if value.get('access') in {'approved', 'pending'} else 'none'
+        return dict(requestRevision=revision, requestStatus=status,
+                    canCancel=(value.get('canCancel') is True and revision is not None
+                               and value.get('access') == 'pending' and status == 'pending'))
+
+    def _access_json(self, tool_id, *, submit, expected_revision=None):
+        # The KEY chooses the requesting user. The caller cannot supply an
+        # identity, server path, approval or grant; this endpoint only asks.
+        cancelling = expected_revision is not None
+        path = f'/api/tools/{tool_id}/' + ('requests/cancel' if cancelling else 'requests' if submit else 'access-status')
+        headers = {'Authorization': 'Bearer ' + self.settings.token(), 'Accept': 'application/json',
+                   'Content-Type': 'application/json', 'User-Agent': 'AX-Organization-Store/1'}
+        payload = {'expectedRevision': expected_revision} if cancelling else {'reason': ACCESS_REQUEST_REASON}
+        body = json.dumps(payload, ensure_ascii=False).encode() if submit else None
+        def uncertain():
+            return dict(toolId=tool_id, status='uncertain', notice=ACCESS_CANCEL_UNCERTAIN if cancelling else ACCESS_REQUEST_UNCERTAIN)
+        try:
+            with self.opener.open(Request(self.url + path, body, headers,
+                                          method='POST' if submit else 'GET'), timeout=10) as response:
+                raw = response.read(512 * 1024 + 1)
+        except HTTPError as error:
+            code = error.code
+            error.close()
+            rejected = {
+                401: '연결 KEY를 확인해 주세요. 연결 설정에서 다시 연결할 수 있어요.',
+                403: '권한 신청을 지원하는 플랫폼 버전인지와 현재 KEY를 확인해 주세요.',
+                404: '도구가 삭제되었거나 플랫폼이 권한 신청을 지원하지 않아요. 목록과 플랫폼 버전을 확인해 주세요.',
+                405: '권한 신청을 지원하는 플랫폼 버전인지와 현재 KEY를 확인해 주세요.',
+                400: '권한 신청을 접수하지 못했어요. 잠시 후 다시 확인해 주세요.',
+                413: '권한 신청을 접수하지 못했어요. 잠시 후 다시 확인해 주세요.',
+                429: '요청이 많아 신청을 접수하지 못했어요. 잠시 후 다시 확인해 주세요.',
+            }
+            if cancelling:
+                rejected.update({
+                    403: '신청 취소를 지원하는 플랫폼 버전인지와 현재 KEY를 확인해 주세요.',
+                    404: '도구가 삭제되었거나 플랫폼이 신청 취소를 지원하지 않아요. 목록과 플랫폼 버전을 확인해 주세요.',
+                    405: '신청 취소를 지원하는 플랫폼 버전인지와 현재 KEY를 확인해 주세요.',
+                    409: '신청 상태가 변경되었어요. 현재 신청 상태를 확인한 뒤 다시 선택해 주세요.',
+                    400: '취소할 신청 상태를 새로 확인해 주세요.',
+                    413: '신청 취소를 접수하지 못했어요. 잠시 후 상태를 확인해 주세요.',
+                    429: '요청이 많아 취소를 접수하지 못했어요. 잠시 후 상태를 확인해 주세요.',
+                })
+            if submit and code in rejected:
+                return dict(toolId=tool_id, status='rejected', notice=rejected[code])
+            if code == 401:
+                raise AuthenticationRequired(self.url) from None
+            if code in {403, 404, 405}:
+                raise SquareError('권한 신청을 지원하는 플랫폼 버전인지와 현재 KEY를 확인해 주세요.') from None
+            if code in {400, 413, 429}:
+                raise SquareError('권한 신청을 접수하지 못했어요. 잠시 후 다시 확인해 주세요.') from None
+            if submit:
+                return uncertain()
+            raise SquareError('사용 권한 상태를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.') from None
+        except (URLError, OSError, TimeoutError, HTTPException):
+            if submit:
+                return uncertain()
+            raise SquareError('사용 권한 상태를 확인하지 못했어요. 연결을 확인해 주세요.') from None
+        try:
+            value = json.loads(raw) if len(raw) <= 512 * 1024 else None
+        except (ValueError, UnicodeError):
+            value = None
+        if (not isinstance(value, dict) or type(value.get('toolId')) is not int
+                or value['toolId'] != tool_id or value.get('access') not in {'approved', 'pending', 'none'}):
+            if submit:
+                return uncertain()
+            raise SquareError('사용 권한 상태를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.')
+        if submit:
+            if cancelling:
+                if value.get('ok') is not True or type(value.get('cancelled')) is not bool:
+                    return uncertain()
+                fields = self.access_fields(value)
+                if value['cancelled'] and (fields['requestStatus'] != 'cancelled'
+                                            or fields['requestRevision'] != expected_revision
+                                            or value['access'] == 'pending'):
+                    return uncertain()
+                status = 'approved' if value['access'] == 'approved' else 'cancelled' if value['cancelled'] else value['access']
+                return dict(toolId=tool_id, status=status, access=value['access'],
+                            cancelled=value['cancelled'], pending=value.get('pending') is True,
+                            **fields,
+                            notice=('이미 사용 권한이 있어요. 승인된 권한은 취소하지 않았습니다.' if value['access'] == 'approved'
+                                    else '사용 권한 신청을 취소했어요.' if value['cancelled']
+                                    else '취소할 대기 중인 신청이 없어요.' if value['access'] == 'none'
+                                    else '현재 신청 상태를 확인했어요.'))
+            if (value.get('ok') is not True or value['access'] not in {'approved', 'pending'}
+                    or type(value.get('requested')) is not bool):
+                return uncertain()
+            return dict(toolId=tool_id, status=value['access'], access=value['access'],
+                        requested=value['requested'], pending=value.get('pending') is True,
+                        **self.access_fields(value),
+                        notice=('이미 사용 권한이 있어요.' if value['access'] == 'approved'
+                                else '사용 권한을 신청했어요. 담당자 승인 후 사용할 수 있어요.' if value['requested']
+                                else '이미 신청한 도구예요. 담당자의 승인을 기다리고 있어요.'))
+        return dict(value, **self.access_fields(value))
+
+    def read_publish_access_json(self, path):
+        """Short, fixed-origin GETs used only for optional author controls."""
+        if (not isinstance(path, str) or
+                not (path == '/api/integration/me' or re.fullmatch(r'/api/tools/[1-9][0-9]*', path))):
+            raise SquareError('허용되지 않은 등록 권한 조회입니다.')
+        headers = {'Authorization': 'Bearer ' + self.settings.token(), 'Accept': 'application/json',
+                   'User-Agent': 'AX-Organization-Store/1'}
+        # Tool details can include long version histories; match the existing
+        # detail API's 4 MiB limit while keeping identity responses smaller.
+        limit = 512 * 1024 if path == '/api/integration/me' else 4 * 1024 * 1024
+        try:
+            with self.opener.open(Request(self.url + path, headers=headers, method='GET'), timeout=2) as response:
+                raw = response.read(limit + 1)
+        except HTTPError as error:
+            error.close()
+            raise SquareError('등록 권한을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.') from None
+        except (URLError, OSError, TimeoutError):
+            raise SquareError('등록 권한을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.') from None
+        try:
+            value = json.loads(raw) if len(raw) <= limit else None
+        except (ValueError, UnicodeError):
+            value = None
+        if not isinstance(value, dict):
+            raise SquareError('등록 권한을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.')
+        return value
+
     def read_installation_json(self, path):
         # Listing installed items must not spend the normal 30-second timeout
         # per tool, nor alter views/download counts. Redirects remain disabled
@@ -119,16 +265,18 @@ class StoreClient(Client):
 
     def open(self, path, method='GET', body=None, content_type=None):
         view = method == 'POST' and isinstance(path, str) and re.fullmatch(r'/api/tools/[1-9][0-9]*/view', path)
-        if method != 'PUT' and not view:
+        detail = method == 'GET' and isinstance(path, str) and re.fullmatch(r'/api/tools/[1-9][0-9]*(?:/manifest)?', path)
+        if method != 'PUT' and not view and not detail:
             return super().open(path, method, body, content_type)
-        if not view and (not isinstance(path, str) or not re.fullmatch(r'/api/tools/[1-9][0-9]*/like', path)):
+        if not view and not detail and (not isinstance(path, str) or not re.fullmatch(r'/api/tools/[1-9][0-9]*/like', path)):
             raise SquareError('허용되지 않은 API 작업입니다.')
-        try:
-            data = json.loads(body)
-        except (ValueError, TypeError, UnicodeError):
-            raise SquareError('플랫폼 활동 요청을 확인하세요.') from None
-        if not isinstance(data, dict) or (data != {} if view else set(data) != {'liked'} or type(data['liked']) is not bool):
-            raise SquareError('플랫폼 활동 요청을 확인하세요.')
+        if not detail:
+            try:
+                data = json.loads(body)
+            except (ValueError, TypeError, UnicodeError):
+                raise SquareError('플랫폼 활동 요청을 확인하세요.') from None
+            if not isinstance(data, dict) or (data != {} if view else set(data) != {'liked'} or type(data['liked']) is not bool):
+                raise SquareError('플랫폼 활동 요청을 확인하세요.')
         headers = {'Authorization': 'Bearer ' + self.settings.token(),
                    'Accept': 'application/json', 'Content-Type': 'application/json',
                    'User-Agent': 'AX-Organization-Store/1'}
@@ -137,10 +285,16 @@ class StoreClient(Client):
             # screen waiting for the normal mutation/network timeout.
             return self.opener.open(Request(self.url + path, body, headers, method=method), timeout=2 if view else 30)
         except HTTPError as error:
+            code = error.code
+            error.close()
+            if detail and code == 403:
+                raise StoreReadError('forbidden') from None
+            if detail and code == 401:
+                raise AuthenticationRequired(self.url) from None
             messages = {401: 'KEY가 취소·재발급되었습니다. 웹에서 KEY를 확인한 뒤 다시 연결하세요.',
                         403: '이 도구의 조회 권한 또는 서버의 확장 연동 지원 여부를 확인하세요.',
                         404: '항목을 찾을 수 없습니다.', 429: '잠시 후 다시 시도하세요.'}
-            raise SquareError(messages.get(error.code, '플랫폼 활동 상태를 저장하지 못했습니다. 목록을 다시 확인하세요.')) from None
+            raise SquareError(messages.get(code, '플랫폼 활동 상태를 저장하지 못했습니다. 목록을 다시 확인하세요.')) from None
         except (URLError, OSError, TimeoutError):
             raise SquareError('서버에 연결하지 못했습니다. 주소·사내망·인증서를 확인하세요.') from None
 
@@ -716,6 +870,44 @@ class Store:
         return identity, {'origin': runtime.settings.url, 'config': str(runtime.settings.path),
                           'userId': user.get('id'), 'keyId': key.get('id')}
 
+    def publish_update_access(self, runtime, payload):
+        """Check the current KEY and one tool only; publication rechecks later."""
+        if set(payload) != {'toolId'}:
+            raise SquareError('새 버전 권한을 확인할 도구를 선택하세요.')
+        tool_id = positive(payload['toolId'])
+        # A socket timeout alone does not bound DNS or a slowly streaming body.
+        # This action is read-only and a worker process handles only one RPC;
+        # a daemon read lets that process finish without waiting on stalled I/O.
+        done, abandoned, result = threading.Event(), threading.Event(), {}
+        def read_access():
+            try:
+                identity = runtime.client.read_publish_access_json('/api/integration/me')
+                if abandoned.is_set():
+                    return
+                user, key, caps = identity.get('user'), identity.get('key'), identity.get('capabilities')
+                if (not isinstance(user, dict) or not isinstance(key, dict) or not isinstance(caps, dict)
+                        or caps.get('publishDraft') is not True
+                        or not isinstance(user.get('id'), str) or not user['id']
+                        or not isinstance(key.get('id'), str) or not key['id']):
+                    result['value'] = {'canUpdate': False}
+                    return
+                item = runtime.client.read_publish_access_json(f'/api/tools/{tool_id}')
+                result['value'] = {'canUpdate': (type(item.get('id')) is int and item['id'] == tool_id
+                                  and item.get('ownerId') == user['id']
+                                  and item.get('deleted') is not True and item.get('purgePending') is not True)}
+            except Exception:
+                result['error'] = True
+            finally:
+                done.set()
+        thread = threading.Thread(target=read_access, name='store-publish-access', daemon=True)
+        thread.start()
+        if not done.wait(PUBLISH_ACCESS_DEADLINE):
+            abandoned.set()
+            raise SquareError('등록 권한을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.')
+        if result.get('error') or 'value' not in result:
+            raise SquareError('등록 권한을 확인하지 못했어요. 잠시 후 다시 확인해 주세요.')
+        return result['value']
+
     def all_publish_targets(self, runtime, query):
         items, seen, offset = [], set(), 0
         for _ in range(100):
@@ -947,6 +1139,8 @@ class Store:
         runtime = Runtime(settings, client=client, home=self.home)
         if action == 'publishOptions':
             return self.publish_options(runtime, payload)
+        if action == 'publishUpdateAccess':
+            return self.publish_update_access(runtime, payload)
         if action == 'inspectPublishSource':
             return self.inspect_publish_source(runtime, payload)
         if action == 'preparePublish':
@@ -964,7 +1158,22 @@ class Store:
                                         payload.get('platform', ''), payload.get('offset', 0), payload.get('limit', 20))
         if action == 'detail':
             tool_id = positive(payload.get('toolId'))
-            item, manifest = runtime.get_item(tool_id), client.manifest(tool_id)
+            try:
+                item, manifest = runtime.get_item(tool_id), client.manifest(tool_id)
+            except StoreReadError as error:
+                if error.status != 'forbidden':
+                    raise
+                status = client.access_status(tool_id)
+                item = status.get('item')
+                if (status['access'] == 'approved' or not isinstance(item, dict)
+                        or type(item.get('id')) is not int or item['id'] != tool_id):
+                    raise SquareError('사용 권한이 변경되었어요. 상세 내용을 다시 열어 주세요.') from None
+                item = dict(item, access=status['access'], accessDecision=status.get('accessDecision', ''),
+                            **StoreClient.access_fields(status))
+                return dict(item=item, manifest={}, canInstall=False, canInspectInstall=False,
+                            canRequestAccess=status.get('canRequest') is True,
+                            canCancelAccessRequest=item['canCancel'],
+                            installNotice='담당자 승인 후 설치할 수 있어요.', webUrl=settings.url + '/')
             if type(item.get('id')) is int and item['id'] == tool_id:
                 self.remember_item(runtime, tool_id, item)
             # Only an explicit popup opening counts. GET/refresh/prepare stay
@@ -999,6 +1208,14 @@ class Store:
             if type(payload.get('liked')) is not bool:
                 raise SquareError('좋아요 상태를 확인하세요.')
             return client.json(f'/api/tools/{positive(payload.get("toolId"))}/like', 'PUT', {'liked': payload['liked']})
+        if action == 'requestAccess':
+            if set(payload) != {'toolId'}:
+                raise SquareError('권한을 신청할 도구를 선택하세요.')
+            return client.request_access(positive(payload['toolId']))
+        if action == 'cancelAccessRequest':
+            if set(payload) != {'toolId', 'expectedRevision'}:
+                raise SquareError('취소할 신청 상태를 새로 확인해 주세요.')
+            return client.cancel_access_request(positive(payload['toolId']), payload['expectedRevision'])
         if action in {'installations', 'checkUpdates'}:
             # Snapshot and recovery need the canonical lock; remote read-only
             # metadata/version requests do not. Another install can proceed.

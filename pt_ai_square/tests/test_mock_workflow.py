@@ -70,7 +70,7 @@ def test_mock_employee_cannot_be_overridden_and_permissions_apply(app):
     bootstrap=owner.get('/api/bootstrap').json
     assert bootstrap['requests'][0]['user']=='0099999' and bootstrap['unread']==1
     rid=bootstrap['requests'][0]['id']
-    assert owner.post(f'/api/requests/{rid}/decision',json={'status':'승인','reason':''},headers=h).status_code==200
+    assert owner.post(f'/api/requests/{rid}/decision',json={'status':'승인','reason':'','expectedRevision':bootstrap['requests'][0]['requestRevision']},headers=h).status_code==200
     app.config.update(MOCK_USER='0099999')
     assert member.get('/api/tools/1').status_code==200
     assert member.get('/api/notifications').json['unread']==1

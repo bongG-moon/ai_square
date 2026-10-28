@@ -14,7 +14,7 @@ local_access = Blueprint('local_access', __name__)
 READ_ENDPOINTS = {
     'local_access.search', 'api.details', 'api.manifest', 'api.version_check',
     'api.deployment_info', 'api.download', 'local_access.options', 'local_access.publish_targets',
-    'local_access.integration_me', 'publish_drafts.details',
+    'local_access.integration_me', 'publish_drafts.details', 'api.access_status',
 }
 
 
@@ -84,11 +84,12 @@ def token_user():
     publish = (scope == 'publish' and request.method == 'POST'
                and request.endpoint in {'api.publish', 'api.inspect_package', 'publish_drafts.create', 'publish_drafts.commit'})
     # Desired-state PUT reuses the web's idempotent per-employee like accounting.
-    # Explicit detail views use the same bounded employee/tool counter. No
-    # other browser mutation is made available to a personal connection KEY.
+    # Explicit detail views use the same bounded employee/tool counter.
+    # A KEY may request its own access, but cannot approve or grant access.
     like = request.method == 'PUT' and request.endpoint == 'api.like'
     view = request.method == 'POST' and request.endpoint == 'api.record_view'
-    if not (read or publish or like or view):
+    access_request = request.method == 'POST' and request.endpoint in {'api.access_request', 'api.cancel_access_request'}
+    if not (read or publish or like or view or access_request):
         raise Forbidden('이 인증키에 허용되지 않은 작업입니다.')
     g.api_token_id = row['id']
     g.api_token_scope = scope
@@ -314,5 +315,6 @@ def integration_me():
                              dept_cd=g.user.get('dept_cd', ''), role=g.user['role']),
                    key=dict(id=key_id, scope=scope) if key_id else None,
                    capabilities=dict(search=True, download=True, like=True, view=True,
+                                     accessRequest=bool(key_id), accessRequestCancel=bool(key_id),
                                      publishDraft=bool(key_id and scope == 'publish'),
                                      approvalRequired=False, directPublish=True))

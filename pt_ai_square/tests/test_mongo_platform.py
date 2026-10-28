@@ -28,9 +28,9 @@ def test_application_approval_revoke_reapply_and_notifications(app):
     assert owner.get('/api/notifications').json['unread']==1
     r=owner.get('/api/bootstrap').json['requests'][0]
     assert r['status']=='대기' and not r['granted']
-    assert owner.post(f'/api/requests/{r["id"]}/decision',json={'status':'승인','reason':''},headers=h).status_code==200
+    assert owner.post(f'/api/requests/{r["id"]}/decision',json={'status':'승인','reason':'','expectedRevision':r['requestRevision']},headers=h).status_code==200
     assert c.get('/api/tools/1').json['guide']=='SECRET INSTALL GUIDE'
-    assert owner.post(f'/api/requests/{r["id"]}/decision',json={'status':'승인','reason':''},headers=h).status_code==409
+    assert owner.post(f'/api/requests/{r["id"]}/decision',json={'status':'승인','reason':'','expectedRevision':r['requestRevision']},headers=h).status_code==409
     assert owner.post(f'/api/requests/{r["id"]}/decision',json={'status':'회수','reason':'업무 종료'},headers=h).status_code==200
     assert c.get('/api/tools/1').status_code==403
     row=owner.get('/api/bootstrap').json['requests'][0];assert row['status']=='승인' and not row['granted'] and len(row['history'])==3

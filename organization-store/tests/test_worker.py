@@ -330,6 +330,78 @@ def test_http_and_actions_are_explicit(configured):
         store.dispatch('like', {'toolId': 1, 'liked': 'true'})
 
 
+def test_publish_access_client_only_permits_bounded_same_origin_gets():
+    settings = type('Settings', (), {'url': 'https://fixture.test', 'token': lambda _: 'ptsq_' + 'Q' * 43})()
+    calls = []
+    class Opener:
+        def open(self, request, timeout):
+            calls.append((request.full_url, request.method, timeout))
+            assert timeout == 2 and request.method == 'GET'
+            return io.BytesIO(b'{"id":7,"ownerId":"owner"}')
+    client = worker.StoreClient(settings, Opener())
+    assert client.read_publish_access_json('/api/tools/7')['ownerId'] == 'owner'
+    assert client.read_publish_access_json('/api/integration/me')['id'] == 7
+    assert calls == [('https://fixture.test/api/tools/7', 'GET', 2),
+                     ('https://fixture.test/api/integration/me', 'GET', 2)]
+    for path in ('/api/tools/0', '/api/tools/7?extra=1', '/api/tools/7/manifest',
+                 'https://evil.test/api/tools/7', '/api/integration/me#fragment'):
+        with pytest.raises(worker.SquareError):
+            client.read_publish_access_json(path)
+    assert len(calls) == 2
+
+
+def test_publish_access_timeout_is_sanitized_and_not_retried():
+    settings = type('Settings', (), {'url': 'https://fixture.test', 'token': lambda _: 'secret-fixture'})()
+    calls = []
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(timeout)
+            raise TimeoutError('private token and details must not be surfaced')
+    client = worker.StoreClient(settings, Opener())
+    with pytest.raises(worker.SquareError) as error:
+        client.read_publish_access_json('/api/integration/me')
+    assert 'private' not in str(error.value) and 'secret-fixture' not in str(error.value)
+    assert calls == [2]
+
+
+def test_publish_access_limits_response_and_rejects_invalid_json():
+    settings = type('Settings', (), {'url': 'https://fixture.test', 'token': lambda _: 'fixture'})()
+    class Opener:
+        def __init__(self, payload): self.payload = payload
+        def open(self, request, timeout):
+            assert timeout == 2
+            return io.BytesIO(self.payload)
+    for payload in (b'x' * (512 * 1024 + 1), b'not-json', b'[]'):
+        with pytest.raises(worker.SquareError):
+            worker.StoreClient(settings, Opener(payload)).read_publish_access_json('/api/integration/me')
+
+
+def test_publish_access_accepts_large_valid_tool_history_and_caps_both_endpoints(configured):
+    store, *_ = configured
+    settings = type('Settings', (), {'url': 'https://fixture.test', 'token': lambda _: 'fixture'})()
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == 2 and request.method == 'GET'
+            if request.full_url.endswith('/api/integration/me'):
+                return io.BytesIO(json.dumps({'user': {'id': 'owner'}, 'key': {'id': 'key-one'},
+                                              'capabilities': {'publishDraft': True}}).encode())
+            assert request.full_url.endswith('/api/tools/7')
+            return io.BytesIO(json.dumps({'id': 7, 'ownerId': 'owner',
+                                           'history': 'x' * (512 * 1024)}).encode())
+    runtime = type('Runtime', (), {'client': worker.StoreClient(settings, Opener())})()
+    assert store.publish_update_access(runtime, {'toolId': 7}) == {'canUpdate': True}
+
+    class TooLarge:
+        def open(self, request, timeout):
+            assert timeout == 2
+            limit = 512 * 1024 if request.full_url.endswith('/api/integration/me') else 4 * 1024 * 1024
+            return io.BytesIO(b'x' * (limit + 1))
+    capped = worker.StoreClient(settings, TooLarge())
+    for path in ('/api/integration/me', '/api/tools/7'):
+        with pytest.raises(worker.SquareError):
+            capped.read_publish_access_json(path)
+
+
 def test_like_client_only_permits_exact_endpoint_and_boolean():
     settings = type('Settings', (), {'url': 'https://fixture.test', 'token': lambda _: 'ptsq_'+'C'*43})()
     class Opener:
@@ -394,3 +466,21 @@ def test_actual_isolated_stdio_worker_and_malformed_payload(tmp_path):
     secret = 'ptsq_'+'D'*43
     result = subprocess.run([sys.executable, '-I', '-B', str(SCRIPT)], input=(secret+'malformed').encode(), capture_output=True, timeout=10)
     assert not json.loads(result.stdout)['ok'] and secret.encode() not in result.stdout and not result.stderr
+
+
+@pytest.mark.parametrize('payload', [{}, {'toolId': 1, 'user': 'someone-else'},
+                                    {'toolId': 1, 'granted': True}, {'toolId': 1, 'reason': 'override'}])
+def test_access_request_payload_cannot_supply_identity_or_grant(configured, payload):
+    store, client, *_ = configured
+    client.request_access = lambda *args: pytest.fail('invalid request reached client')
+    with pytest.raises(worker.SquareError, match='권한을 신청할 도구'):
+        store.dispatch('requestAccess', payload)
+
+
+@pytest.mark.parametrize('payload', [{}, {'toolId': 1}, {'toolId': 1, 'expectedRevision': 'a'*32, 'user': 'other'},
+                                    {'toolId': 1, 'expectedRevision': 'a'*32, 'granted': False}])
+def test_access_cancel_payload_cannot_supply_identity_or_grant(configured, payload):
+    store, client, *_ = configured
+    client.cancel_access_request = lambda *args: pytest.fail('invalid cancel reached client')
+    with pytest.raises(worker.SquareError, match='취소할 신청 상태'):
+        store.dispatch('cancelAccessRequest', payload)

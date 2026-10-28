@@ -169,14 +169,14 @@ def serialize(t, stats, now, registrants=None, snapshot=None):
         registrar = registrants.get(t['owner'], '')
     data.update(registrantId=t['owner'], registrantName=registrar or '등록자 정보 없음')
     comments = (snapshot.feedback.get(t['_id'], []) if snapshot is not None else db().feedback.find({'tool':t['_id']}).sort('created',-1)) if can_read else []
-    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),purgePending=bool(t.get('purge')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),access='approved' if can_read else 'pending' if access and access['status']=='대기' else 'none',accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c,snapshot) for c in comments],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
+    return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),purgePending=bool(t.get('purge')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),**access_request_fields(access,can_read),accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c,snapshot) for c in comments],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
 
 def access_rows(snapshot=None):
     result=[]
     for r in snapshot.access_rows if snapshot is not None else db().access.find().sort([('updated',-1),('_id',1)]):
         t=snapshot.tools.get(r['tool']) if snapshot is not None else db().tools.find_one({'_id':r['tool']})
         if not t or not manager(t): continue
-        result.append(dict(id=r['_id'],itemId=r['tool'],name=t['data']['name'],user=r['user'],who=name_of(r['user'],snapshot),reason=r.get('reason',''),status=r['status'],decision=r.get('decision',''),granted=r.get('granted',False),source=r.get('source','신청'),history=r.get('history',[]),ownerId=t['owner']))
+        result.append(dict(id=r['_id'],requestRevision=access_request_revision(r),itemId=r['tool'],name=t['data']['name'],user=r['user'],who=name_of(r['user'],snapshot),reason=r.get('reason',''),status=r['status'],decision=r.get('decision',''),granted=r.get('granted',False),source=r.get('source','신청'),history=r.get('history',[]),ownerId=t['owner']))
     return result
 
 @api.get('/api/bootstrap')
@@ -431,22 +431,148 @@ def subscription(tid):
     row=subscribe(tid,g.user['id'],value)
     return jsonify(ok=True,pending=deliver_pending('subscriptions',row['_id']))
 
+def access_request_revision(row):
+    if not row:
+        return None
+    revision = row.get('requestRevision')
+    if isinstance(revision, str) and re.fullmatch(r'(?:[a-f0-9]{32}|[a-f0-9]{64})', revision):
+        return revision
+    # Existing pending requests need a stable token without a migration/write.
+    # Cancellation persists this token; every later application gets a new UUID.
+    raw = json.dumps([row['_id'], row.get('updated')], separators=(',', ':'), ensure_ascii=True)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def access_request_fields(row, can_read):
+    pending = bool(row and row.get('status') == '대기' and not row.get('granted'))
+    status = ('none' if not row else
+              'approved' if row.get('granted') else
+              {'대기': 'pending', '취소': 'cancelled', '반려': 'rejected', '승인': 'revoked'}.get(row.get('status'), 'none'))
+    return dict(access='approved' if can_read else 'pending' if pending else 'none',
+                requestRevision=access_request_revision(row), requestStatus=status,
+                canCancel=not can_read and pending)
+
+
+def access_request_state(t):
+    """Own request state only; never disclose gated release or install content."""
+    row = db().access.find_one({'tool': t['_id'], 'user': g.user['id']})
+    fields = access_request_fields(row, allowed(t))
+    return dict(toolId=t['_id'], **fields, canRequest=fields['access'] == 'none',
+                accessDecision=row.get('decision', '') if row else '')
+
+
+@api.get('/api/tools/<int:tid>/access-status')
+def access_status(tid):
+    t = tool(tid)
+    state = access_request_state(t)
+    data = resolved(t)
+    # Mirror the public catalog's identity/description whitelist. In particular,
+    # do not reuse full detail serialization after a concurrent grant change.
+    item = {key: data.get(key, [] if key == 'workTags' else '') for key in
+            ('name', 'desc', 'platform', 'org', 'orgId', 'category', 'workTags', 'owner')}
+    registrant = db().users.find_one({'_id': t['owner']}, {'name': 1}) or {}
+    item.update(id=tid, type=data.get('type'), registrantId=t['owner'],
+                registrantName=registrant.get('name') or '등록자 정보 없음',
+                approval=bool(data.get('approval')),
+                **{key: state[key] for key in ('access', 'requestRevision', 'requestStatus', 'canCancel')})
+    return jsonify(**state, item=item)
+
+
+def existing_key_access_request(tid):
+    """Safely reconcile a duplicate/CAS race without submitting another request."""
+    if not getattr(g, 'api_token_id', None):
+        return None
+    state = access_request_state(tool(tid))
+    if state['access'] in {'approved', 'pending'}:
+        row = db().access.find_one({'tool': tid, 'user': g.user['id']}, {'outbox': 1}) or {}
+        return jsonify(ok=True, **state, requested=False,
+                       pending=bool(row.get('outbox')))
+    return None
+
+
 @api.post('/api/tools/<int:tid>/requests')
 def access_request(tid):
-    t=tool(tid);reason=text(payload(),'reason',2000);uid=g.user['id'];key=f'{tid}:{uid}'
-    if allowed(t): raise Conflict('이미 조회할 수 있는 기능입니다.')
+    t=tool(tid);raw=payload();reason=text(raw,'reason',2000);uid=g.user['id'];key=f'{tid}:{uid}'
+    if getattr(g, 'api_token_id', None) and set(raw) != {'reason'}:
+        raise BadRequest('권한 신청에는 신청 사유만 전달할 수 있습니다.')
+    if allowed(t):
+        if getattr(g, 'api_token_id', None):
+            return jsonify(ok=True, **access_request_state(t), requested=False, pending=False)
+        raise Conflict('이미 조회할 수 있는 기능입니다.')
     e=event([t['owner'],*all_admin_ids()],f'{name_of(uid)}님의 {t["data"]["name"]} 권한 신청',{'type':'access','id':tid},'approval')
     old=db().access.find_one({'_id':key})
-    if old and old['status']=='대기': raise Conflict('이미 승인 대기 중입니다.')
-    values={'tool':tid,'user':uid,'reason':reason,'status':'대기','decision':'','granted':False,'source':'신청','updated':time.time()}
+    if old and old['status']=='대기':
+        repeated=existing_key_access_request(tid)
+        if repeated is not None: return repeated
+        raise Conflict('이미 승인 대기 중입니다.')
+    values={'tool':tid,'user':uid,'reason':reason,'status':'대기','decision':'','granted':False,'source':'신청','updated':time.time(),'requestRevision':uuid.uuid4().hex}
     if old:
-        result=db().access.update_one({'_id':key,'updated':old['updated'],'granted':False},{'$set':values,'$push':{'outbox':e,'history':{'status':'대기','actor':uid,'at':time.time(),'reason':reason}}})
-        if not result.modified_count: raise Conflict('권한 상태가 변경되었습니다.')
+        result=db().access.update_one({'_id':key,'updated':old['updated'],'status':old['status'],'requestRevision':old.get('requestRevision'),'granted':False},{'$set':values,'$push':{'outbox':e,'history':{'status':'대기','actor':uid,'at':time.time(),'reason':reason}}})
+        if not result.modified_count:
+            repeated=existing_key_access_request(tid)
+            if repeated is not None: return repeated
+            raise Conflict('권한 상태가 변경되었습니다.')
     else:
         try: db().access.insert_one(dict(values,_id=key,outbox=[e],history=[{'status':'대기','actor':uid,'at':time.time(),'reason':reason}]))
-        except DuplicateKeyError: raise Conflict('이미 신청했습니다.')
+        except DuplicateKeyError:
+            repeated=existing_key_access_request(tid)
+            if repeated is not None: return repeated
+            raise Conflict('이미 신청했습니다.')
     pending=cleanup_late_tool_write(tid)
-    return jsonify(ok=True,pending=deliver_pending('access',key) or pending)
+    return jsonify(ok=True,toolId=tid,**access_request_fields(values,False),canRequest=False,accessDecision='',requested=True,
+                   pending=deliver_pending('access',key) or pending)
+
+
+@api.post('/api/tools/<int:tid>/requests/cancel')
+def cancel_access_request(tid):
+    t = tool(tid)
+    raw = payload()
+    revision = raw.get('expectedRevision')
+    if (set(raw) != {'expectedRevision'} or not isinstance(revision, str)
+            or not re.fullmatch(r'(?:[a-f0-9]{32}|[a-f0-9]{64})', revision)):
+        raise BadRequest('신청 상태를 새로 확인한 뒤 취소해 주세요.')
+    uid = g.user['id']
+    key = f'{tid}:{uid}'
+
+    def current_result():
+        state = access_request_state(tool(tid))
+        # A cancellation never revokes a grant, including a new organizational grant.
+        if state['access'] == 'approved':
+            return jsonify(ok=True, **state, cancelled=False, pending=False)
+        if state['requestRevision'] != revision:
+            raise Conflict('신청 상태가 변경되었습니다. 현재 상태를 확인해 주세요.')
+        row = db().access.find_one({'_id': key}, {'outbox': 1}) or {}
+        return jsonify(ok=True, **state, cancelled=state['requestStatus'] == 'cancelled',
+                       pending=bool(row.get('outbox')))
+
+    if allowed(t):
+        return current_result()
+    old = db().access.find_one({'_id': key})
+    if not old or access_request_revision(old) != revision:
+        raise Conflict('신청 상태가 변경되었습니다. 현재 상태를 확인해 주세요.')
+    if old.get('status') != '대기' or old.get('granted'):
+        return current_result()
+    now = time.time()
+    e = event([t['owner'], *all_admin_ids()],
+              f'{name_of(uid)}님의 {t["data"]["name"]} 권한 신청 취소',
+              {'type': 'access', 'id': tid}, 'approval')
+    e.update(audit=audit_event(f'권한 신청 {key} 사용자 취소')['audit'])
+    match = {'_id': key, 'user': uid, 'tool': tid, 'updated': old['updated'],
+             'status': '대기', 'granted': False,
+             'requestRevision': old.get('requestRevision')}
+    changed = db().access.update_one(match, {
+        '$set': {'status': '취소', 'decision': '', 'updated': now,
+                 'requestRevision': revision, 'cancelledBy': uid},
+        '$push': {'outbox': e, 'history': {'status': '취소', 'actor': uid, 'at': now}},
+    })
+    if not changed.modified_count:
+        return current_result()
+    pending = cleanup_late_tool_write(tid)
+    pending = deliver_pending('access', key) or pending
+    # Report the operation that committed, even if a new request follows it.
+    cancelled = dict(old, status='취소', granted=False, decision='', requestRevision=revision)
+    return jsonify(ok=True, toolId=tid, **access_request_fields(cancelled,False),
+                   canRequest=True, accessDecision='', cancelled=True, pending=pending)
 
 @api.post('/api/requests/<rid>/decision')
 def decide(rid):
@@ -454,13 +580,23 @@ def decide(rid):
     if not r: raise NotFound()
     t=tool(r['tool'],True);raw=payload();status=text(raw,'status',10)
     if status not in {'승인','반려','회수'}: raise BadRequest('처리 상태를 확인해 주세요.')
+    # Approve/reject must identify the reviewed attempt. Older pages must reload;
+    # accepting an omitted token could apply an old decision to a new request.
+    if status in {'승인', '반려'} and 'expectedRevision' not in raw:
+        raise Conflict('신청 내용을 다시 확인해야 합니다. 페이지를 새로고침한 뒤 처리해 주세요.')
+    if 'expectedRevision' in raw:
+        expected = raw['expectedRevision']
+        if not isinstance(expected, str) or not re.fullmatch(r'(?:[a-f0-9]{32}|[a-f0-9]{64})', expected):
+            raise BadRequest('신청 내용을 확인할 수 없습니다. 페이지를 새로고침한 뒤 처리해 주세요.')
+        if access_request_revision(r) != expected:
+            raise Conflict('다른 신청으로 변경되었습니다. 현재 신청 내용을 다시 확인해 주세요.')
     if (status=='회수' and not r.get('granted')) or (status!='회수' and r['status']!='대기'): raise Conflict('이미 처리된 신청입니다.')
     reason=text(raw,'reason',2000,status in {'반려','회수'})
     e=event([r['user']],f'{t["data"]["name"]} 권한 {status}',{'type':'tool','id':r['tool']},'approval')
     job=audit_event(f'권한 {rid} {status}',subscription={'tool':r['tool'],'user':r['user']} if status=='승인' else None)
     e.update(audit=job['audit'])
     if 'subscription' in job: e['subscription']=job['subscription']
-    result=db().access.update_one({'_id':rid,'updated':r['updated']},{'$set':{'status':r['status'] if status=='회수' else status,'granted':status=='승인','decision':reason,'updated':time.time(),'decidedBy':g.user['id']},'$push':{'outbox':e,'history':{'status':status,'actor':g.user['id'],'at':time.time(),'reason':reason}}})
+    result=db().access.update_one({'_id':rid,'updated':r['updated'],'status':r['status'],'granted':r.get('granted',False),'requestRevision':r.get('requestRevision')},{'$set':{'status':r['status'] if status=='회수' else status,'granted':status=='승인','decision':reason,'updated':time.time(),'decidedBy':g.user['id']},'$push':{'outbox':e,'history':{'status':status,'actor':g.user['id'],'at':time.time(),'reason':reason}}})
     if not result.modified_count: raise Conflict('이미 처리된 신청입니다.')
     pending=cleanup_late_tool_write(t['_id'])
     return jsonify(ok=True,pending=deliver_pending('access',rid) or pending)

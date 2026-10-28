@@ -25,7 +25,8 @@ def test_mutation_and_audit_are_durable_even_when_audit_delivery_fails(app,monke
         assert publish(c,h,tid=1,revision=2).status_code==201
     if action=='decision':
         member,mh=ready(app,'member')
-        assert member.post('/api/tools/1/requests',headers=mh,json={'reason':'need'}).status_code==200
+        submitted=member.post('/api/tools/1/requests',headers=mh,json={'reason':'need'})
+        assert submitted.status_code==200
     with monkeypatch.context() as fault:
         fail_update(fault,lambda name,q,u:name=='audit')
         if action=='edit': r=c.patch('/api/tools/1',headers=h,json={'name':'updated','expectedRevision':1})
@@ -43,7 +44,7 @@ def test_mutation_and_audit_are_durable_even_when_audit_delivery_fails(app,monke
         elif action=='grant':
             r=c.post('/api/tools/1/grants',headers=h,json={'user':'member'});collection,key='access','1:member'
         else:
-            r=c.post('/api/requests/1:member/decision',headers=h,json={'status':'승인','reason':''});collection,key='access','1:member'
+            r=c.post('/api/requests/1:member/decision',headers=h,json={'status':'승인','reason':'','expectedRevision':submitted.json['requestRevision']});collection,key='access','1:member'
     assert r.status_code==200,r.json
     assert r.json['pending'] is True
     with app.app_context():

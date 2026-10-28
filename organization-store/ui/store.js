@@ -14,7 +14,8 @@
     }
     return n;
   };
-  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailTab: 'intro', detailOpener: null, installation: null };
+  const state = { channel: '', seq: 0, pending: new Map(), tail: Promise.resolve(), connected: false, baseUrl: '', presetBaseUrl: '', context: {}, hostFeatures: [], tab: 'catalog', offset: null, generation: 0, records: [], detail: null, detailGeneration: 0, detailPanelGeneration: 0, connectionGeneration: 0, detailTab: 'intro', detailOpener: null, installation: null };
+  const accessOperations = new Map();
   const installationActive = () => ['choosing','preparing','review','installing','uncertain','request-uncertain'].includes(state.installation?.phase);
   function installationButton(toolId) {
     const node = el('button', 'primary', '바로 설치하기'); node.type = 'button'; node.dataset.installTool = String(toolId);
@@ -215,7 +216,7 @@
     httpConsent();
   }
   async function initialize() {
-    publication.loaded=false; const result = await rpc('status'); state.connected = result.configured; state.baseUrl = result.baseUrl || '';
+    ++state.connectionGeneration; accessOperations.clear(); publication.loaded=false; const result = await rpc('status'); state.connected = result.configured; state.baseUrl = result.baseUrl || '';
     if (state.installation && (state.installation.origin !== state.baseUrl || !state.connected)) clearInstallation();
     connectionFields(result); $('reuse-connection').hidden = !result.existingConnectionAvailable; $('reuse-help').hidden = !result.existingConnectionAvailable;
     $('connection-button').hidden = !state.connected; $('publish-open').hidden = !state.connected;
@@ -367,7 +368,11 @@
     return row;
   }
   function updateCard(item) {
-    for (const card of $('results').querySelectorAll('.tool-card[data-tool-id]')) if (card.dataset.toolId === String(item.id)) card.querySelector('.metrics')?.replaceWith(metrics(item));
+    for (const card of $('results').querySelectorAll('.tool-card[data-tool-id]')) if (card.dataset.toolId === String(item.id)) {
+      card.querySelector('.metrics')?.replaceWith(metrics(item));
+      card.querySelector('.access-badge')?.remove();
+      if (item.access && item.access !== 'approved') card.querySelector('.card-bottom').before(el('span','badge access-badge',item.access==='pending'?'승인 대기 중':'사용 승인 필요'));
+    }
   }
   function toolCard(item) {
     const card = el('article', 'tool-card catalog-card'); card.dataset.toolId = item.id;
@@ -388,7 +393,7 @@
     const owner = el('p', 'card-owner'); owner.append(el('span', 'owner-label', '등록자'), el('span', '', registrant(item))); owner.title = `등록자 · ${registrant(item)}`;
     const foot = el('div', 'card-bottom'); foot.append(metrics(item), button('자세히 보기', 'text-button', () => detail(item.id)));
     card.append(top, title, el('p', 'tool-desc', item.desc || '상세 화면에서 사용 방법을 확인하세요.'), tags, owner);
-    if (item.access && item.access !== 'approved') card.append(el('span', 'badge access-badge', '사용 승인 필요'));
+    if (item.access && item.access !== 'approved') card.append(el('span', 'badge access-badge', item.access==='pending'?'승인 대기 중':'사용 승인 필요'));
     card.append(foot); return card;
   }
   function recordName(record) { return record.name || record.toolName || record.title || record.packageName || '이름을 확인할 수 없는 기능'; }
@@ -492,9 +497,78 @@
     feedback('파일을 내려받았어요. 다운로드만으로 설치되지는 않습니다.');
     if (state.detail === result && state.detailTab === 'connect') detailPanel('connect');
   }
+  function accessControls(result) {
+    const controls=el('div','access-controls'); controls.dataset.accessTool=String(result.item.id);
+    return controls;
+  }
+  function renderAccess(result) {
+    const item=result.item, operation=accessOperations.get(String(item.id));
+    for(const controls of document.querySelectorAll('[data-access-tool]')) {
+      if(controls.dataset.accessTool!==String(item.id))continue;
+      controls.replaceChildren();
+      if(['sending','checking','cancelling'].includes(operation?.phase)) {
+        const pending=el('button','secondary',{sending:'신청 중…',checking:'상태 확인 중…',cancelling:'취소 중…'}[operation.phase]);pending.type='button';pending.disabled=true;pending.setAttribute('aria-busy','true');controls.append(pending);
+      } else if(['uncertain','rejected'].includes(operation?.phase)) {
+        controls.append(button('신청 상태 확인','secondary',()=>accessAction(result,'refresh')),el('span','access-control-notice',operation.notice));
+      } else if(item.access==='pending') {
+        const pending=el('span','access-pending','승인 대기 중');pending.setAttribute('role','status');
+        controls.append(pending,button('상태 새로고침','text-button',()=>accessAction(result,'refresh')));
+        if(item.canCancel===true&&typeof item.requestRevision==='string'&&item.requestRevision)controls.append(button('신청 취소','text-button',()=>accessAction(result,'cancel')));
+      } else if(result.canRequestAccess===true) {
+        controls.append(button(item.requestStatus==='cancelled'?'권한 다시 신청하기':'권한 신청하기','primary',()=>accessAction(result,'request')));
+      } else if(result.webUrl) {
+        controls.append(button('웹에서 권한 신청','secondary',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
+      }
+    }
+    const message=document.querySelector('.access-request-message');
+    if(message) {
+      message.textContent=operation?.notice || item.accessNotice || (item.access==='pending'?'신청을 접수했어요. 담당자가 승인하면 설치할 수 있어요.':item.requestStatus==='cancelled'?'신청을 취소했어요. 필요할 때 다시 신청할 수 있어요.':'버튼을 누르면 연결한 계정으로 담당자에게 사용 권한을 신청해요.');
+      message.classList.toggle('error',['uncertain','rejected'].includes(operation?.phase));
+    }
+  }
+  async function accessAction(result, action) {
+    const id=String(result.item.id), previous=accessOperations.get(id);
+    const refresh=action==='refresh', cancel=action==='cancel';
+    if(['sending','checking','cancelling'].includes(previous?.phase))return;
+    if(cancel&&!(result.item.access==='pending'&&result.item.canCancel===true&&result.item.requestRevision))return;
+    const connection=state.connectionGeneration, origin=state.baseUrl;
+    const sameConnection=()=>connection===state.connectionGeneration&&origin===state.baseUrl;
+    const visible=()=>sameConnection()&&String(state.detail?.item?.id)===id&&$('detail-dialog').open;
+    const operation={phase:refresh?'checking':cancel?'cancelling':'sending'};accessOperations.set(id,operation);renderAccess(result);
+    try {
+      // Refresh is read-only. A lost reply is never evidence that the request failed.
+      const response=await rpc(refresh?'detail':cancel?'cancelAccessRequest':'requestAccess',{toolId:result.item.id,...(refresh?{recordView:false}:cancel?{expectedRevision:result.item.requestRevision}:{})},sameConnection);
+      if(!sameConnection())return;
+      if(refresh) {
+        if(!response?.item||String(response.item.id)!==id)throw Error('invalid access response');
+        accessOperations.delete(id);updateCard(response.item);
+        if(visible())renderDetail(response,state.detailTab);
+      } else if(['pending','approved','cancelled','none'].includes(response?.status)) {
+        accessOperations.delete(id);
+        const fields={access:response.status==='cancelled'?'none':response.status,requestStatus:response.requestStatus||response.status,requestRevision:response.requestRevision||null,canCancel:response.canCancel===true,accessNotice:response.status==='none'?(response.notice||'취소할 대기 중인 신청이 없어요.'):''};
+        if(['pending','cancelled'].includes(response.status))fields.accessDecision='';
+        Object.assign(result.item,fields);result.canRequestAccess=fields.access==='none';updateCard(result.item);
+        if(visible()) {
+          Object.assign(state.detail.item,fields);state.detail.canRequestAccess=fields.access==='none';
+          if(response.status==='approved') {
+            await accessAction(state.detail,'refresh');
+            if(cancel&&visible())feedback('이미 사용 권한이 있어 신청을 취소하지 않았어요. 현재 사용 권한은 유지됩니다.');
+          }
+          else {renderAccess(state.detail);detailPanel(state.detailTab,false);}
+        }
+      } else {
+        operation.phase=response?.status==='rejected'?'rejected':'uncertain';operation.notice=response?.notice||(cancel?'취소 결과를 확인하지 못했어요. 신청 상태를 먼저 확인해 주세요.':'신청 결과를 확인하지 못했어요. 다시 신청하기 전에 신청 상태를 확인해 주세요.');
+        if(visible())renderAccess(state.detail);
+      }
+    } catch(error) {
+      if(!sameConnection())return;
+      operation.phase='uncertain';operation.notice=refresh?'신청 상태를 확인하지 못했어요. 연결을 확인한 뒤 다시 확인해 주세요.':cancel?'취소 결과를 확인하지 못했어요. 신청 상태를 먼저 확인해 주세요.':'신청 결과를 확인하지 못했어요. 다시 신청하기 전에 신청 상태를 확인해 주세요.';
+      if(visible())renderAccess(state.detail);
+    }
+  }
   function detailPanel(tab, animate = true) {
     const result = state.detail; if (!result) return;
-    const item = result.item, panel = $('detail-panel'); state.detailTab = tab;
+    const item = result.item, panel = $('detail-panel'), panelTicket=++state.detailPanelGeneration; state.detailTab = tab;
     document.querySelectorAll('[data-detail-tab]').forEach(n => {const selected = n.dataset.detailTab === tab; n.setAttribute('aria-selected',String(selected)); n.tabIndex=selected?0:-1;});
     panel.setAttribute('aria-labelledby','detail-tab-'+tab); panel.replaceChildren();
     if (animate) revealPanel(panel);
@@ -512,17 +586,23 @@
     }
     if (tab === 'connect') {
       const gated = item.access && item.access !== 'approved';
-      panel.append(el('h3','','사용할 공간을 정하고 시작하세요.'));
-      if (gated) panel.append(section('사용 권한 확인',item.access==='pending'?'사용 신청을 검토 중입니다. 웹에서 신청 상태를 확인해 주세요.':'이 기능은 사용 승인이 필요합니다. 웹에서 담당자에게 사용 권한을 신청해 주세요.'));
+      panel.append(el('h3','',gated?'사용 권한을 확인하세요.':'사용할 공간을 정하고 시작하세요.'));
+      if (gated) {
+        const access=el('section','access-request-panel'),message=el('p','access-request-message');message.setAttribute('aria-live','polite');
+        access.append(el('h4','','담당자 승인 후 사용할 수 있어요.'),message,accessControls(result));
+        if(item.accessDecision&&item.access!=='pending')access.append(el('p','muted',`이전 처리 안내: ${item.accessDecision}`));
+        panel.append(access);
+      }
       if (item.environment || item.platform) panel.append(section('실행 환경',item.environment || item.platform));
       const actions=el('div','detail-actions');
       if (!gated && (result.canInstall || result.canInspectInstall)) actions.append(installationButton(item.id));
       if (!gated && !result.canInstall && result.manifest?.downloadUrl) actions.append(button('AI에게 설치 요청',result.canInspectInstall?'secondary':'primary',()=>requestAiInstall(result),'install'));
       if (!gated && result.manifest?.downloadUrl) actions.append(button('파일 다운로드','secondary',()=>downloadDetail(result)));
-      if (result.webUrl) actions.append(button(gated?'웹에서 사용 권한 확인':'웹에서 보기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
+      if (result.webUrl) actions.append(button('웹에서 보기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
       const progress = el('section','installation-status'); progress.id='detail-installation-status'; progress.dataset.toolId=String(item.id); progress.setAttribute('aria-live','polite'); progress.setAttribute('aria-label','설치 진행 상태'); progress.hidden=true;
-      panel.append(actions,progress,el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
-      renderInstallation();
+      panel.append(actions,progress);
+      if(!gated)panel.append(el('p','catalog-note',result.installNotice || '파일 다운로드와 실제 설치는 별개입니다. 설치 전 사용할 공간과 변경 경로를 확인하세요.'));
+      renderInstallation();renderAccess(result);
       if (item.guide) panel.append(section('등록자가 제공한 안내',item.guide));
       if (item.url) panel.append(section('연결 주소',item.url));
       if (currentVersion?.commands) for (const [scope,label] of [['user','전체 공간(내 계정)'],['project','특정 폴더']]) if (currentVersion.commands[scope]) panel.append(section(`${label} 설치 안내`,currentVersion.commands[scope]));
@@ -531,7 +611,29 @@
       return;
     }
     if (tab === 'versions') {
-      panel.append(el('h3','','배포 이력'));
+      const heading=el('div','detail-version-actions'); heading.append(el('h3','','배포 이력')); panel.append(heading);
+      if(item.access&&item.access!=='approved') {
+        panel.append(el('p','muted detail-callout','사용 승인 후 배포 이력을 확인할 수 있어요.'));return;
+      }
+      const detailTicket=state.detailGeneration, connectionTicket=state.connectionGeneration, origin=state.baseUrl;
+      const current=()=>state.detail===result&&state.detailGeneration===detailTicket&&state.detailPanelGeneration===panelTicket&&state.connectionGeneration===connectionTicket&&state.baseUrl===origin&&state.detailTab==='versions'&&$('detail-dialog').open;
+      // Optional read only authorization runs only on this tab. An older host,
+      // offline server or a different owner must not break the detail screen.
+      function checkUpdateAccess(){
+        if(!current())return;
+        heading.querySelector('.detail-version-access')?.remove();
+        rpc('publishUpdateAccess',{toolId:item.id},current).then(access=>{
+          if(current()&&access?.canUpdate===true){
+            const update=button('새 버전 등록','secondary',()=>openOwnUpdate(result,current,update));
+            update.setAttribute('aria-label',`${item.name} 새 버전 등록`);heading.append(update);
+          }
+        }).catch(()=>{
+          if(!current())return;
+          const notice=el('div','detail-version-access');notice.setAttribute('role','status');
+          notice.append(el('span','muted','등록 권한을 확인하지 못했어요.'),button('다시 확인','text-button',checkUpdateAccess));heading.append(notice);
+        });
+      }
+      checkUpdateAccess();
       if (!versions.length) panel.append(el('p','muted detail-callout','확인할 수 있는 배포 이력이 없습니다.'));
       for (const version of versions) {
         const row=el('article','version-row'), heading=el('div','version-heading'); heading.append(el('strong','',`v${version.n}`));
@@ -558,12 +660,18 @@
     if (result.webUrl) panel.append(button('웹에서 의견 남기기','text-button',()=>rpc('host.openExternal',{url:result.webUrl}),'web'));
   }
   async function detail(toolId) {
-    const generation=++state.detailGeneration, dialog=$('detail-dialog');
+    const generation=++state.detailGeneration, dialog=$('detail-dialog'), connection=state.connectionGeneration, origin=state.baseUrl;
+    const current=()=>generation===state.detailGeneration&&connection===state.connectionGeneration&&origin===state.baseUrl&&dialog.open;
     if (!dialog.open) state.detailOpener=document.activeElement;
     state.detail=null; $('detail-title').textContent='기능 상세'; $('detail-kicker').textContent='P&T AI Square'; $('detail-feedback').hidden=true; $('detail-view').replaceChildren(el('p','loading','상세 정보를 확인하고 있어요…'));
     if (!dialog.open) dialog.showModal(); $('detail-close').focus({preventScroll:true});
-    const result=await rpc('detail',{toolId,recordView:true},()=>generation===state.detailGeneration);
-    if (generation!==state.detailGeneration || !dialog.open) return;
+    let result;
+    try { result=await rpc('detail',{toolId,recordView:true},current); }
+    catch(error) { if(current())throw error;return; }
+    if (!current()) return;
+    renderDetail(result);
+  }
+  function renderDetail(result, tab='intro') {
     state.detail=result; const item=result.item, root=$('detail-view');
     $('detail-title').textContent=item.name; $('detail-kicker').replaceChildren(typeBadge(item.type),el('span','',item.platform || ''));
     const top=el('div','detail-top'), identity=el('div','detail-identity'), identityText=el('div');
@@ -573,12 +681,13 @@
       const response=await rpc('like',{toolId,liked:!item.liked}); item.liked=response.liked; item.likes=response.count; if(item.statistics)item.statistics.likes=response.count;
       like.textContent=`${response.liked?'♥':'♡'} 좋아요 ${response.count}`;like.setAttribute('aria-pressed',String(response.liked));identityText.querySelector('.metrics')?.replaceWith(metrics(item));updateCard(item);feedback('웹과 같은 좋아요 기록에 반영했어요.');
     }); like.setAttribute('aria-pressed',String(!!item.liked));
-    actions.append(like,button('사용 시작','primary',()=>{detailPanel('connect');$('detail-tab-connect').focus();}));top.append(identity,actions);
+    const gated=item.access&&item.access!=='approved';like.disabled=!!gated;if(gated)like.title='사용 승인 후 좋아요를 남길 수 있어요.';
+    actions.append(like,gated?accessControls(result):button('사용 시작','primary',()=>{detailPanel('connect');$('detail-tab-connect').focus();}));top.append(identity,actions);
     const tabs=el('div','detail-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','기능 상세 탭');
     for(const [id,title] of [['intro','소개'],['connect','설치·연결'],['versions','버전'],['comments','의견']]){const tab=el('button','',title);tab.type='button';tab.addEventListener('click',()=>detailPanel(id));tab.id='detail-tab-'+id;tab.dataset.detailTab=id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','detail-panel');tabs.append(tab);}
     tabs.addEventListener('keydown',event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const items=[...tabs.children],index=items.indexOf(document.activeElement),next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowRight'?1:-1)+items.length)%items.length;detailPanel(items[next].dataset.detailTab);items[next].focus();});
     const panel=el('section','detail-panel');panel.id='detail-panel';panel.setAttribute('role','tabpanel');panel.tabIndex=0;
-    root.replaceChildren(top,tabs,panel);root.scrollTop=0;detailPanel('intro', false);revealPanel(root);updateCard(item);
+    root.replaceChildren(top,tabs,panel);root.scrollTop=0;detailPanel(tab, false);renderAccess(result);revealPanel(root);updateCard(item);
   }
   async function prepare(toolId) {
     if (installationActive()) return;
@@ -838,6 +947,36 @@
     const result=await rpc('publishOptions');
     publishOptions($('publish-existing'),result.candidates,'기존 도구 선택');
     publication.allowed=result.canPublish===true;
+  }
+  async function openOwnUpdate(result,current,opener) {
+    if(!current()||publication.busy||$('publish-dialog').open)return;
+    // A pending or uncertain server-side submission must retain its id and
+    // selected file until the user checks its result in the original form.
+    if((publication.draft&&publication.draft.status!=='committed')||(publication.requestId&&!publication.draft)){
+      feedback('이전에 준비한 등록의 결과를 먼저 확인해 주세요. 도구 등록 창에서 이어서 확인할 수 있어요.',true);return;
+    }
+    const dirty=publication.file||publication.manualFields.size||$('publish-target').value||
+      Object.values(publishFields).some(id=>$(id).value.trim())||document.querySelector('input[name="publish-visibility"]:checked');
+    if(dirty&&publication.draft?.status!=='committed'){
+      if(!await confirm('작성 중인 등록 내용을 바꿀까요?',[
+        el('p','','이전에 작성한 내용과 선택한 파일을 지우고 이 도구의 새 버전을 준비합니다.')
+      ],'내용 지우고 계속'))return;
+      if(!current()||publication.busy||$('publish-dialog').open)return;
+    }
+    // Recheck authorization immediately before touching the existing form.
+    // The backend also rechecks identity/revision at prepare and commit.
+    let response;try{response=await rpc('publishOptions',{toolId:result.item.id},current);}catch(error){if(!current())return;throw error;}
+    if(!current()||publication.busy||$('publish-dialog').open)return;
+    if(!response?.canPublish||Number(response.existing?.toolId)!==Number(result.item.id)||!response.existing.metadata||typeof response.existing.metadata!=='object')throw Error('이 도구의 등록 권한과 정보를 다시 확인해 주세요.');
+    if(!Array.isArray(response.candidates)||!response.candidates.some(row=>String(row.id)===String(result.item.id)))throw Error('내 도구 목록에서 대상 도구를 확인하지 못했어요. 다시 시도해 주세요.');
+    resetPublish();publication.origin=state.baseUrl;publication.loaded=true;publication.allowed=true;publication.opener=opener;
+    publishOptions($('publish-org'),response.options?.organizations,'조직 선택');publishOptions($('publish-category'),response.options?.categories,'업무 분류 선택');
+    publishOptions($('publish-existing'),response.candidates,'기존 도구 선택');
+    $('publish-target').value='update';$('publish-target').dispatchEvent(new Event('optionschanged'));
+    $('publish-existing').value=String(result.item.id);$('publish-existing').dispatchEvent(new Event('optionschanged'));
+    fillPublishMetadata({...response.existing.metadata,changes:''});$('publish-access').hidden=true;$('publish-access').replaceChildren();publishMode();
+    publishMessage('기존 도구를 선택했어요. 새 자료와 변경 내용을 확인한 뒤 등록하세요.');publishControls();
+    $('publish-dialog').showModal();$('publish-close').focus({preventScroll:true});
   }
   $('publish-open').addEventListener('click',()=>{
     publication.opener=document.activeElement;
