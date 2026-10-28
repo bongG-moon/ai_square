@@ -56,6 +56,10 @@ def init_app(app, overrides=None):
         app.register_blueprint(people)
         from .backend.ax_workspace import ax_workspace
         app.register_blueprint(ax_workspace)
+        from .backend.immersion_room import immersion_room
+        app.register_blueprint(immersion_room)
+    from .backend.room_holidays import install_room_holidays
+    install_room_holidays(app)
     from .backend.distribution_skill import distribution_skill
     app.register_blueprint(distribution_skill)
     @app.get('/')

@@ -60,14 +60,43 @@ def _job_from_source(kind, source):
     completed = {'id': completed_id, 'audit': {'_id': completed_id,
                  'user': marker['audit']['audit']['user'], 'created': marker['created'],
                  'action': f'{"도구" if kind == "tool" else "기능 요청"} {source["_id"]} 영구 삭제'}}
-    return {'_id': f'{kind}:{source["_id"]}', 'kind': kind, 'entityId': source['_id'],
+    job = {'_id': f'{kind}:{source["_id"]}', 'kind': kind, 'entityId': source['_id'],
             'operationId': marker['id'], 'state': 'pending', 'created': marker['created'],
             'revision': source['revision'], 'requestRevision': marker['requestRevision'],
             'files': sorted({r['path'] for r in rows if r.get('path')}), 'outbox': audits,
             'completionAudit': completed}
+    if kind == 'tool' and marker.get('contribution'):
+        job['contribution'] = marker['contribution']
+    return job
+
+
+def _retain_contribution(job):
+    """Persist credit before *any* caller removes activity or tool documents.
+
+Old pending jobs may predate this field. Upgrade them while their source still
+exists. Old completed jobs without a source cannot be reconstructed honestly.
+Every write is conditional so concurrent retry workers reuse the first record.
+"""
+    if job['kind'] != 'tool' or job.get('contribution'):
+        return
+    from .contributions import snapshot_tool
+    source = db().tools.find_one({'_id': job['entityId'], 'purge.id': job['operationId']})
+    if not source:
+        return
+    snapshot = snapshot_tool(source, job['created'])
+    db().tools.update_one({'_id': source['_id'], 'purge.id': job['operationId'],
+                           'purge.contribution': {'$exists': False}},
+                          {'$set': {'purge.contribution': snapshot}})
+    source = db().tools.find_one({'_id': source['_id'], 'purge.id': job['operationId']},
+                                 {'purge.contribution': 1})
+    if source:
+        snapshot = source['purge']['contribution']
+        db().deletion_jobs.update_one({'_id': job['_id'], 'contribution': {'$exists': False}},
+                                     {'$set': {'contribution': snapshot}})
 
 
 def _remove_relations(job):
+    _retain_contribution(job)
     entity_id = job['entityId']
     if job['kind'] == 'tool':
         # Keep the request and its discussion; retain a readable snapshot but
@@ -148,6 +177,7 @@ def _resume(job):
     key = job['_id']
     try:
         if job.get('state') != 'complete':
+            _retain_contribution(job)
             folder = 'artifacts' if job['kind'] == 'tool' else 'request_attachments'
             for filename in job.get('files', []):
                 path = _file_path(folder, filename)
@@ -205,6 +235,9 @@ def remove(kind, entity_id, expected_revision):
     if not marker:
         marker = {'id': uuid.uuid4().hex, 'created': time.time(), 'requestRevision': source['revision'],
                   'audit': audit_event(f'{"도구" if kind == "tool" else "기능 요청"} {entity_id} 영구 삭제 요청')}
+        if kind == 'tool':
+            from .contributions import snapshot_tool
+            marker['contribution'] = snapshot_tool(source, marker['created'])
         result = collection.update_one({'_id': entity_id, 'revision': source['revision'], 'purge': {'$exists': False}},
                                        {'$set': {'purge': marker}, '$inc': {'revision': 1}})
         if not result.modified_count:

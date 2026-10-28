@@ -593,18 +593,18 @@ const originalRender=render, originalModal=openModal, originalDetail=detail, ori
 const originalCloseModal=closeModal,originalNavigate=navigate;
 let activeDetailView=null;
 const workspace=document.createElement('section');workspace.id='sq-workspace';workspace.hidden=true;$('#sq-main').append(workspace);
-const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('ax-workspace','AX Workspace','','data-route="ax"')}${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
+const nav=$('.sq-header nav');nav.insertAdjacentHTML('beforeend',`${button('ax-workspace','AX Workspace','','data-route="ax"')}${button('requests-board','기능 요청','','data-route="ideas"')}${button('manage','등록 관리','','data-route="manage"')}${button('immersion-room','AI 몰입룸','','data-route="immersion-room"')}${button('admin-home','관리자','','data-route="admin" id="ws-admin-nav" hidden')}`);
 $('.sq-header-actions [data-action="manage"]').remove();
 $('.sq-header-actions').insertAdjacentHTML('afterbegin',`<button class="sq-quiet ws-bell" data-action="inbox" aria-label="내 알림" title="내 알림">${icon('bell')}<span id="ws-unread" hidden></span></button>`);
 render=function(){
  const categories=server.categories||[];
  $('#sq-category').innerHTML=options(['모든 업무',...categories.filter(x=>x.enabled||x.name===state.category).map(x=>x.name)],state.category);
- originalRender();const special=['manage','admin','ideas','ax'].includes(state.route);
+ originalRender();const special=['manage','admin','ideas','ax','immersion-room'].includes(state.route);
  workspace.hidden=!special;$('.sq-toolbar').hidden=special;$('#sq-search-form').hidden=special;
  $('#ws-admin-nav').hidden=server.user.role!=='admin';
  renderUnreadCount();
  if(special){
-  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.'],ax:['AX Workspace.','업무를 연결하는 시작.']};
+  const labels={manage:['내가 나눈 노하우.','동료의 피드백으로 더 나은 도구로.'],admin:['함께 쓰는 공간을 가꾸세요.','좋은 공유가 이어질 수 있도록.'],ideas:['작은 불편함도 좋은 시작.','함께 만들고 싶은 도구를 이야기하세요.'],ax:['AX Workspace.','업무를 연결하는 시작.'],'immersion-room':['AI 몰입룸.','함께 배우고, 깊이 몰입하는 시간.']};
   setPageHeading(...labels[state.route],true);renderWorkspace();
  }
  enhanceSelects();
@@ -675,16 +675,17 @@ function deletionJobsPanel(){
  return jobs.length?`<div class="ws-panel-head"><div><h2>마무리가 필요한 삭제</h2><p>파일이나 데이터 정리를 완료하지 못한 항목입니다. 다시 시도하면 남은 부분부터 처리합니다.</p></div></div><div class="ws-list">${jobs.map(j=>`<div class="ws-row"><span class="ws-avatar">${icon('refresh-cw')}</span><div class="ws-row-main"><strong>${j.kind==='idea'?'기능 요청':'등록 기능'} #${j.entityId}</strong><p>${dated(j.created)} · 삭제 처리 중</p></div>${button('retry-deletion','삭제 다시 시도','sq-secondary ws-danger',`data-job="${esc(j.id)}"`)}</div>`).join('')}</div>`:'';
 }
 function renderWorkspace(){
+ if(state.route==='immersion-room'){renderImmersionRoom();return;}
  if(state.route==='ideas'){renderIdeas();return;}
  if(state.route==='ax'){renderAxWorkspace();return;}
  const isAdmin=state.route==='admin';work.scope=isAdmin?'all':'mine';
- const tabs=isAdmin?[['tools','전체 기능'],['trash','휴지통'],['requests','권한 관리'],['taxonomy','조직·업무'],['admins','관리자 설정'],['storage','저장 공간'],['activity','사용 이력']]:[['tools','내 등록 기능'],['trash','휴지통'],['requests','권한 관리'],['feedback','피드백']];
+ const tabs=isAdmin?[['tools','전체 기능'],['trash','휴지통'],['requests','권한 관리'],['taxonomy','조직·업무'],['admins','관리자 설정'],['storage','저장 공간'],['activity','사용 이력'],['room-admin','몰입룸 신청']]:[['tools','내 등록 기능'],['contributions','내 기여도'],['trash','휴지통'],['requests','권한 관리'],['feedback','피드백']];
  if(!tabs.some(t=>t[0]===work.tab))work.tab='tools';
  const list=managementItems();const pending=requests.filter(r=>r.status==='대기'&&(isAdmin||r.ownerId===server.user.id)).length;
  let html=`<div class="ws-summary"><div><span>공유한 기능</span><strong>${list.filter(x=>!x.deleted).length}<small>개</small></strong></div><div><span>승인 대기</span><strong>${pending}<small>건</small></strong></div><div><span>새로운 피드백</span><strong>${list.reduce((n,x)=>n+x.comments.filter(c=>c.status==='접수').length,0)}<small>건</small></strong></div><div class="ws-summary-action">${button('register',icon('plus')+' 기능 등록','sq-primary')}</div></div><div class="ws-surface"><div class="sq-tabs ws-tabs">${tabs.map(([id,label])=>button('workspace-tab',label,'',`data-tab="${id}" aria-pressed="${work.tab===id}"`)).join('')}</div>`;
  if(work.tab==='tools'||work.tab==='trash'){
   const trash=work.tab==='trash',rows=list.filter(x=>!!x.deleted===trash);
-  html+=`<div class="ws-panel-head"><div><h2>${trash?'휴지통':isAdmin?'전체 등록 기능':'내가 공유한 기능'}</h2><p>${trash?'복원하면 다시 사용할 수 있습니다. 영구 삭제는 관리자만 가능하며 배포 파일과 관련 기록이 제거됩니다.':'등록 정보와 배포 버전, 조회 권한을 관리하세요.'}</p></div>${trash?badge(rows.length+'개'):''}</div><div class="ws-list">${rows.map(x=>`<article class="ws-row"><span class="sq-tool-icon" data-type="${esc(x.type)}">${icon(trash?'trash-2':x.icon)}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${esc(x.org)} · ${esc(x.type)} · v${x.active}${isAdmin?' · '+esc(x.owner):''}</p>${x.purgePending?'<p class="ws-message">영구 삭제 처리 중입니다. 완료되지 않았다면 다시 시도해 주세요.</p>':''}</div>${badge(x.purgePending?'삭제 처리 중':trash?'휴지통':x.approval?'승인 후 조회':'전체 공개')}<div class="sq-row-actions">${trash?`${x.purgePending?'':button('restore-tool','복원','sq-link',`data-id="${x.id}"`)}${isAdmin?button('purge-tool',x.purgePending?'삭제 다시 시도':'영구 삭제','sq-secondary ws-danger',`data-id="${x.id}"`):''}`:`${button('edit-tool','수정','sq-link',`data-id="${x.id}"`)}${button('manage-versions','버전','sq-link',`data-id="${x.id}"`)}${button('grant-users','권한','sq-link',`data-id="${x.id}"`)}${button('delete-tool',icon('trash-2'),'sq-icon ws-danger',`data-id="${x.id}" aria-label="${esc(x.name)} 삭제"`)}`}</div></article>`).join('')||blank(trash?'trash-2':'package-open',trash?'휴지통이 비어 있습니다.':'아직 등록한 기능이 없습니다.',trash?'휴지통으로 이동한 기능을 여기서 복원하거나 정리할 수 있습니다.':'잘 만든 도구를 동료들과 공유해 보세요.')}</div>`;
+  html+=`<div class="ws-panel-head"><div><h2>${trash?'휴지통':isAdmin?'전체 등록 기능':'내가 공유한 기능'}</h2><p>${trash?'복원하면 다시 사용할 수 있습니다. 영구 삭제하면 파일과 관련 기록은 제거되지만, 그동안의 기여도는 유지됩니다.':'등록 정보와 배포 버전, 조회 권한을 관리하세요.'}</p></div>${trash?badge(rows.length+'개'):''}</div><div class="ws-list">${rows.map(x=>`<article class="ws-row"><span class="sq-tool-icon" data-type="${esc(x.type)}">${icon(trash?'trash-2':x.icon)}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${esc(x.org)} · ${esc(x.type)} · v${x.active}${isAdmin?' · '+esc(x.owner):''}</p>${x.purgePending?'<p class="ws-message">영구 삭제 처리 중입니다. 완료되지 않았다면 다시 시도해 주세요.</p>':''}</div>${badge(x.purgePending?'삭제 처리 중':trash?'휴지통':x.approval?'승인 후 조회':'전체 공개')}<div class="sq-row-actions">${trash?`${x.purgePending?'':button('restore-tool','복원','sq-link',`data-id="${x.id}"`)}${isAdmin?button('purge-tool',x.purgePending?'삭제 다시 시도':'영구 삭제','sq-secondary ws-danger',`data-id="${x.id}"`):''}`:`${button('edit-tool','수정','sq-link',`data-id="${x.id}"`)}${button('manage-versions','버전','sq-link',`data-id="${x.id}"`)}${button('grant-users','권한','sq-link',`data-id="${x.id}"`)}${button('delete-tool',icon('trash-2'),'sq-icon ws-danger',`data-id="${x.id}" aria-label="${esc(x.name)} 삭제"`)}`}</div></article>`).join('')||blank(trash?'trash-2':'package-open',trash?'휴지통이 비어 있습니다.':'아직 등록한 기능이 없습니다.',trash?'휴지통으로 이동한 기능을 여기서 복원하거나 정리할 수 있습니다.':'잘 만든 도구를 동료들과 공유해 보세요.')}</div>`;
  }
 
  if(work.tab==='trash'&&isAdmin)html+=deletionJobsPanel();
@@ -697,7 +698,11 @@ function renderWorkspace(){
  if(work.tab==='admins')html+=`<div class="ws-panel-head"><div><h2>함께 운영하는 관리자</h2><p>기본 관리자는 설정 파일에서, 추가 관리자는 이 화면에서 관리합니다.</p></div>${server.user.baseAdmin?button('add-admin',icon('user-plus')+' 관리자 추가','sq-primary'):''}</div>${(work.admins||[]).map(a=>`<div class="ws-row"><span class="ws-avatar">${esc(a.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(a.name)}</strong><p>${esc(a.id)}</p></div>${badge(a.base?'기본 관리자':'추가 관리자')}${!a.base&&server.user.baseAdmin?button('remove-admin','해제','sq-secondary',`data-user="${esc(a.id)}"`):''}</div>`).join('')||blank('users','관리자 목록을 불러오는 중입니다.','잠시만 기다려 주세요.')}`;
  if(work.tab==='storage')html+=storageCapacityPanel();
  if(work.tab==='activity')html+=activityPanel();
+ if(work.tab==='room-admin'&&isAdmin)html+=adminRoomPanel();
+ if(work.tab==='contributions'&&!isAdmin)html+=contributionPanel();
  workspace.innerHTML=html+'</div>';mountIcons();enhanceSelects();
+ if(work.tab==='contributions'&&!isAdmin)ensureContributions();
+ if(work.tab==='room-admin'&&isAdmin)ensureAdminRoom();
 }
 function taxonomyPanel(){return `<div class="ws-panel-head"><div><h2>조직과 업무 분류</h2><p>저장하면 검색 필터와 등록·수정 화면에 바로 반영됩니다.</p></div></div><div class="ws-taxonomy">${[['organization','조직',organizations],['category','업무',server.categories||[]]].map(([kind,label,rows])=>`<section><div class="ws-panel-head"><h3>${label}</h3>${button('taxonomy-edit',icon('plus')+' 추가','sq-link',`data-kind="${kind}"`)}</div>${rows.map(x=>`<div class="ws-row"><span class="ws-order">${x.order}</span><div class="ws-row-main"><strong>${esc(x.name)}</strong><p>${x.enabled?'선택 가능':'사용 중지 · 기존 기록 유지'}</p></div>${button('taxonomy-edit',icon('pencil'),'sq-icon',`data-kind="${kind}" data-id="${esc(x.id)}" aria-label="${esc(x.name)} 수정"`)}</div>`).join('')}</section>`).join('')}</div>`;}
 
@@ -871,7 +876,7 @@ async function inbox(loadMore=false){
 Object.assign(actions,{
  'manage':()=>manage(),
  'admin-home':async()=>{work.tab='tools';closeModal();navigate('admin');},
- 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='activity')return openActivityHistory();if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='trash'&&server.user.role==='admin')await loadDeletionJobs();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;renderWorkspace();},
+ 'workspace-tab':async b=>{work.tab=b.dataset.tab;if(work.tab==='contributions')return openContributions();if(work.tab==='room-admin')return openAdminRoom();if(work.tab==='activity')return openActivityHistory();if(work.tab==='storage')await fetchStorageCapacity();if(work.tab==='trash'&&server.user.role==='admin')await loadDeletionJobs();if(work.tab==='admins')work.admins=(await requestAPI('/api/admins')).admins;renderWorkspace();},
  'admin-tab':b=>{work.tab=b.dataset.tab==='orgs'?'taxonomy':b.dataset.tab;closeModal();navigate(work.scope==='all'?'admin':'manage');if(work.tab==='activity')return openActivityHistory();},
  'storage-dialog':()=>originalManage('storage'),
  'access-filter':b=>{work.requestFilter=b.dataset.filter;renderWorkspace();},
@@ -883,10 +888,10 @@ Object.assign(actions,{
  'feedback-open':b=>detail(b.dataset.id,'comments'),
  'feedback-reply':b=>{const x=getItem(runtime.detailId),c=x.comments.find(c=>c.id===+b.dataset.id);work.feedback=c;openModal('피드백에 답변하기',x.name,`<div class="sq-callout"><strong>${esc(c.author)}</strong><br>${esc(c.text)}</div><form data-work-form="feedback"><label class="sq-field"><span>답변</span><textarea name="text" maxlength="4000" placeholder="검토 결과나 진행 상황을 알려주세요."></textarea></label>${x.canManage?`<label class="sq-field"><span>처리 상태</span><select name="status">${options(['접수','검토 중','반영 중','반영 완료','보류'],c.status)}</select></label>`:''}<div class="sq-actions"><button class="sq-primary">답변 저장</button></div></form>`);},
  'subscribe':async b=>{const x=getItem(b.dataset.id);await requestAPI(`/api/tools/${x.id}/subscription`,'PUT',{enabled:!x.subscribed});await afterWorkspaceSave(()=>detail(x.id,runtime.detailTab));},
- 'delete-tool':b=>{const x=getItem(b.dataset.id);ask('이 기능을 휴지통으로 이동할까요?',x.name+' · 목록과 다운로드가 중단됩니다. 등록자·관리자가 복원할 수 있습니다.',async()=>{await requestAPI(`/api/tools/${x.id}`,'DELETE',{expectedRevision:x.revision});await afterWorkspaceSave(()=>refresh());},'휴지통으로 이동');},
+ 'delete-tool':b=>{const x=getItem(b.dataset.id);ask('이 기능을 휴지통으로 이동할까요?',x.name+' — 목록과 다운로드가 중단됩니다. 등록자와 관리자가 복원할 수 있으며, 그동안의 기여도는 유지됩니다.',async()=>{await requestAPI(`/api/tools/${x.id}`,'DELETE',{expectedRevision:x.revision});await afterWorkspaceSave(()=>refresh());},'휴지통으로 이동');},
  'restore-tool':async b=>{const x=getItem(b.dataset.id);await requestAPI(`/api/tools/${x.id}/restore`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(()=>refresh());},
  'retry-deletion':b=>{const job=(work.deletionJobs||[]).find(j=>j.id===b.dataset.job);if(server.user.role!=='admin'||!job)return;ask('남은 삭제 작업을 마무리할까요?','이미 시작한 영구 삭제를 이어서 처리합니다. 복원할 수 없습니다.',async()=>{const result=await requestAPI(job.kind==='idea'?`/api/ideas/${job.entityId}`:`/api/tools/${job.entityId}/purge`,job.kind==='idea'?'DELETE':'POST',{expectedRevision:job.revision});await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'아직 정리하지 못한 항목이 있습니다. 잠시 후 다시 시도해 주세요.':'삭제를 완료했습니다.');},'삭제 마무리');},
- 'purge-tool':b=>{const x=getItem(b.dataset.id);if(server.user.role!=='admin'||!x?.deleted)return;ask('이 기능을 영구 삭제할까요?',x.name+' · 모든 배포 버전과 파일, 좋아요·다운로드 이력, 권한·피드백이 삭제됩니다. 삭제 후 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/tools/${x.id}/purge`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능을 영구 삭제했습니다.');},'영구 삭제');},
+ 'purge-tool':b=>{const x=getItem(b.dataset.id);if(server.user.role!=='admin'||!x?.deleted)return;ask('이 기능을 영구 삭제할까요?',x.name+' — 모든 배포 버전과 파일, 개별 이용 이력, 권한과 피드백이 삭제됩니다. 도구 이름과 기여도 합계는 보관하며, 삭제한 파일은 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/tools/${x.id}/purge`,'POST',{expectedRevision:x.revision});closeModal();await afterWorkspaceSave(async()=>{await refresh();await loadDeletionJobs();if(state.route==='admin')renderWorkspace();});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능을 영구 삭제했습니다.');},'영구 삭제');},
  'idea-delete':b=>{const i=work.idea;if(server.user.role!=='admin'||!i)return;ask('이 기능 요청을 삭제할까요?',i.name+' · 요청 내용, 답변, 첨부파일이 삭제되며 복원할 수 없습니다.',async()=>{const result=await requestAPI(`/api/ideas/${i.id}`,'DELETE',{expectedRevision:i.revision});closeModal();await afterWorkspaceSave(async()=>{await loadIdeas();navigate('ideas');});announce(result.pending&&!result.deleted?'삭제가 시작되었습니다. 요청 상세 또는 관리자 → 휴지통에서 남은 작업을 다시 시도할 수 있습니다.':'기능 요청을 삭제했습니다.');},'요청 삭제');},
  'taxonomy-edit':b=>{const kind=b.dataset.kind,x=[...organizations,...server.categories].find(x=>x.id===b.dataset.id);work.taxonomy={kind,id:x?.id};openModal(x?'분류 수정':'분류 추가',kind==='organization'?'조직 설정':'업무 설정',`<form data-work-form="taxonomy"><div class="sq-form-grid"><label class="sq-field wide"><span>이름</span><input name="name" value="${esc(x?.name||'')}" required maxlength="80"></label><label class="sq-field"><span>표시 순서</span><input name="order" type="number" min="0" max="999" value="${x?.order??10}" required></label><label class="sq-field"><span>사용 여부</span><select name="enabled"><option value="true" ${x?.enabled!==false?'selected':''}>사용</option><option value="false" ${x?.enabled===false?'selected':''}>사용 중지</option></select></label><label class="sq-field wide"><span>안내 담당자 (선택)</span><input name="owner" maxlength="100" value="${esc(x?.owner||'')}"></label></div><div class="sq-callout">이름을 바꿔도 기존 기능과의 연결은 유지됩니다. 사용 중지한 항목은 새로 선택할 수 없습니다.</div><div class="sq-actions"><button class="sq-primary">저장</button></div></form>`);},
  'access-decision':b=>{const reviewed=requests.find(r=>String(r.id)===b.dataset.request);if(!reviewed)return;work.access={id:b.dataset.request,status:b.dataset.status,expectedRevision:reviewed.requestRevision};openModal('조회 권한 '+b.dataset.status,'신청 처리',`<form data-work-form="access"><label class="sq-field"><span>처리 사유 ${b.dataset.status==='승인'?'(선택)':''}</span><textarea name="reason" maxlength="2000" ${b.dataset.status==='승인'?'':'required'} placeholder="신청자에게 안내할 내용을 적어주세요."></textarea></label><div class="sq-actions"><button class="sq-primary">${b.dataset.status}</button></div></form>`);},
@@ -900,7 +905,7 @@ Object.assign(actions,{
  'inbox-more':()=>inbox(true),
  'inbox-filter':b=>{work.unreadOnly=b.dataset.unread==='true';return inbox();},
  'read-all':async()=>{await requestAPI('/api/notifications/read','PUT',{all:true});nextNotificationRead();await afterWorkspaceSave(()=>inbox());},
- 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id),workspaceToken=n.target.type==='workspace'?runtime.detailLoadToken:null;await requestAPI('/api/notifications/read','PUT',{id:n.id});nextNotificationRead();if(workspaceToken!==null&&workspaceToken!==runtime.detailLoadToken)return;return afterWorkspaceSave(async()=>{await refresh();if(n.target.type==='workspace'){if(workspaceToken!==runtime.detailLoadToken)return;return openAxWorkspaceFile(n.target.id);}if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
+ 'notification-open':async b=>{const n=work.notifications.find(n=>n.id===b.dataset.id);if(!n)return;const workspaceToken=['workspace','room'].includes(n.target.type)?runtime.detailLoadToken:null,roomToken=n.target.type==='room'?++roomNotificationGeneration:null;await requestAPI('/api/notifications/read','PUT',{id:n.id});nextNotificationRead();if(workspaceToken!==null&&workspaceToken!==runtime.detailLoadToken||roomToken!==null&&roomToken!==roomNotificationGeneration)return;return afterWorkspaceSave(async()=>{if(n.target.type==='room')return openRoomNotification(n.target,roomToken);await refresh();if(n.target.type==='workspace'){if(workspaceToken!==runtime.detailLoadToken)return;return openAxWorkspaceFile(n.target.id);}if(n.target.type==='idea')return ideaDetail(n.target.id);if(n.target.type==='access'){work.tab='requests';closeModal();navigate(server.user.role==='admin'?'admin':'manage');return;}if(n.target.type==='admin'){closeModal();navigate(server.user.role==='admin'?'admin':'home');return;}return detail(n.target.id,n.target.type==='feedback'?'comments':'intro');});}
 });
 function userPicker(mode){work.userMode=mode;work.users=[];openModal(mode==='grant'?'조회 사용자 추가':'추가 관리자 지정',mode==='grant'?getItem(work.grantTool).name:'기본 관리자 전용',`<p class="sq-note">이 사이트에 로그인한 적이 있는 계정을 이름 또는 사번으로 검색하세요.</p><form data-work-form="user-search" class="ws-user-search"><input id="ws-user-search" type="search" placeholder="이름 또는 사번" aria-label="사용자 검색"><button class="sq-primary">검색</button></form><div id="ws-user-results"></div>`);}
 function renderUserChoices(){$('#ws-user-results').innerHTML=work.users.map(u=>`<div class="ws-row"><span class="ws-avatar">${esc(u.name.slice(0,1))}</span><div class="ws-row-main"><strong>${esc(u.name)}</strong><p>${esc(u.id)}</p></div>${button('choose-user',work.userMode==='admin'?'관리자 지정':'조회 승인','sq-secondary',`data-user="${esc(u.id)}"`)}</div>`).join('')||blank('search','일치하는 사용자가 없습니다.','먼저 사이트에 로그인한 계정인지 확인해 주세요.');mountIcons();}
@@ -1200,7 +1205,7 @@ rankRowHTML=function(row,rank){
  if(state.rankMode!=='people')return baseRankRow(row,rank);
  const name=row.name||'구성원',dept=row.org||'공통';
  const photo=server.dataMode!=='dummy'&&/^\/api\/people\/[0-9]{1,20}\/photo$/.test(row.photoUrl||'')?row.photoUrl:'';
- return `<div class="sq-rank-row sq-person-rank${row.isMe?' is-me':''}" data-rank="${rank}"><span class="sq-rank-number">${rank}</span><div class="sq-person-info"><div class="sq-person-identity"><span class="sq-person-dept" title="${esc(dept)}">${esc(dept)}</span><span class="sq-person-name-group"><strong class="sq-person-name" title="${esc(name)}">${esc(name)}</strong>${row.isMe?'<span class="sq-me-badge">나</span>':''}<span class="sq-person-avatar" aria-hidden="true"><span>${esc([...name][0]||'?')}</span>${photo?`<img class="sq-person-photo" src="${photo}" width="28" height="28" alt="" referrerpolicy="no-referrer">`:''}</span></span></div><span class="sq-person-counts"><span title="등록한 도구">${icon('package')}${num(row.registered)}</span><span title="받은 좋아요">${icon('heart')}${num(row.likes)}</span><span title="고유 다운로드">${icon('arrow-down-to-line')}${num(row.downloads)}</span></span></div><span class="sq-person-score"><strong>${num(row.score)}</strong><small>점</small></span></div>`;
+ return `<div class="sq-rank-row sq-person-rank${row.isMe?' is-me':''}" data-rank="${rank}"><span class="sq-rank-number">${rank}</span><div class="sq-person-info"><div class="sq-person-identity"><span class="sq-person-dept" title="${esc(dept)}">${esc(dept)}</span><span class="sq-person-name-group"><strong class="sq-person-name" title="${esc(name)}">${esc(name)}</strong>${row.isMe?'<span class="sq-me-badge">나</span>':''}<span class="sq-person-avatar" aria-hidden="true"><span>${esc([...name][0]||'?')}</span>${photo?`<img class="sq-person-photo" src="${photo}" width="28" height="28" alt="" referrerpolicy="no-referrer">`:''}</span></span></div><span class="sq-person-counts"><span title="등록한 도구">${icon('package')}${num(row.registered)}</span><span title="받은 좋아요">${icon('heart')}${num(row.likes)}</span><span title="다운로드 수">${icon('arrow-down-to-line')}${num(row.downloads)}</span></span></div><span class="sq-person-score"><strong>${num(row.score)}</strong><small>점</small></span></div>`;
 };
 renderRanks=function(){
  baseRenderRanks();const isPeople=state.rankMode==='people';
@@ -1237,10 +1242,10 @@ actions['rank-info']=()=>{
  const weights=peopleRanks?.weights||{registered:5,likes:2,downloads:1};
  const score=(label,weight,symbol,unit)=>`<div class="sq-score-tile"><span class="sq-score-symbol" aria-hidden="true">${icon(symbol)}</span><span class="sq-score-label">${label}</span><strong>${esc(weight)}<small>점</small></strong><span class="sq-score-unit">${unit}</span></div>`;
  const rule=(title,copy)=>`<li><span aria-hidden="true">${icon('check')}</span><div><strong>${title}</strong><p>${copy}</p></div></li>`;
- const formula=people?score('등록한 도구',weights.registered,'package','도구 1개당')+score('받은 좋아요',weights.likes,'heart','좋아요 1개당')+score('고유 다운로드',weights.downloads,'arrow-down-to-line','사용자·도구당 최초 1회'):score('좋아요',2,'heart','한 사람·한 도구당')+score('다운로드',1,'arrow-down-to-line','사용자·도구당 최초 1회');
+ const formula=people?score('등록한 도구',weights.registered,'package','도구 1개당')+score('받은 좋아요',weights.likes,'heart','좋아요 1개당')+score('다운로드 수',weights.downloads,'arrow-down-to-line','사용자·도구당 최초 1회'):score('좋아요',2,'heart','한 사람·한 도구당')+score('다운로드',1,'arrow-down-to-line','사용자·도구당 최초 1회');
  const periods=people?'<div class="sq-ranking-period-note">전체 기간에 쌓인 공유 활동을 합산합니다.</div>':`<div class="sq-ranking-periods" aria-label="집계 기간 안내"><div${state.rankMode==='recent'?' class="is-current"':''}><strong>실시간</strong><span>집계 시각부터 최근 7일</span></div><div${state.rankMode==='total'?' class="is-current"':''}><strong>누적</strong><span>전체 기간</span></div></div>`;
- const rules=people?rule('버전이 늘어도, 도구는 한 번만','등록한 도구 수와 동료들이 보낸 좋아요·다운로드를 더합니다.')+rule('반복 활동은 추가 점수 없이','본인 도구에 대한 반응, 반복 다운로드와 업데이트는 제외합니다.')+rule('현재 유효한 공유 활동만','취소한 좋아요, 삭제된 도구와 비활성 사용자는 반영하지 않습니다.'):rule('좋아요는 한 번씩 반영','취소하면 점수가 빠지고, 다시 눌러도 최초 좋아요 날짜를 유지합니다.')+rule('처음 받은 다운로드만 반영','같은 사람이 같은 도구를 다시 받거나 업데이트해도 점수가 늘지 않습니다.');
- const details=people?`<li>조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다.</li><li>${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 고유 다운로드 수 → 사번 순으로 정렬합니다.')}</li>`:'<li>실시간 다운로드 점수에는 전체 기간 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.</li><li>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위에 표시된 활동 수도 선택한 기간 기준입니다.</li><li>접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 전환하는 애니메이션은 재집계와 별개입니다.</li><li>다운로드 수는 서버의 파일 응답 기준이며 PC 설치 완료 수가 아닙니다.</li>';
+ const rules=people?rule('버전이 늘어도, 도구는 한 번만','등록한 도구 수와 동료들이 보낸 좋아요, 다운로드 수를 더합니다.')+rule('반복 활동은 추가 점수 없이','본인 도구에 대한 반응, 반복 다운로드와 업데이트는 제외합니다.')+rule('도구를 삭제해도 기여는 그대로','휴지통에 있는 도구도 합산하며, 영구 삭제한 도구는 삭제 시점의 점수를 보관합니다.'):rule('좋아요는 한 번씩 반영','취소하면 점수가 빠지고, 다시 눌러도 최초 좋아요 날짜를 유지합니다.')+rule('처음 받은 다운로드만 반영','같은 사람이 같은 도구를 다시 받거나 업데이트해도 점수가 늘지 않습니다.');
+ const details=people?`<li>조회 승인이 필요한 도구의 개별 정보는 이 화면에 표시하지 않습니다. 내 도구별 점수는 등록 관리의 내 기여도에서 확인할 수 있습니다.</li><li>사용 중인 도구의 취소한 좋아요와 비활성 사용자는 반영하지 않습니다. 이 기능 적용 전에 영구 삭제된 도구는 기록이 없어 복구할 수 없습니다.</li><li>${esc(peopleRanks?.tieBreak||'동점이면 등록 도구 수 → 받은 좋아요 수 → 다운로드 수 → 사번 순으로 정렬합니다.')}</li>`:'<li>실시간 다운로드 점수에는 전체 기간 최초 수신일이 최근 7일인 경우만 반영합니다. URL 클릭은 다운로드 점수에 포함하지 않습니다.</li><li>동점이면 해당 기간의 다운로드 수 → 좋아요 수 → 최근 도구 등록일 순입니다. 순위에 표시된 활동 수도 선택한 기간 기준입니다.</li><li>접속·새로고침·좋아요·다운로드 후 재집계합니다. 5초마다 1–5위와 6–10위를 전환하는 애니메이션은 재집계와 별개입니다.</li><li>다운로드 수는 서버의 파일 응답 기준이며 PC 설치 완료 수가 아닙니다.</li>';
  openModal(people?'함께 만드는 사람들 · 집계 기준':'동료들이 많이 찾는 도구 · 집계 기준','순위 안내',`<section class="sq-ranking-guide"><p class="sq-ranking-intro">${people?'도구를 나눈 동료들을 소개합니다. 등록한 도구와 동료들의 반응을 바탕으로 공유 기여도 상위 10명을 보여드립니다.':'동료들의 좋아요와 다운로드를 모아 상위 10개 도구를 보여드립니다. 최근의 관심은 실시간으로, 꾸준한 이용은 누적으로 살펴보세요.'}</p><div class="sq-score-grid${people?' sq-score-grid-three':''}">${formula}</div>${periods}<div class="sq-ranking-rules"><h3>이렇게 반영해요</h3><ul>${rules}</ul></div><details class="sq-ranking-details"><summary>세부 집계 기준<span aria-hidden="true">${icon('chevron-down')}</span></summary><ul>${details}</ul></details><footer class="sq-ranking-footer"><span>${icon('refresh-cw')} 최신 활동으로 다시 확인할 수 있어요.</span>${button('rank-refresh','집계 새로고침','sq-secondary')}</footer></section>`);
 };
 function workflowDiagram(workflow){
@@ -1464,6 +1469,298 @@ root.addEventListener('change',e=>{
  }
  if(!e.target.matches('[data-grant-select]'))return;
  const key=e.target.dataset.grantSelect;e.target.checked?s.selected.add(key):s.selected.delete(key);updateGrantSaveButton(s);
+});
+
+// Personal contribution detail is fetched only when this management tab opens.
+function contributionState(){
+ const user=String(server.user.id);
+ if(!work.contribution||work.contribution.user!==user)work.contribution={user,token:0,requested:false,loading:false,data:null,error:'',page:1};
+ return work.contribution;
+}
+function contributionVisible(){return state.route==='manage'&&work.tab==='contributions';}
+function renderContributions(){if(contributionVisible())renderWorkspace();}
+function ensureContributions(){const s=contributionState();if(!s.requested){s.requested=true;void loadContributions(1);}}
+async function loadContributions(page=1){
+ const s=contributionState(),token=++s.token;
+ s.requested=true;s.loading=true;s.error='';s.page=Math.max(1,Number(page)||1);s.data=null;renderContributions();
+ try{
+  const data=await requestAPI(`/api/me/contributions?page=${s.page}&pageSize=20`);
+  if(work.contribution!==s||String(server.user.id)!==s.user||token!==s.token)return false;
+  if(!contributionVisible()){s.requested=false;return false;}
+  s.data=data;s.page=data.page;return true;
+ }catch(error){
+  if(work.contribution!==s||String(server.user.id)!==s.user||token!==s.token)return false;
+  if(!contributionVisible()){s.requested=false;return false;}
+  s.error=error.status?error.message:'기여도 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';return false;
+ }finally{
+  if(work.contribution===s&&token===s.token){s.loading=false;renderContributions();}
+ }
+}
+function openContributions(){
+ work.tab='contributions';
+ // Mark before navigating: rendering the new tab must not start a second request.
+ contributionState().requested=true;
+ if(state.route!=='manage')navigate('manage');
+ return loadContributions(1);
+}
+function contributionPanel(){
+ const s=contributionState(),data=s.data,n=value=>Math.max(0,Number(value)||0).toLocaleString('ko-KR');
+ const heading=`<header class="ws-contribution-head"><div><h2>내 기여도</h2><p>내가 나눈 도구가 동료들의 업무에 얼마나 쓰였는지 확인해 보세요.</p></div>${button('contribution-refresh',icon('refresh-cw')+' 새로고침','sq-secondary',s.loading?'disabled':'')}</header>`;
+ let body;
+ if(s.error)body=`<div class="ws-contribution-empty is-error" role="alert">${icon('circle-alert')}<strong>내역을 확인하지 못했어요.</strong><p>${esc(s.error)}</p>${button('contribution-retry','다시 시도','sq-secondary')}</div>`;
+ else if(!data)body=`<div class="ws-contribution-empty" role="status">${icon('chart-no-axes-combined')}<strong>기여도 내역을 불러오고 있어요.</strong><p>등록한 도구와 동료들의 반응을 모아 확인합니다.</p></div>`;
+ else{
+  const summary=data.summary,weights=data.weights;
+  const metrics=[['registered','등록한 도구','개','package'],['likes','받은 좋아요','개','heart'],['downloads','다운로드 수','회','download']];
+  body=`<div class="ws-contribution-overview"><div class="ws-contribution-total"><span>전체 기여도</span><strong>${n(summary.score)}<small>점</small></strong><p>전체 기간 기준</p></div><div class="ws-contribution-metrics">${metrics.map(([key,label,unit,symbol])=>`<div><span>${icon(symbol)}${label}</span><strong>${n(summary[key])}<small>${unit}</small></strong><p>${n(summary[key])} × ${n(weights[key])}점 <b>${n(summary[key]*weights[key])}점</b></p></div>`).join('')}</div></div><div class="ws-contribution-retention">${icon('history')}<p>도구를 삭제해도 기여도는 유지됩니다. 영구 삭제한 도구는 삭제 시점의 점수를 보관합니다.</p></div>`;
+  if(!data.totalItems)body+=`<div class="ws-contribution-empty">${icon('package-open')}<strong>아직 등록한 도구가 없습니다.</strong><p>도구를 공유하면 등록 점수와 동료들의 반응을 여기서 확인할 수 있어요.</p>${button('register','첫 도구 등록하기','sq-primary')}</div>`;
+  else{
+   const statuses={active:'사용 중',trash:'휴지통',deleted:'삭제됨'};
+   const cell=(row,key)=>`<td><strong>${n(row[key]*weights[key])}<small>점</small></strong><span>${n(row[key])}${key==='registered'?'개':key==='likes'?'개':'회'} × ${n(weights[key])}점</span></td>`;
+   body+=`<div class="ws-contribution-table-head"><h3>도구별 점수</h3><span>총 ${n(data.totalItems)}개</span></div><div class="ws-contribution-table-wrap" role="region" aria-label="도구별 기여도" tabindex="0"><table class="ws-contribution-table"><caption class="ws-activity-sr">내가 등록한 도구별 등록 점수, 받은 좋아요 점수, 다운로드 수 점수와 합계</caption><thead><tr><th scope="col">도구</th><th scope="col">상태</th><th scope="col">등록</th><th scope="col">좋아요</th><th scope="col">다운로드</th><th scope="col">합계</th></tr></thead><tbody>${data.items.map(row=>`<tr><th scope="row"><strong title="${esc(row.name)}">${esc(row.name)}</strong><span>도구 #${esc(row.id)}${row.status==='deleted'?' / 삭제 시점의 점수':''}</span></th><td><span class="ws-contribution-status" data-status="${esc(row.status)}">${statuses[row.status]||'확인 중'}</span></td>${cell(row,'registered')}${cell(row,'likes')}${cell(row,'downloads')}<td class="ws-contribution-row-total"><strong>${n(row.score)}<small>점</small></strong></td></tr>`).join('')}</tbody></table></div><footer class="ws-contribution-pagination"><span>20개씩 표시</span><nav aria-label="기여도 내역 페이지">${button('contribution-previous','이전','sq-secondary',data.page<=1?'disabled':'')}<span>${n(data.page)} / ${n(data.totalPages)}</span>${button('contribution-next','다음','sq-secondary',data.page>=data.totalPages?'disabled':'')}</nav></footer>`;
+  }
+  body+=`<details class="ws-contribution-rules"><summary>점수는 어떻게 계산하나요?${icon('chevron-down')}</summary><ul><li>도구 1개당 ${n(weights.registered)}점입니다. 새 버전을 올려도 등록 점수가 중복되지 않습니다.</li><li>받은 좋아요 1개당 ${n(weights.likes)}점, 같은 동료가 같은 도구를 처음 내려받으면 ${n(weights.downloads)}점입니다.</li><li>내 도구에 대한 내 반응, 반복 다운로드와 업데이트는 점수에 포함하지 않습니다. 사용 중인 도구의 좋아요를 취소하면 해당 점수는 빠집니다.</li><li>휴지통에 있는 도구와 삭제된 도구도 합산합니다. 이 기능 적용 전에 영구 삭제되어 기록이 남아 있지 않은 도구는 복구할 수 없습니다.</li></ul></details>`;
+ }
+ return `<section class="ws-contribution" aria-label="내 기여도 내역" aria-busy="${s.loading}">${heading}${body}</section>`;
+}
+actions['contribution-open']=()=>openContributions();
+actions['contribution-refresh']=()=>{const s=contributionState();if(!s.loading)return loadContributions(1);};
+actions['contribution-retry']=()=>{const s=contributionState();if(!s.loading)return loadContributions(s.page);};
+actions['contribution-previous']=()=>{const s=contributionState();if(!s.loading&&s.data&&s.page>1)return loadContributions(s.page-1);};
+actions['contribution-next']=()=>{const s=contributionState();if(!s.loading&&s.data&&s.page<s.data.totalPages)return loadContributions(s.page+1);};
+
+// AI 몰입룸: dates are civil dates in Korea, never the browser's local timezone.
+const roomSlots={all:'종일',am:'오전',pm:'오후'};
+const roomStatuses={pending:'승인 대기',approved:'예약 확정',rejected:'반려',cancelled:'취소'};
+function roomToday(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).filter(p=>['year','month','day'].includes(p.type)).reduce((parts,p)=>({...parts,[p.type]:p.value}),{});}
+function roomTodayString(){const d=roomToday();return `${d.year}-${d.month}-${d.day}`;}
+function roomDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return null;const d=new Date(value+'T00:00:00Z');return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value?d:null;}
+function roomAddDays(value,days){const d=roomDate(value);if(!d)return '';d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+function roomBounds(month){const first=roomDate(month+'-01');const start=roomAddDays(month+'-01',-first.getUTCDay());return {start,end:roomAddDays(start,41)};}
+function roomMonthLabel(month){const [y,m]=month.split('-');return `${y}년 ${Number(m)}월`;}
+function roomPeriod(row){return row.startDate===row.endDate?row.startDate:`${row.startDate} ~ ${row.endDate}`;}
+function roomState(){
+ const user=String(server.user.id);
+ if(!work.immersionRoom||work.immersionRoom.user!==user){const today=roomTodayString();work.immersionRoom={user,today,month:today.slice(0,7),loadToken:0,mutation:0,loading:false,loadedMonth:null,reservations:[],holidays:[],sources:[],holidayNotice:'',error:'',notice:'',saving:false,patching:false,draft:{startDate:today,endDate:today,slot:'all',title:'',purpose:''},attempt:null,formError:'',selectionAnchor:today,detailId:null};}
+ return work.immersionRoom;
+}
+function roomCurrent(s){return work.immersionRoom===s&&String(server.user.id)===s.user;}
+function roomVisible(){return state.route==='immersion-room';}
+function roomRender(){if(roomVisible())renderImmersionRoom();}
+async function loadImmersionRoom(){
+ const s=roomState(),token=++s.loadToken,month=s.month,mutation=s.mutation,{start,end}=roomBounds(month);
+ s.loading=true;s.error='';roomRender();
+ const query=`?start=${start}&end=${end}`;
+ const [reservations,holidays]=await Promise.allSettled([requestAPI('/api/immersion-room'+query,'GET',undefined,{timeoutMs:10000}),requestAPI('/api/immersion-room/holidays'+query,'GET',undefined,{timeoutMs:10000})]);
+ if(!roomCurrent(s)||token!==s.loadToken||month!==s.month||mutation!==s.mutation)return false;
+ s.loading=false;
+ if(reservations.status==='fulfilled'){
+  const data=reservations.value;s.reservations=data.reservations;s.loadedMonth=month;s.canManage=data.canManage;s.historyTruncated=data.historyTruncated===true;
+  if(roomDate(data.today))s.today=data.today;
+ }else{s.error='예약 현황을 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.';}
+ if(holidays.status==='fulfilled'){s.holidays=holidays.value.holidays||[];s.holidayNotice=holidays.value.notice||'';s.sources=holidays.value.sources||[];s.coverage=holidays.value.coverage;}
+ else{s.holidays=[];s.sources=[];s.holidayNotice='공휴일 정보를 불러오지 못했습니다. 예약 현황은 그대로 확인할 수 있습니다.';}
+ roomRender();return reservations.status==='fulfilled';
+}
+function openImmersionRoom(){closeModal();const s=roomState();s.error='';navigate('immersion-room');return loadImmersionRoom();}
+function roomSetMonth(offset){const s=roomState(),d=roomDate(s.month+'-01');d.setUTCMonth(d.getUTCMonth()+offset);s.month=d.toISOString().slice(0,7);s.reservations=[];s.holidays=[];s.loadedMonth=null;s.notice='';return loadImmersionRoom();}
+function roomSelect(start,end=start){const s=roomState();if(s.saving)return;if(!roomDate(start)||!roomDate(end))return;[start,end]=[start,end].sort();s.draft.startDate=start;s.draft.endDate=end;s.formError='';roomRender();}
+function roomActive(row){return row.status==='pending'||row.status==='approved';}
+function roomPill(row){return `<span class="ir-status" data-status="${esc(row.status)}">${esc(roomStatuses[row.status]||row.status)}</span>`;}
+function roomCalendar(s){
+ const {start}=roomBounds(s.month),holidays=new Map(s.holidays.map(h=>[h.date,h.name]));
+ let weeks='';
+ for(let week=0;week<6;week++){
+  let cells='';
+  for(let weekday=0;weekday<7;weekday++){
+   const date=roomAddDays(start,week*7+weekday),other=date.slice(0,7)!==s.month,selected=date>=s.draft.startDate&&date<=s.draft.endDate,holiday=holidays.get(date),rows=s.reservations.filter(r=>roomActive(r)&&r.startDate<=date&&r.endDate>=date);
+   cells+=`<div class="ir-day${other?' is-outside':''}${selected?' is-selected':''}${date===s.today?' is-today':''}" role="gridcell" data-room-date="${date}" data-weekday="${weekday}"${holiday?' data-holiday="true"':''}><button type="button" class="ir-date" data-action="room-day" data-date="${date}" aria-label="${date}${holiday?' '+esc(holiday):''} 선택" aria-pressed="${selected}"${date===s.today?' aria-current="date"':''}><span>${Number(date.slice(-2))}</span>${holiday?`<small title="${esc(holiday)}">${esc(holiday)}</small>`:''}</button><div class="ir-day-bookings">${rows.map(row=>`<button type="button" class="ir-booking" data-action="room-detail" data-id="${esc(row.id)}" data-status="${esc(row.status)}" title="${esc(row.title)} / ${roomSlots[row.slot]} / ${roomStatuses[row.status]}" aria-label="${esc(row.title)}, ${roomSlots[row.slot]}, ${roomStatuses[row.status]}"><span>${roomSlots[row.slot]}</span><strong>${esc(row.title)}</strong></button>`).join('')}</div></div>`;
+  }
+  weeks+=`<div class="ir-week" role="row">${cells}</div>`;
+ }
+ return `<div class="ir-calendar" role="grid" aria-label="${roomMonthLabel(s.month)} 예약 달력" aria-busy="${s.loading}"><div class="ir-weekdays" role="row">${['일','월','화','수','목','금','토'].map((day,i)=>`<span role="columnheader" data-weekday="${i}">${day}</span>`).join('')}</div>${weeks}</div>`;
+}
+function roomRequestForm(s){const d=s.draft,disabled=s.saving?'disabled':'';return `<aside class="ir-request"><div class="ir-section-label">나의 몰입 시간</div><h2>${s.canManage?'예약 등록':'예약 신청'}</h2><p class="ir-help">달력에서 날짜나 기간을 선택하거나 직접 입력하세요.</p><form id="ir-request-form"><fieldset ${disabled}><div class="ir-date-fields"><label><span>시작일</span><input type="date" name="startDate" min="${s.today}" value="${esc(d.startDate)}" required></label><label><span>종료일</span><input type="date" name="endDate" min="${esc(d.startDate||s.today)}" value="${esc(d.endDate)}" required></label></div><div class="ir-slot-field"><span>이용 시간</span><div class="ir-slot-options">${Object.entries(roomSlots).map(([value,label])=>`<label><input type="radio" name="slot" value="${value}" ${d.slot===value?'checked':''}><span>${label}</span></label>`).join('')}</div></div><label class="ir-field"><span>예약 제목</span><input name="title" value="${esc(d.title)}" required maxlength="100" placeholder="예: 보고서 자동화 과제 개발"></label><label class="ir-field"><span>이용 목적</span><textarea name="purpose" rows="3" required maxlength="2000" placeholder="어떤 과제나 교육을 진행할 예정인가요?">${esc(d.purpose)}</textarea></label></fieldset>${s.formError?`<p class="ir-form-error" role="alert">${esc(s.formError)}</p>`:''}<button class="sq-primary ir-submit" type="submit" ${disabled||s.loading||s.loadedMonth!==s.month?'disabled':''}>${s.saving?'예약 저장 중…':s.canManage?'예약 등록':'예약 신청'}</button><p class="ir-form-note">${s.canManage?'관리자가 등록한 예약은 바로 확정됩니다.':'신청 후 관리자가 승인하면 예약이 확정됩니다.'} 승인 대기 중인 시간도 다른 예약과 겹칠 수 없습니다.</p></form></aside>`;}
+function roomSelectionSummary(s){const selected=s.reservations.filter(r=>roomActive(r)&&r.startDate<=s.draft.endDate&&r.endDate>=s.draft.startDate);return `<section class="ir-selection-summary"><h3>선택한 기간의 예약 <small>${selected.length}건</small></h3>${selected.length?`<div class="ir-summary-list">${selected.map(row=>`<button type="button" data-action="room-detail" data-id="${esc(row.id)}" class="ir-summary-row"><span><strong>${esc(row.title)}</strong><small>${esc(roomPeriod(row))} / ${roomSlots[row.slot]} / ${esc(row.owner.name)}</small></span>${roomPill(row)}${icon('chevron-right')}</button>`).join('')}</div>`:'<p>선택한 기간에 등록된 예약이 없습니다.</p>'}</section>`;}
+function renderImmersionRoom(){
+ const s=roomState(),inactive=s.reservations.filter(r=>!roomActive(r));
+ workspace.innerHTML=`${s.notice?`<p class="ir-notice" role="status">${icon('check-circle-2')}${esc(s.notice)}</p>`:''}<div class="ir-layout"><section class="ir-calendar-panel"><header class="ir-calendar-head"><div><span class="ir-section-label">공간 예약</span><h2>${roomMonthLabel(s.month)}</h2></div><nav aria-label="달력 월 이동">${button('room-previous',icon('chevron-left'),'ir-icon-button','aria-label="이전 달"')}${button('room-today','오늘','ir-today')}${button('room-next',icon('chevron-right'),'ir-icon-button','aria-label="다음 달"')}${button('room-refresh',icon('refresh-cw'),'ir-icon-button',`aria-label="예약 현황 새로고침" ${s.loading?'disabled':''}`)}</nav></header><div class="ir-calendar-meta"><div class="ir-legend"><span data-status="approved">예약 확정</span><span data-status="pending">승인 대기</span></div><p>${s.loading?'예약 현황을 불러오는 중…':'날짜 선택 또는 드래그로 기간 지정'}</p></div>${s.error?`<div class="ir-load-error" role="alert"><p>${esc(s.error)}</p>${button('room-refresh','다시 시도','sq-secondary')}</div>`:''}${roomCalendar(s)}${s.holidayNotice?`<p class="ir-holiday-notice" role="status">${esc(s.holidayNotice)}</p>`:''}</section><div class="ir-sidebar">${roomRequestForm(s)}${roomSelectionSummary(s)}</div></div>${inactive.length?`<details class="ir-history"><summary>${s.canManage?'반려 및 취소 내역':'내 신청 처리 내역'}<span>${inactive.length}건${s.historyTruncated?' 이상':''}${icon('chevron-down')}</span></summary>${inactive.map(row=>`<button type="button" data-action="room-detail" data-id="${esc(row.id)}" class="ir-summary-row"><span><strong>${esc(row.title)}</strong><small>${esc(roomPeriod(row))} / ${roomSlots[row.slot]} / ${esc(row.owner.name)}</small></span>${roomPill(row)}${icon('chevron-right')}</button>`).join('')}${s.historyTruncated?'<p class="ir-help">한 번에 최근 처리 내역 100건까지 표시합니다.</p>':''}</details>`:''}`;
+ mountIcons();
+}
+function roomUUID(){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('');return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;}
+function roomDraftError(d,today){
+ if(!roomDate(d.startDate)||!roomDate(d.endDate))return '시작일과 종료일을 확인해 주세요.';
+ if(d.startDate<today)return '오늘 이후의 날짜를 선택해 주세요.';
+ if(d.endDate<d.startDate)return '종료일은 시작일보다 빠를 수 없습니다.';
+ if((roomDate(d.endDate)-roomDate(d.startDate))/86400000>=31)return '한 번에 최대 31일까지 신청할 수 있습니다.';
+ if(!Object.hasOwn(roomSlots,d.slot))return '이용 시간을 선택해 주세요.';
+ if(!d.title.trim()||d.title.trim().length>100)return '예약 제목을 100자 이내로 입력해 주세요.';
+ if(!d.purpose.trim()||d.purpose.trim().length>2000)return '이용 목적을 2,000자 이내로 입력해 주세요.';
+ return '';
+}
+async function submitImmersionRoom(){
+ const s=roomState();if(s.saving||s.loading||s.loadedMonth!==s.month)return false;
+ const d={...s.draft,title:s.draft.title.trim(),purpose:s.draft.purpose.trim()};s.formError=roomDraftError(d,s.today);if(s.formError){roomRender();return false;}
+ const fingerprint=JSON.stringify(d);if(s.attempt?.fingerprint!==fingerprint)s.attempt={fingerprint,id:roomUUID()};
+ s.saving=true;s.formError='';s.notice='';roomRender();
+ try{
+  const result=await requestAPI('/api/immersion-room/reservations','POST',{...d,clientRequestId:s.attempt.id});
+  if(!roomCurrent(s))return false;
+  s.mutation++;s.loadToken++;s.loading=false;s.draft.title='';s.draft.purpose='';s.attempt=null;
+  s.notice=result.reservation.status==='approved'?'예약이 확정되었습니다.':result.reservation.status==='pending'?'신청이 접수되었습니다. 관리자 승인을 기다려 주세요.':`이 신청은 이미 ${roomStatuses[result.reservation.status]||'처리 완료'} 상태입니다. 달력 아래 처리 내역에서 확인해 주세요.`;
+  if(roomVisible()){const loaded=await loadImmersionRoom();if(!loaded&&roomCurrent(s))s.notice+=' 예약은 저장되었지만 달력을 새로 불러오지 못했습니다.';}
+  return true;
+ }catch(error){if(roomCurrent(s))s.formError=error.status?error.message:'서버 응답을 확인하지 못했습니다. 같은 내용으로 다시 신청하면 중복 등록 없이 결과를 확인합니다.';return false;}
+ finally{if(roomCurrent(s)){s.saving=false;roomRender();}}
+}
+function openRoomDetail(id){
+ const s=roomState(),row=s.reservations.find(r=>String(r.id)===String(id));if(!row)return;s.detailId=row.id;s.detailError='';s.detailReason='';renderRoomDetail();
+}
+function renderRoomDetail(){
+ const s=roomState(),row=s.reservations.find(r=>r.id===s.detailId);if(!row)return;
+ openModal(row.title,'AI 몰입룸 예약',`<section class="ir-detail">${roomPill(row)}<dl><div><dt>이용 기간</dt><dd>${esc(roomPeriod(row))}</dd></div><div><dt>이용 시간</dt><dd>${roomSlots[row.slot]}</dd></div><div><dt>신청자</dt><dd>${esc(row.owner.name)}<small>${esc(row.owner.org||'')}</small></dd></div></dl><div class="ir-purpose"><h3>이용 목적</h3><p>${esc(row.purpose)}</p></div>${row.reason?`<div class="ir-decision-reason"><h3>처리 사유</h3><p>${esc(row.reason)}</p></div>`:''}${row.canApprove||row.canReject||row.canCancel?`<label class="ir-field"><span>처리 사유 (선택)</span><textarea id="ir-decision-reason" maxlength="500" rows="2" placeholder="신청자에게 전달할 내용이 있으면 적어주세요." ${s.patching?'disabled':''}>${esc(s.detailReason||'')}</textarea></label>`:''}${s.detailError?`<p class="ir-form-error" role="alert">${esc(s.detailError)}</p>`:''}<div class="ir-detail-actions">${row.canCancel?button('room-cancel','예약 취소','sq-secondary',s.patching?'disabled':''):''}${row.canReject?button('room-reject','반려','sq-secondary',s.patching?'disabled':''):''}${row.canApprove?button('room-approve','승인','sq-primary',s.patching?'disabled':''):''}</div></section>`);
+ s.detailDialogToken=runtime.detailLoadToken;
+}
+async function changeRoomStatus(status){
+ const s=roomState(),row=s.reservations.find(r=>r.id===s.detailId);
+ if(!row||s.patching||(status==='approved'&&!row.canApprove)||(status==='rejected'&&!row.canReject)||(status==='cancelled'&&!row.canCancel))return false;
+ const reason=$('#ir-decision-reason')?.value||'',id=row.id,token=s.detailDialogToken;s.detailReason=reason;
+ if(reason.length>500){s.detailError='처리 사유는 500자 이내로 입력해 주세요.';renderRoomDetail();return false;}
+ s.patching=true;s.detailError='';$('#sq-dialog-body')?.querySelectorAll('.ir-detail button').forEach(b=>b.disabled=true);
+ try{
+  const result=await requestAPI('/api/immersion-room/reservations/'+encodeURIComponent(id),'PATCH',{status,expectedRevision:row.revision,reason});
+  if(!roomCurrent(s))return false;s.mutation++;s.loadToken++;s.loading=false;
+  const index=s.reservations.findIndex(r=>r.id===id);if(index>=0)s.reservations[index]=result.reservation;
+  s.notice=`예약을 ${roomStatuses[status]} 상태로 변경했습니다.`;
+  if(runtime.detailLoadToken===token&&$('#sq-dialog').open)closeModal();
+  if(roomVisible()){const loaded=await loadImmersionRoom();if(!loaded&&roomCurrent(s))s.notice+=' 변경은 저장되었지만 달력을 새로 불러오지 못했습니다.';}
+  return true;
+ }catch(error){
+  if(roomCurrent(s)&&runtime.detailLoadToken===token&&$('#sq-dialog').open){s.detailError=error.status?error.message:'변경 결과를 확인하지 못했습니다. 창을 닫고 예약 현황을 새로고침해 주세요.';s.patching=false;renderRoomDetail();}
+  return false;
+ }finally{if(roomCurrent(s)){s.patching=false;roomRender();}}
+}
+Object.assign(actions,{
+ 'immersion-room':()=>openImmersionRoom(),
+ 'room-previous':()=>roomSetMonth(-1),'room-next':()=>roomSetMonth(1),
+ 'room-today':()=>{const s=roomState();s.month=s.today.slice(0,7);s.selectionAnchor=s.today;roomSelect(s.today);return loadImmersionRoom();},
+ 'room-refresh':()=>{if(!roomState().loading)return loadImmersionRoom();},
+ 'room-day':b=>{if(Date.now()<roomSuppressClick)return;const s=roomState();s.selectionAnchor=b.dataset.date;roomSelect(b.dataset.date);$(`[data-action="room-day"][data-date="${b.dataset.date}"]`)?.focus();},
+ 'room-detail':b=>openRoomDetail(b.dataset.id),
+ 'room-approve':()=>changeRoomStatus('approved'),'room-reject':()=>changeRoomStatus('rejected'),'room-cancel':()=>changeRoomStatus('cancelled')
+});
+let roomDrag=null,roomSuppressClick=0;
+function roomPaintRange(start,end){[start,end]=[start,end].sort();$$('[data-room-date]').forEach(cell=>{const selected=cell.dataset.roomDate>=start&&cell.dataset.roomDate<=end;cell.classList.toggle('is-selected',selected);cell.querySelector('.ir-date')?.setAttribute('aria-pressed',String(selected));});}
+root.addEventListener('pointerdown',e=>{const cell=e.target.closest('[data-room-date]');if(!cell||e.target.closest('[data-action="room-detail"]')||e.button!==0||e.pointerType!=='mouse'||!roomVisible()||roomState().saving)return;roomDrag={start:cell.dataset.roomDate,end:cell.dataset.roomDate,user:roomState().user};});
+root.addEventListener('pointermove',e=>{if(!roomDrag)return;const cell=e.target.closest('[data-room-date]');if(cell&&roomVisible()){roomDrag.end=cell.dataset.roomDate;roomPaintRange(roomDrag.start,roomDrag.end);}});
+document.addEventListener('pointerup',()=>{if(!roomDrag)return;const range=roomDrag;roomDrag=null;if(roomVisible()&&range.user===roomState().user){roomSuppressClick=Date.now()+350;roomState().selectionAnchor=range.start;roomSelect(range.start,range.end);}});
+document.addEventListener('pointercancel',()=>{roomDrag=null;roomRender();});
+root.addEventListener('click',e=>{const cell=e.target.closest('[data-room-date]');if(!cell||e.target.closest('button, a, input, select, textarea, [data-action]')||Date.now()<roomSuppressClick||!roomVisible()||roomState().saving)return;const s=roomState();s.selectionAnchor=cell.dataset.roomDate;roomSelect(cell.dataset.roomDate);});
+root.addEventListener('keydown',e=>{
+ const b=e.target.closest('[data-action="room-day"]');if(!b||!roomVisible())return;
+ const offsets={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7};if(!Object.hasOwn(offsets,e.key))return;e.preventDefault();
+ const date=roomAddDays(b.dataset.date,offsets[e.key]),s=roomState(),{start,end}=roomBounds(s.month);if(date<start||date>end)return;
+ if(e.shiftKey)roomSelect(s.selectionAnchor||b.dataset.date,date);
+ $(`[data-action="room-day"][data-date="${date}"]`)?.focus();
+});
+root.addEventListener('input',e=>{const form=e.target.closest('#ir-request-form');if(!form)return;const s=roomState();if(s.saving)return;const {name,value}=e.target;if(Object.hasOwn(s.draft,name))s.draft[name]=value;if(['startDate','endDate'].includes(name))roomPaintRange(s.draft.startDate,s.draft.endDate);});
+root.addEventListener('change',e=>{if(!e.target.closest('#ir-request-form'))return;const s=roomState();if(s.saving)return;if(Object.hasOwn(s.draft,e.target.name))s.draft[e.target.name]=e.target.value;if(['startDate','endDate'].includes(e.target.name)){roomPaintRange(s.draft.startDate,s.draft.endDate);const end=$('#ir-request-form [name="endDate"]');if(end)end.min=s.draft.startDate||s.today;const summary=$('.ir-selection-summary');if(summary){summary.outerHTML=roomSelectionSummary(s);mountIcons();}}});
+root.addEventListener('submit',e=>{if(e.target.id!=='ir-request-form')return;e.preventDefault();e.stopImmediatePropagation();void submitImmersionRoom();},true);
+
+// 관리자 몰입룸 예약: 상태 변경은 기존 예약 API와 revision 검사를 사용합니다.
+function adminRoomState(){
+ const user=String(server.user.id);
+ if(!work.adminRoom||work.adminRoom.user!==user)work.adminRoom={user,filter:'pending',page:1,token:0,requested:false,loading:false,data:null,error:'',busy:false,notice:''};
+ return work.adminRoom;
+}
+function adminRoomVisible(){return state.route==='admin'&&work.tab==='room-admin'&&server.user.role==='admin';}
+function adminRoomRender(){if(adminRoomVisible())renderWorkspace();}
+function ensureAdminRoom(){const s=adminRoomState();if(!s.requested){s.requested=true;void loadAdminRoom(1);}}
+async function loadAdminRoom(page=1){
+ const s=adminRoomState(),token=++s.token,filter=s.filter;
+ s.requested=true;s.loading=true;s.error='';s.page=Math.max(1,Number(page)||1);adminRoomRender();
+ try{
+  const data=await requestAPI(`/api/immersion-room/admin/reservations?status=${filter}&page=${s.page}&pageSize=20`);
+  if(work.adminRoom!==s||String(server.user.id)!==s.user||s.token!==token||!adminRoomVisible())return false;
+  s.data=data;s.page=data.page;return true;
+ }catch(error){
+  if(work.adminRoom===s&&s.token===token&&adminRoomVisible()){s.error=error.status?error.message:'예약 신청 내역을 불러오지 못했습니다. 다시 시도해 주세요.';s.data=null;}
+  return false;
+ }finally{if(work.adminRoom===s&&s.token===token){s.loading=false;adminRoomRender();}}
+}
+function openAdminRoom(){
+ if(server.user.role!=='admin')return;
+ work.tab='room-admin';const s=adminRoomState();s.requested=true;
+ if(state.route!=='admin')navigate('admin');return loadAdminRoom(1);
+}
+function adminRoomPanel(){
+ const s=adminRoomState(),data=s.data;
+ const heading=`<header class="room-admin-head"><div><h2>몰입룸 신청 관리</h2><p>신청 내용을 확인하고 예약을 승인하거나 반려할 수 있습니다.</p></div>${button('room-admin-refresh',icon('refresh-cw')+' 새로고침','sq-secondary',s.loading?'disabled':'')}</header>`;
+ const filters=`<div class="room-admin-toolbar"><div class="ws-segment" aria-label="신청 상태">${[['pending','승인 대기'],['history','처리 내역'],['all','전체']].map(([value,label])=>button('room-admin-filter',label,'',`data-filter="${value}" aria-pressed="${s.filter===value}"`)).join('')}</div>${data?`<span>총 ${Number(data.total)||0}건</span>`:''}</div>`;
+ let body='';
+ if(s.notice)body+=`<p class="room-admin-notice" role="status">${esc(s.notice)}</p>`;
+ if(s.error)body+=`<div class="room-admin-empty" role="alert"><strong>내역을 불러오지 못했어요.</strong><p>${esc(s.error)}</p>${button('room-admin-refresh','다시 시도','sq-secondary')}</div>`;
+ else if(s.loading&&!data)body+='<div class="room-admin-empty" role="status">신청 내역을 불러오고 있습니다.</div>';
+ else if(!data||!data.reservations.length)body+=`<div class="room-admin-empty"><strong>${s.filter==='pending'?'승인 대기 중인 신청이 없습니다.':'표시할 신청 내역이 없습니다.'}</strong><p>새로운 신청이 접수되면 여기에서 확인할 수 있습니다.</p></div>`;
+ else{
+  body+=`<div class="room-admin-list" aria-busy="${s.loading}">${data.reservations.map(r=>`<article class="room-admin-row"><div class="room-admin-row-main"><div class="room-admin-row-title"><strong>${esc(r.title)}</strong>${roomPill(r)}</div><p>${esc(roomPeriod(r))} / ${esc(roomSlots[r.slot]||'')} <span aria-hidden="true">·</span> ${esc(r.owner.name)}${r.owner.org?' / '+esc(r.owner.org):''}</p><p class="room-admin-purpose">${esc(r.purpose)}</p></div>${button('room-admin-detail','상세 보기','sq-secondary',`data-id="${esc(r.id)}"`)}</article>`).join('')}</div><footer class="room-admin-pages"><span>20개씩 표시</span><nav aria-label="몰입룸 신청 페이지">${button('room-admin-prev','이전','sq-secondary',s.page<=1||s.loading?'disabled':'')}<span>${Number(data.page)||1} / ${Number(data.totalPages)||1}</span>${button('room-admin-next','다음','sq-secondary',s.page>=data.totalPages||s.loading?'disabled':'')}</nav></footer>`;
+ }
+ return `<section class="room-admin" aria-label="몰입룸 신청 관리">${heading}${filters}${body}</section>`;
+}
+function openAdminRoomDetail(id){
+ const s=adminRoomState(),row=s.data?.reservations.find(x=>String(x.id)===String(id));if(!row)return;
+ s.detail=row;s.detailReason='';s.detailError='';renderAdminRoomDetail();
+}
+function renderAdminRoomDetail(){
+ const s=adminRoomState(),r=s.detail;if(!r)return;
+ openModal(r.title,'AI 몰입룸 신청',`<section class="ir-detail room-admin-detail">${roomPill(r)}<dl><div><dt>이용 기간</dt><dd>${esc(roomPeriod(r))}</dd></div><div><dt>이용 시간</dt><dd>${esc(roomSlots[r.slot]||'')}</dd></div><div><dt>신청자</dt><dd>${esc(r.owner.name)}<small>${esc(r.owner.org||'')}</small></dd></div></dl><div class="ir-purpose"><h3>이용 목적</h3><p>${esc(r.purpose)}</p></div>${r.reason?`<div class="ir-decision-reason"><h3>처리 사유</h3><p>${esc(r.reason)}</p></div>`:''}${r.canApprove||r.canReject||r.canCancel?`<label class="ir-field"><span>처리 사유 (선택)</span><textarea id="room-admin-reason" maxlength="500" rows="2" placeholder="신청자에게 전달할 내용을 적어주세요." ${s.busy?'disabled':''}>${esc(s.detailReason)}</textarea></label>`:''}${s.detailError?`<p class="ir-form-error" role="alert">${esc(s.detailError)}</p>`:''}<div class="ir-detail-actions">${r.canCancel?button('room-admin-cancel','예약 삭제','sq-secondary ws-danger',s.busy?'disabled':''):''}${r.canReject?button('room-admin-reject','반려','sq-secondary',s.busy?'disabled':''):''}${r.canApprove?button('room-admin-approve','승인','sq-primary',s.busy?'disabled':''):''}</div>${r.canCancel?'<p class="room-admin-detail-note">예약 삭제 시 해당 시간이 비워지며 처리 내역은 보관됩니다.</p>':''}</section>`);
+ s.detailToken=runtime.detailLoadToken;
+}
+function confirmAdminRoomDecision(status){
+ const s=adminRoomState(),r=s.detail;if(!r||s.busy||!adminRoomVisible()||(status==='approved'&&!r.canApprove)||(status==='rejected'&&!r.canReject)||(status==='cancelled'&&!r.canCancel))return;
+ const reason=$('#room-admin-reason')?.value||'';s.detailReason=reason;
+ if(reason.length>500){s.detailError='처리 사유는 500자 이내로 입력해 주세요.';renderAdminRoomDetail();return;}
+ const label={approved:'승인',rejected:'반려',cancelled:'예약 삭제'}[status];
+ const copy=status==='cancelled'?'예약 시간이 비워지고 신청 내역에는 취소로 남습니다.':'신청자에게 처리 결과가 전달됩니다.';
+ ask(`${label}할까요?`,copy,()=>commitAdminRoomDecision(status,r.id,r.revision,reason),label);
+}
+async function commitAdminRoomDecision(status,id,revision,reason){
+ const s=adminRoomState(),token=s.detailToken;if(s.busy||!adminRoomVisible())return;
+ s.busy=true;s.detailError='';
+ $('#sq-dialog-body')?.querySelectorAll('.ir-detail-actions button').forEach(b=>b.disabled=true);
+ try{
+  const result=await requestAPI('/api/immersion-room/reservations/'+encodeURIComponent(id),'PATCH',{status,expectedRevision:revision,reason});
+  if(work.adminRoom!==s||String(server.user.id)!==s.user)return;
+  s.notice=`${roomStatuses[result.reservation.status]||'처리'}되었습니다.`;
+  if(runtime.detailLoadToken===token&&$('#sq-dialog')?.open)closeModal();
+  s.data=null;const loaded=await loadAdminRoom(s.page);
+  if(!loaded&&adminRoomVisible())s.notice+=' 처리 결과는 저장되었지만 목록을 새로 불러오지 못했습니다.';
+ }catch(error){
+  if(work.adminRoom===s&&adminRoomVisible()&&runtime.detailLoadToken===token&&$('#sq-dialog')?.open){s.detailError=error.status?error.message:'처리 결과를 확인하지 못했습니다. 목록을 새로고침해 주세요.';s.busy=false;renderAdminRoomDetail();}
+ }finally{if(work.adminRoom===s){s.busy=false;adminRoomRender();}}
+}
+let roomNotificationGeneration=0;
+async function openRoomNotification(target,generation=++roomNotificationGeneration){
+ const id=String(target.id||'');if(!id||generation!==roomNotificationGeneration)return;
+ closeModal();const s=roomState(),user=s.user;
+ if(roomDate(target.startDate)){s.month=target.startDate.slice(0,7);s.selectionAnchor=target.startDate;s.draft.startDate=target.startDate;s.draft.endDate=target.startDate;}
+ navigate('immersion-room');
+ const viewToken=runtime.detailLoadToken,month=s.month;
+ const calendar=loadImmersionRoom(),calendarToken=s.loadToken;
+ const [,detail]=await Promise.allSettled([calendar,requestAPI('/api/immersion-room/reservations/'+encodeURIComponent(id),'GET',undefined,{timeoutMs:10000})]);
+ if(generation!==roomNotificationGeneration||viewToken!==runtime.detailLoadToken||!roomCurrent(s)||user!==String(server.user.id)||!roomVisible()||s.month!==month||s.loadToken!==calendarToken)return;
+ if(detail.status==='fulfilled'&&detail.value.reservation){const row=detail.value.reservation;const index=s.reservations.findIndex(r=>r.id===row.id);if(index<0)s.reservations.push(row);else s.reservations[index]=row;openRoomDetail(row.id);}
+ else{s.error='예약 상세를 불러오지 못했습니다. 달력에서 다시 확인해 주세요.';roomRender();}
+}
+Object.assign(actions,{
+ 'room-admin-refresh':()=>{const s=adminRoomState();if(!s.loading){s.notice='';return loadAdminRoom(s.page);}},
+ 'room-admin-filter':b=>{const s=adminRoomState();if(!['pending','history','all'].includes(b.dataset.filter))return;s.filter=b.dataset.filter;s.data=null;s.notice='';return loadAdminRoom(1);},
+ 'room-admin-prev':()=>{const s=adminRoomState();if(!s.loading&&s.page>1)return loadAdminRoom(s.page-1);},
+ 'room-admin-next':()=>{const s=adminRoomState();if(!s.loading&&s.data&&s.page<s.data.totalPages)return loadAdminRoom(s.page+1);},
+ 'room-admin-detail':b=>openAdminRoomDetail(b.dataset.id),
+ 'room-admin-approve':()=>confirmAdminRoomDecision('approved'),
+ 'room-admin-reject':()=>confirmAdminRoomDecision('rejected'),
+ 'room-admin-cancel':()=>confirmAdminRoomDecision('cancelled')
 });
 
 // END WORKSPACE EXTENSION

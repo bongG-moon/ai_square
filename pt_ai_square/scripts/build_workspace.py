@@ -21,10 +21,12 @@ s=s.replace("throw Error(result.error||'요청을 처리하지 못했습니다.'
 s=s.replace("tab==='comments'", "tab==='comments'")
 anchor='refresh().catch(showError);setInterval('
 at=s.rindex(anchor)
-s=s[:at]+start+'\n'.join((BASE/'frontend'/name).read_text(encoding='utf-8') for name in ['frontend_workspace.js','frontend_upload.js','frontend_package.js','frontend_commands.js','frontend_storage.js','frontend_people.js','frontend_ax_workspace.js','frontend_grants.js'])+'\n'+end+s[at:]
+s=s[:at]+start+'\n'.join((BASE/'frontend'/name).read_text(encoding='utf-8') for name in ['frontend_workspace.js','frontend_upload.js','frontend_package.js','frontend_commands.js','frontend_storage.js','frontend_people.js','frontend_ax_workspace.js','frontend_grants.js','frontend_contributions.js','frontend_immersion_room.js','frontend_room_admin.js'])+'\n'+end+s[at:]
 p.write_text(s,encoding='utf-8')
 p=BASE/'templates/index.html';s=p.read_text(encoding='utf-8')
 if '/static/workspace.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/workspace.css"></head>')
 if '/static/grants.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/grants.css"></head>')
+if '/static/immersion-room.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/immersion-room.css"></head>')
+if '/static/room-admin.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/room-admin.css"></head>')
 p.write_text(s,encoding='utf-8')
 print('Workspace UI built.')

@@ -1,0 +1,26 @@
+#square-app .room-admin{padding:32px 0 6px}
+#square-app .room-admin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px}
+#square-app .room-admin-head h2{margin:0;font-size:21px;letter-spacing:-.4px}
+#square-app .room-admin-head p{margin:10px 0 0;color:#818693;font-size:14px;line-height:1.6}
+#square-app .room-admin-head .sq-secondary{white-space:nowrap}
+#square-app .room-admin-head .sq-secondary svg{width:16px;height:16px;margin-right:5px}
+#square-app .room-admin-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:25px 0 12px}
+#square-app .room-admin-toolbar>span{font-size:13px;color:#898d98}
+#square-app .room-admin-list{border-top:1px solid #e9ebf0}
+#square-app .room-admin-row{display:flex;align-items:center;gap:20px;padding:20px 4px;border-bottom:1px solid #e9ebf0}
+#square-app .room-admin-row-main{flex:1;min-width:0}
+#square-app .room-admin-row-title{display:flex;align-items:center;gap:10px;min-width:0}
+#square-app .room-admin-row-title strong{font-size:16px;color:#242936;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#square-app .room-admin-row-main p{font-size:13px;line-height:1.6;color:#818793;margin:7px 0 0}
+#square-app .room-admin-row-main .room-admin-purpose{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:#5e6471;overflow-wrap:anywhere}
+#square-app .room-admin-row>.sq-secondary{white-space:nowrap;flex-shrink:0;min-height:40px}
+#square-app .room-admin-empty{padding:44px 16px;text-align:center;background:#f8f9fb;border:1px solid #eceef3;border-radius:14px;color:#697281}
+#square-app .room-admin-empty strong{font-size:15px}
+#square-app .room-admin-empty p{font-size:13px;line-height:1.65;margin:8px 0 0}
+#square-app .room-admin-empty .sq-secondary{margin-top:14px}
+#square-app .room-admin-notice{padding:12px 15px;border-radius:10px;background:#f1f6ff;color:#4d6da8;font-size:13px;line-height:1.5}
+#square-app .room-admin-pages{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:20px;color:#8a909b;font-size:13px}
+#square-app .room-admin-pages nav{display:flex;align-items:center;gap:12px}
+#square-app .room-admin-pages button{min-height:34px;padding:5px 12px}
+#square-app .room-admin-detail-note{color:#7e8795;font-size:12px;line-height:1.6;margin:13px 0 0;text-align:right}
+@media(max-width:650px){#square-app .room-admin{padding-top:22px}#square-app .room-admin-head{align-items:flex-start}#square-app .room-admin-toolbar{align-items:flex-start;flex-wrap:wrap}#square-app .room-admin-row{align-items:flex-start;flex-direction:column;gap:12px}#square-app .room-admin-row>.sq-secondary{align-self:flex-end}#square-app .room-admin-pages{flex-wrap:wrap}}

@@ -75,3 +75,28 @@ def test_ax_workspace_dummy_is_read_only_and_separate(dummy):
     assert dummy.get(response.json['files'][0]['downloadUrl']).status_code == 409
     assert dummy.post('/api/ax-workspace').status_code == 409
     assert dummy.get('/api/deletions').json == {'jobs':[]}
+
+
+def test_dummy_contributions_show_only_my_tools_with_full_totals(dummy):
+    first = dummy.get('/api/me/contributions?pageSize=2').json
+    second = dummy.get('/api/me/contributions?pageSize=2&page=2&user=sample-colleague').json
+    assert first['dummy'] is True and first['totalItems'] == 3
+    assert [row['id'] for row in first['items'] + second['items']] == [1, 2, 3]
+    assert first['summary'] == second['summary']
+    assert first['summary']['registered'] == 3
+    assert first['summary']['score'] == sum(row['score'] for row in first['items'] + second['items'])
+    assert dummy.get('/api/me/contributions?page=0').status_code == 400
+    assert dummy.get('/api/me/contributions?pageSize=101').status_code == 400
+
+
+def test_room_preview_and_holidays_do_not_need_database(dummy):
+    from datetime import datetime, timedelta, timezone
+    day = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    response = dummy.get(f'/api/immersion-room?start={day}&end={day}')
+    assert response.status_code == 200
+    assert response.json['dummy'] is True and response.json['canManage'] is False
+    assert response.json['reservations'][0]['owner']['name'] == '예시 동료'
+    assert dummy.post('/api/immersion-room/reservations', json={}).status_code == 409
+    holidays = dummy.get('/api/immersion-room/holidays?start=2026-10-01&end=2026-10-31')
+    assert holidays.status_code == 200 and len(holidays.json['holidays']) == 3
+    assert dummy.get('/api/immersion-room?start=bad&end=bad').status_code == 400

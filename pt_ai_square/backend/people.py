@@ -7,7 +7,8 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from flask import Blueprint, Response, current_app, g, jsonify
+from flask import Blueprint, Response, current_app, g, jsonify, request
+from werkzeug.exceptions import BadRequest
 
 from .storage import db
 
@@ -112,49 +113,31 @@ def contributor_photo(employee):
     # directory proxy. Check eligibility before consulting the image cache too.
     if (not _photo_enabled(employee)
             or not db().users.find_one({'_id': employee, 'enabled': {'$ne': False}}, {'_id': 1})
-            or not db().tools.find_one({'owner': employee, 'deleted': {'$ne': True}}, {'_id': 1})):
+            or not (db().tools.find_one({'owner': employee}, {'_id': 1})
+                    or db().deletion_jobs.find_one({'kind': 'tool', 'contribution.schemaVersion': 1,
+                                                   'contribution.owner': employee}, {'_id': 1}))):
         return Response(status=404, headers={'Cache-Control': 'private, no-store'})
     return _photo_response(employee)
 
 
 def _ranking_pipeline():
-    # Downloads use the same lifetime identity as tool rankings. Old daily rows
-    # count once per tool/user; the newer firstDownloadedAt:null marks update-
-    # only receipts and must not fall back to their created timestamp.
-    download_first = {'$cond': [
-        {'$eq': [{'$type': '$firstDownloadedAt'}, 'missing']}, '$created', '$firstDownloadedAt',
-    ]}
-    return [
-        {'$match': {'deleted': {'$ne': True}}},
-        {'$lookup': {'from': 'users', 'localField': 'owner', 'foreignField': '_id', 'as': 'creator'}},
-        {'$unwind': '$creator'},
-        {'$match': {'creator.enabled': {'$ne': False}}},
-        {'$lookup': {'from': 'activity_state', 'let': {'toolId': '$_id', 'creatorId': '$owner'}, 'pipeline': [
-            {'$match': {'$expr': {'$and': [
-                {'$eq': ['$tool', '$$toolId']}, {'$ne': ['$user', '$$creatorId']},
-                {'$in': ['$kind', ['like', 'download']]},
-            ]}}},
-            {'$group': {'_id': {'user': '$user', 'kind': '$kind'},
-                'liked': {'$max': {'$cond': [{'$and': [{'$eq': ['$kind', 'like']}, {'$eq': ['$liked', True]}]}, 1, 0]}},
-                'downloaded': {'$max': {'$cond': [{'$and': [
-                    {'$eq': ['$kind', 'download']}, {'$gt': [{'$ifNull': ['$count', 0]}, 0]},
-                    {'$ne': [{'$ifNull': [download_first, None]}, None]},
-                ]}, 1, 0]}},
-            }},
-            {'$group': {'_id': None, 'likes': {'$sum': '$liked'}, 'downloads': {'$sum': '$downloaded'}}},
-        ], 'as': 'activity'}},
-        {'$group': {'_id': '$owner', 'name': {'$first': '$creator.name'},
-            'dept': {'$first': '$creator.dept'}, 'orgId': {'$first': '$creator.orgId'},
-            'registered': {'$sum': 1},
-            'likes': {'$sum': {'$ifNull': [{'$arrayElemAt': ['$activity.likes', 0]}, 0]}},
-            'downloads': {'$sum': {'$ifNull': [{'$arrayElemAt': ['$activity.downloads', 0]}, 0]}},
-        }},
-        {'$set': {'score': {'$add': [{'$multiply': ['$registered', 5]}, {'$multiply': ['$likes', 2]}, '$downloads']}}},
-        {'$lookup': {'from': 'taxonomy', 'localField': 'orgId', 'foreignField': '_id', 'as': 'organization'}},
-        {'$set': {'org': {'$ifNull': ['$dept', {'$ifNull': [{'$arrayElemAt': ['$organization.name', 0]}, '공통']}]}}},
-        {'$sort': {'score': -1, 'registered': -1, 'likes': -1, 'downloads': -1, '_id': 1}},
-        {'$project': {'organization': 0, 'dept': 0, 'orgId': 0}},
-    ]
+    from .contributions import ranking_pipeline
+    return ranking_pipeline()
+
+
+@people.get('/api/me/contributions')
+def my_contributions():
+    # Owner identity always comes from the authenticated session, including admins.
+    from .contributions import personal_details
+    values = {}
+    for name, default, maximum in [('page', 1, 1000000), ('pageSize', 20, 100)]:
+        raw = request.args.get(name, str(default))
+        if not re.fullmatch(r'[0-9]{1,7}', raw) or not 1 <= int(raw) <= maximum:
+            raise BadRequest('페이지와 표시 개수를 확인해 주세요.')
+        values[name] = int(raw)
+    response = jsonify(personal_details(g.user['id'], values['page'], values['pageSize']))
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @people.get('/api/people/ranking')
@@ -177,5 +160,5 @@ def ranking():
                   registered=0, likes=0, downloads=0, score=0, isMe=True, photoUrl=None)
     return jsonify(items=items, me=me, totalUsers=total, period='all', asOf=time.time(),
         weights=dict(registered=5, likes=2, downloads=1),
-        method='등록 도구 × 5 + 받은 좋아요 × 2 + 고유 다운로드 × 1 · 전체 기간',
-        tieBreak='동점은 등록 수, 좋아요, 다운로드, 사번 순입니다. 본인 반응·반복 수신·업데이트·삭제 도구는 제외합니다.')
+        method='등록 도구 × 5 + 받은 좋아요 × 2 + 다운로드 수 × 1 (전체 기간)',
+        tieBreak='동점은 등록 수, 좋아요, 다운로드, 사번 순입니다. 본인 반응과 반복 수신, 업데이트는 제외하며 삭제한 도구의 기여도는 유지합니다.')

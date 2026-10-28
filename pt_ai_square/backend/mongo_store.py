@@ -82,7 +82,13 @@ def init_db(app):
         db().workspace_files.create_index([('created', -1)])
         db().workspace_subscriptions.create_index([('file', 1), ('user', 1)], unique=True)
         db().workspace_subscriptions.create_index([('user', 1), ('enabled', 1)])
+        db().room_reservations.create_index('slotKeys', unique=True, sparse=True)
+        db().room_reservations.create_index([('owner.id', 1), ('clientRequestId', 1)], unique=True)
+        db().room_reservations.create_index([('startDate', 1), ('endDate', 1), ('status', 1)])
+        db().room_reservations.create_index([('status', 1), ('startDate', 1), ('_id', 1)])
+        db().room_reservations.create_index([('updated', -1), ('_id', -1)])
         db().deletion_jobs.create_index([('state', 1), ('created', 1)])
+        db().deletion_jobs.create_index([('kind', 1), ('contribution.owner', 1)])
         db().activity.create_index([('tool', 1), ('created', -1)])
         for kind, names in [('organization', ['공통', '제조팀', '장비팀', '기술팀']), ('category', ['공통 업무', '제조', '장비', '기술'])]:
             for order, name in enumerate(names):
@@ -203,7 +209,7 @@ def _deliver_event(e):
 def deliver_notifications(collection_name=None, document_id=None):
     """Deliver bounded, idempotent outbox work; leave failed events durable."""
     from .post_commit import DeliveryResult, deliver_job, log_deferred
-    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users', 'workspace_files', 'workspace_subscriptions', 'deletion_jobs', 'subscriptions')
+    supported = ('tools', 'access', 'feedback', 'ideas', 'administrators', 'settings', 'taxonomy', 'users', 'workspace_files', 'workspace_subscriptions', 'deletion_jobs', 'subscriptions', 'room_reservations')
     collections = supported if collection_name is None else (collection_name,)
     if any(name not in supported for name in collections):
         raise ValueError('Unsupported outbox collection')

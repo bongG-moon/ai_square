@@ -20,7 +20,7 @@ def people_app(app):
     return app
 
 
-def test_received_contribution_uses_unique_downloads_excludes_self_updates_and_deleted(people_app):
+def test_received_contribution_uses_unique_downloads_excludes_self_updates_retains_deleted(people_app):
     app=people_app
     owner,h=ready(app)
     assert publish(owner,h,approval=True).status_code==201
@@ -45,11 +45,11 @@ def test_received_contribution_uses_unique_downloads_excludes_self_updates_and_d
     data=response.json
     assert data['period']=='all' and data['totalUsers']==1
     row=data['items'][0]
-    assert (row['id'],row['registered'],row['likes'],row['downloads'],row['score'])==('owner',1,1,2,9)
+    assert (row['id'],row['registered'],row['likes'],row['downloads'],row['score'])==('owner',2,2,2,16)
     assert data['me']['id']=='member' and data['me']['rank'] is None
     assert 'SECRET INSTALL GUIDE' not in response.text and '장비 점검' not in response.text
     with app.app_context():mongo_activity.set_like(1,'member',False)
-    assert member.get('/api/people/ranking').json['items'][0]['score']==7
+    assert member.get('/api/people/ranking').json['items'][0]['score']==14
 
 
 def test_top_ten_ties_and_current_employee_outside_top_ten(people_app):
@@ -167,7 +167,7 @@ def test_ranking_portrait_contract_and_fixed_host_without_forwarded_credentials(
 
 @pytest.mark.parametrize('case,employee',[
     ('unknown','0012345'),('disabled','0012345'),('no-tools','0012345'),
-    ('deleted','0012345'),('nonnumeric','owner'),('too-long','1'*21),
+    ('nonnumeric','owner'),('too-long','1'*21),
 ])
 def test_ineligible_contributor_portraits_never_fetch_upstream(people_app,monkeypatch,case,employee):
     if case not in {'unknown','no-tools'}:

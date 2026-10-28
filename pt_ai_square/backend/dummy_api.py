@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from flask import jsonify, request
-from werkzeug.exceptions import NotFound
+from werkzeug.exceptions import BadRequest, NotFound
 
 MESSAGE='샘플 데이터는 조회 전용입니다. 저장·다운로드는 실제 데이터 모드에서 이용해 주세요.'
 
@@ -50,8 +50,41 @@ def install_dummy(app):
         for rank,row in enumerate(rows,1):row['rank']=rank
         return jsonify(items=rows[:10],me=None,totalUsers=len(rows),period='all',asOf=now,dummy=True,
                        weights=dict(registered=5,likes=2,downloads=1),
-                       method='등록 도구 × 5 + 받은 좋아요 × 2 + 고유 다운로드 × 1 · 전체 기간',
+                       method='등록 도구 × 5 + 받은 좋아요 × 2 + 다운로드 수 × 1 · 전체 기간',
                        tieBreak='동점은 등록 수, 좋아요, 다운로드, 사번 순입니다. 샘플 데이터입니다.')
+
+    @app.get('/api/me/contributions')
+    def dummy_contributions():
+        try:
+            page = int(request.args.get('page', '1'))
+            size = int(request.args.get('pageSize', '20'))
+        except (TypeError, ValueError):
+            raise BadRequest('페이지 번호와 조회 개수를 확인해 주세요.')
+        if not 1 <= page <= 1000000 or not 1 <= size <= 100:
+            raise BadRequest('페이지 번호와 조회 개수를 확인해 주세요.')
+        rows = [dict(id=x['id'], name=x['name'], status='active', registered=1,
+                     likes=x['likes'], downloads=x['downloads'],
+                     score=5+x['likes']*2+x['downloads'], created=x['created'], retainedAt=None)
+                for x in items if x['ownerId'] == uid]
+        summary = {key: sum(x[key] for x in rows) for key in ('registered', 'likes', 'downloads', 'score')}
+        return jsonify(summary=summary, items=rows[(page-1)*size:page*size],
+                       totalItems=len(rows), page=page, pageSize=size,
+                       totalPages=(len(rows)+size-1)//size, asOf=now, dummy=True,
+                       weights=dict(registered=5, likes=2, downloads=1))
+
+    @app.get('/api/immersion-room')
+    def dummy_immersion_room():
+        from datetime import datetime, timedelta, timezone
+        from .room_holidays import calendar_range
+        start, end = calendar_range(request.args)
+        today = datetime.now(timezone(timedelta(hours=9))).date()
+        day = today.isoformat()
+        sample = dict(id='sample-room-booking', startDate=day, endDate=day, slot='am',
+                      title='AI 과제 개발 모임', purpose='샘플 예약입니다. 각자 개발 중인 과제를 함께 살펴봅니다.',
+                      status='approved', owner=dict(id='sample-colleague', name='예시 동료', org='공통'),
+                      revision=1, created=now, updated=now, reason='', canCancel=False, canApprove=False)
+        return jsonify(reservations=[sample] if start <= today <= end else [],
+                       today=day, canManage=False, dummy=True)
 
     @app.get('/api/<path:path>')
     def dummy_reads(path):
