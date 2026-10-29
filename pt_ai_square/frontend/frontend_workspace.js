@@ -20,7 +20,8 @@ render=function(){
  const categories=server.categories||[];
  $('#sq-category').innerHTML=options(['모든 업무',...categories.filter(x=>x.enabled||x.name===state.category).map(x=>x.name)],state.category);
  originalRender();const special=['manage','admin','ideas','ax','immersion-room'].includes(state.route);
- workspace.hidden=!special;$('.sq-toolbar').hidden=special;$('#sq-search-form').hidden=special;
+ const toolbar=$('.sq-toolbar'),search=$('#sq-search-form');
+ workspace.hidden=!special;toolbar.hidden=special;search.hidden=special;
  $('#ws-admin-nav').hidden=server.user.role!=='admin';
  renderUnreadCount();
  if(special){

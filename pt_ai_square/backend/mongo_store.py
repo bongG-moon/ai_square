@@ -172,7 +172,22 @@ def _deliver_event(e):
             raise ValueError('Unsupported deferred token fields')
         db().local_tokens.update_one({'id': token_update['id'], 'user': token_update['user']},
                                      {'$set': fields})
-    for uid in e.get('recipients', []):
+    recipients = e.get('recipients', [])
+    if e.get('recipientGroup') == 'room-admins':
+        # Resolve active administrators at delivery time. A failed read leaves
+        # the event in the reservation outbox for the next notification poll.
+        # Configured admins need not have logged in yet; only explicitly
+        # disabled accounts are removed. No stale request alert after a decision.
+        if target.get('type') != 'room':
+            raise ValueError('Invalid room administrator notification')
+        if not db().room_reservations.find_one(
+                {'_id': target.get('id'), 'status': 'pending'}, {'_id': 1}):
+            return
+        admins = all_admin_ids()
+        disabled = {u['_id'] for u in db().users.find(
+            {'_id': {'$in': list(admins)}, 'enabled': False}, {'_id': 1})}
+        recipients = sorted(admins - disabled - {e.get('excludeUser')})
+    for uid in recipients:
         # Recipients are independent. One unavailable inbox must not prevent
         # the others from receiving a notification about the saved comment.
         try:

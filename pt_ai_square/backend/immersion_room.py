@@ -127,6 +127,7 @@ def reservation_detail(reservation_id):
 def _retry(existing, fingerprint):
     if existing['fingerprint'] != fingerprint:
         raise Conflict('같은 요청 번호에 다른 내용이 들어 있습니다. 새 예약으로 신청해 주세요.')
+    followup_pending('room-notification', deliver_notifications, 'room_reservations', existing['_id'])
     return jsonify(reservation=_public(existing), created=False)
 
 
@@ -166,6 +167,13 @@ def create():
                revision=1, created=now, updated=now, reason='', clientRequestId=key,
                fingerprint=fingerprint,
                decisions=[dict(status='approved' if admin else 'pending', user=g.user['id'], at=now)])
+    if not admin:
+        # Store the delivery intent with the booking. Administrator resolution
+        # is deferred so a failed secondary read cannot undo a saved request.
+        notification = event([], f'AI 몰입룸 예약 신청: {title}',
+                             {'type': 'room', 'id': row['_id'], 'startDate': row['startDate']}, 'room')
+        notification.update(recipientGroup='room-admins', excludeUser=g.user['id'])
+        row['outbox'] = [notification]
     try:
         # A unique multikey index reserves every half-day in this ONE insert.
         # A collision rolls back the whole document, including multi-day stays.
@@ -175,6 +183,8 @@ def create():
         if existing:
             return _retry(existing, fingerprint)
         raise Conflict('선택한 기간에 승인 대기 또는 승인된 예약이 있습니다. 다른 날짜나 시간대를 선택해 주세요.') from None
+    if not admin:
+        followup_pending('room-notification', deliver_notifications, 'room_reservations', row['_id'])
     return jsonify(reservation=_public(row), created=True), 201
 
 

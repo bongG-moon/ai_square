@@ -94,6 +94,7 @@ def test_simultaneous_overlap_only_one_succeeds(app):
     assert sorted(results) == [201, 409]
     with app.app_context():
         assert db().room_reservations.count_documents({}) == 1
+        assert db().notifications.count_documents({'user': 'admin', 'kind': 'room'}) == 1
         assert len(db().room_reservations.find_one()['slotKeys']) == 10
 
 
@@ -112,6 +113,7 @@ def test_simultaneous_same_request_is_idempotent(app):
     assert len({identifier for _, identifier in results}) == 1
     with app.app_context():
         assert db().room_reservations.count_documents({}) == 1
+        assert db().notifications.count_documents({'user': 'admin', 'kind': 'room'}) == 1
 
 
 def test_reject_cancel_release_slots_and_history_permissions(app):
@@ -203,6 +205,123 @@ def test_status_notifications_idempotent_and_owner_only(app):
         assert len(messages) == 3
         assert any('승인' in message['title'] for message in messages)
         assert any('취소' in message['title'] for message in messages)
+
+
+def test_request_notification_targets_active_admins_and_not_direct_bookings(app):
+    owner, oh = ready(app, 'owner')
+    admin, ah = ready(app, 'admin')
+    ready(app, 'member')
+    ready(app, 'other')
+    app.config['ADMIN_IDS'] += ',unseen'
+    with app.app_context():
+        db().administrators.insert_many([
+            {'_id': 'admin', 'active': True}, {'_id': 'member', 'active': True},
+            {'_id': 'other', 'active': True}, {'_id': 'inactive', 'active': False},
+        ])
+        db().users.update_one({'_id': 'other'}, {'$set': {'enabled': False}})
+    result = create(owner, oh)
+    assert result.status_code == 201
+    row = result.json['reservation']
+    with app.app_context():
+        messages = list(db().notifications.find({'kind': 'room'}))
+        assert {m['user'] for m in messages} == {'admin', 'member', 'unseen'}
+        assert len(messages) == 3
+        assert all(m['target'] == {'type': 'room', 'id': row['id'],
+                                    'startDate': row['startDate']} for m in messages)
+        assert all(row['purpose'] not in m['title'] for m in messages)
+    direct = create(admin, ah, startDate='2026-11-11', endDate='2026-11-11')
+    assert direct.status_code == 201 and direct.json['reservation']['status'] == 'approved'
+    with app.app_context():
+        assert db().notifications.count_documents({'kind': 'room'}) == 3
+
+
+def test_request_succeeds_when_there_are_no_administrators(app):
+    owner, oh = ready(app, 'owner')
+    app.config['ADMIN_IDS'] = ''
+    result = create(owner, oh)
+    assert result.status_code == 201
+    with app.app_context():
+        assert db().notifications.count_documents({'kind': 'room'}) == 0
+        assert not db().room_reservations.find_one({'_id': result.json['reservation']['id']}).get('outbox')
+
+
+def test_admin_lookup_failure_preserves_request_and_retries_current_recipients(app, monkeypatch):
+    from pt_ai_square.backend import mongo_store
+    owner, oh = ready(app, 'owner')
+    admin, _ = ready(app, 'admin')
+    ready(app, 'member')
+    original = mongo_store.all_admin_ids
+    def fail():
+        raise OperationFailure('injected admin lookup error', code=225)
+    # Authentication must finish before injecting the failure into the
+    # secondary operation; the reservation's primary insert remains real.
+    deliver = immersion_room.deliver_notifications
+    def fail_on_delivery(*args, **kwargs):
+        with monkeypatch.context() as fault:
+            fault.setattr(mongo_store, 'all_admin_ids', fail)
+            return deliver(*args, **kwargs)
+    monkeypatch.setattr(immersion_room, 'deliver_notifications', fail_on_delivery)
+    key = str(uuid.uuid4())
+    result = create(owner, oh, clientRequestId=key)
+    assert result.status_code == 201
+    row = result.json['reservation']
+    with app.app_context():
+        saved = db().room_reservations.find_one({'_id': row['id']})
+        assert saved['status'] == 'pending' and len(saved['outbox']) == 1
+        assert saved['outbox'][0]['recipientGroup'] == 'room-admins'
+        db().administrators.insert_one({'_id': 'member', 'active': True})
+    monkeypatch.setattr(immersion_room, 'deliver_notifications', deliver)
+    assert create(owner, oh, clientRequestId=key).status_code == 200
+    assert admin.get('/api/notifications').status_code == 200
+    with app.app_context():
+        assert mongo_store.all_admin_ids is original
+        assert {m['user'] for m in db().notifications.find({'kind': 'room'})} == {'admin', 'member'}
+        assert db().notifications.count_documents({'kind': 'room'}) == 2
+        assert not db().room_reservations.find_one({'_id': row['id']}).get('outbox')
+
+
+def test_partial_delivery_is_idempotent_and_revoked_admin_is_not_retried(app, monkeypatch):
+    owner, oh = ready(app, 'owner')
+    admin, _ = ready(app, 'admin')
+    ready(app, 'member')
+    with app.app_context():
+        db().administrators.insert_one({'_id': 'member', 'active': True})
+    original = Collection.update_one
+    def fail_member(collection, query, *args, **kwargs):
+        if collection.name == 'notifications' and query.get('_id', '').endswith(':member'):
+            raise OperationFailure('injected inbox failure', code=225)
+        return original(collection, query, *args, **kwargs)
+    with monkeypatch.context() as fault:
+        fault.setattr(Collection, 'update_one', fail_member)
+        row = create(owner, oh).json['reservation']
+    with app.app_context():
+        assert db().notifications.count_documents({'user': 'admin', 'kind': 'room'}) == 1
+        assert db().room_reservations.find_one({'_id': row['id']})['outbox']
+        db().administrators.update_one({'_id': 'member'}, {'$set': {'active': False}})
+    assert admin.get('/api/notifications').status_code == 200
+    assert admin.get('/api/notifications').status_code == 200
+    with app.app_context():
+        assert db().notifications.count_documents({'kind': 'room'}) == 1
+        assert not db().room_reservations.find_one({'_id': row['id']}).get('outbox')
+
+
+def test_delayed_request_alert_is_removed_after_booking_was_decided(app, monkeypatch):
+    owner, oh = ready(app, 'owner')
+    admin, ah = ready(app, 'admin')
+    original = Collection.update_one
+    def fail_inbox(collection, *args, **kwargs):
+        if collection.name == 'notifications':
+            raise OperationFailure('injected inbox failure', code=225)
+        return original(collection, *args, **kwargs)
+    with monkeypatch.context() as fault:
+        fault.setattr(Collection, 'update_one', fail_inbox)
+        row = create(owner, oh).json['reservation']
+        assert transition(admin, ah, row, 'rejected', reason='일정 변경').status_code == 200
+    assert admin.get('/api/notifications').status_code == 200
+    with app.app_context():
+        assert db().notifications.count_documents({'user': 'admin', 'kind': 'room'}) == 0
+        assert db().notifications.count_documents({'user': 'owner', 'kind': 'room'}) == 1
+        assert not db().room_reservations.find_one({'_id': row['id']}).get('outbox')
 
 
 def test_rejection_outbox_retries_after_notification_failure(app, monkeypatch):
