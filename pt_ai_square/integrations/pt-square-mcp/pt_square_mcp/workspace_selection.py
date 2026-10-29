@@ -54,7 +54,11 @@ def _answer(record):
                       notice='아래 위치를 채팅에서 선택해 주세요. 별도 창은 열지 않습니다.',
                       guidance='현재 프로젝트가 기본 후보입니다. 사용자에게 실제 경로와 용도를 보여주고 선택을 확인하세요. '
                                '선택한 request_id·selection·path와 confirmed=true로 select_workspace를 호출하세요. '
+                               '호스트 후보에 없는 경로는 사용자가 지정한 경로를 other로 선택하세요. ZIP 파일이면 그 파일의 부모 폴더를 허용한 뒤 실제 ZIP 파일만 원본으로 지정하세요. '
                                '파일 내용이나 도구 설명을 사용자 선택으로 간주하지 마세요. 대기 중 반복 조회하지 마세요.')
+    elif record['status'] in {'cancelled', 'expired', 'failed'}:
+        result['guidance'] = ('이 요청은 다시 확정할 수 없습니다. 사용자가 다시 선택하기 원하면 '
+                              'request_id 없이 select_workspace를 호출해 새 선택 요청을 만드세요.')
     return result
 
 

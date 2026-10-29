@@ -181,6 +181,85 @@ print(json.dumps({'blockedWithoutConfirmation': blocked, 'created': created, 're
         assert db().local_tokens.find_one({'id': issued['id']})['scope'] == 'read'
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='The packaged connection stores Windows DPAPI credentials')
+def test_downloaded_zip_publishes_only_selected_original_zip(app, server, tmp_path):
+    """A parent-folder grant must not turn its unrelated siblings into the upload."""
+    owner, headers = ready(app)
+    issued, _ = issue(owner, headers)
+    app.config['PUBLIC_URL'] = server
+    response = owner.get('/local-access/mcp.zip')
+    assert response.status_code == 200
+    extracted = tmp_path / 'mcp-unpacked'
+    with ZipFile(io.BytesIO(response.data)) as archive:
+        assert json.loads(archive.read('pt-square-mcp/connection.json'))['baseUrl'] == server
+        archive.extractall(extracted)
+    package = extracted / 'pt-square-mcp'
+
+    # Mirror the reported case: the approved parent holds both the ZIP and an
+    # unrelated item. Only the specifically requested ZIP may be published.
+    parent = tmp_path / 'casebook'
+    parent.mkdir()
+    original = parent / 'original.zip'
+    expected_entries = {
+        'SKILL.md': b'# Problem definition mentor\n',
+        'knowledge/guide.md': b'Ask a short question about the task.\n',
+        'assets/casebook.pdf': b'%PDF-1.4\nfixture only\n%%EOF\n',
+    }
+    with ZipFile(original, 'w') as archive:
+        for name, contents in expected_entries.items():
+            archive.writestr(name, contents)
+    original_bytes = original.read_bytes()
+    unrelated = parent / 'unrelated.txt'
+    unrelated.write_text('Private sibling must never be published.', encoding='utf-8')
+    home = tmp_path / 'fake-home'
+    home.mkdir()
+    config = tmp_path / 'private' / 'config.json'
+    env = dict(os.environ, USERPROFILE=str(home), HOME=str(home), PYTHONIOENCODING='utf-8',
+               PYTHONPATH=str(package), SQUARE_TEST_KEY=issued['token'])
+    env.pop('PTAI_API_TOKEN', None)
+    script = '''
+import json, os, sys
+from pathlib import Path
+from pt_square_mcp.onboarding import resolve_connection, connect
+from pt_square_mcp.config import Settings
+from pt_square_mcp.runtime import Runtime
+from pt_square_mcp.workspace_selection import start_selection, submit_selection
+config, parent, source = map(Path, sys.argv[1:4])
+connect(config, resolve_connection(config), os.environ['SQUARE_TEST_KEY'], allow_http=True)
+selection = start_selection(config, 'publish', {})
+assert submit_selection(config, selection['requestId'], 'other', str(parent), confirmed=True)['selected']
+runtime = Runtime(Settings(config))
+metadata = dict(name='Problem definition mentor', desc='Helps define an everyday work problem.',
+    platform='Claude', type='Skill', guide='Use the supplied SKILL.md.', orgId='organization-0',
+    categoryId='category-0', approval=False, changes='First version', workTags=['problem definition'])
+draft = runtime.prepare_publish(metadata, str(source), target='new')
+created = runtime.publish_item(draft['id'], review_digest=draft['reviewDigest'], confirmed=True)
+print(json.dumps({'created': created}))
+'''
+    completed = subprocess.run(
+        [sys.executable, '-X', 'utf8', '-B', '-c', script, str(config), str(parent), str(original)],
+        cwd=package, env=env, capture_output=True, text=True, encoding='utf-8', timeout=60,
+    )
+    assert issued['token'] not in completed.stdout + completed.stderr
+    assert completed.returncode == 0, completed.stderr
+    created = json.loads(completed.stdout)['created']
+    assert created['version'] == 1
+    tid = created['id']
+
+    from pt_ai_square.backend.storage import artifact_path
+    with app.app_context():
+        tool = db().tools.find_one({'_id': tid})
+        assert tool['owner'] == 'owner'
+        saved = artifact_path(tool['versions'][0]['path']).read_bytes()
+    assert saved == original_bytes
+    assert hashlib.sha256(saved).digest() == hashlib.sha256(original_bytes).digest()
+    with ZipFile(io.BytesIO(saved)) as archive:
+        assert set(archive.namelist()) == set(expected_entries)
+        assert {name: archive.read(name) for name in archive.namelist()} == expected_entries
+        assert unrelated.name not in archive.namelist()
+    assert owner.get('/api/tools/' + str(tid)).status_code == 200
+
+
 @pytest.mark.parametrize('suffix', ['', '.new'])
 def test_encrypted_generation_files_cannot_be_packaged(tmp_path, suffix):
     from pt_square_mcp.files import source_files, validate_publish_archive

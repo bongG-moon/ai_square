@@ -424,87 +424,75 @@ def chat_tool(setup, monkeypatch):
 
 
 @pytest.mark.parametrize('purpose', ['install', 'publish'])
-def test_server_hitl_defaults_to_host_current_and_confirms_only_chosen_purpose(setup, monkeypatch, purpose):
+@pytest.mark.parametrize('capability', ['form', 'none', 'url'])
+def test_server_always_asks_in_chat_before_granting_current(setup, monkeypatch, purpose, capability):
     fn = chat_tool(setup, monkeypatch)
-    ctx = ChatContext([setup.project])
+    ctx = ChatContext([setup.project], capability=capability, action='cancel')
     before = setup.config.read_bytes()
-    result = asyncio.run(fn(ctx, purpose=purpose))
+    pending = asyncio.run(fn(ctx, purpose=purpose))
+    assert pending['status'] == 'pending' and pending['defaultPath'] == str(setup.project)
+    assert not ctx.prompts and setup.config.read_bytes() == before
+    unconfirmed = asyncio.run(fn(ctx, purpose=purpose, request_id=pending['requestId'],
+                                 selection='current', path=str(setup.project)))
+    assert unconfirmed['confirmationRequired'] and setup.config.read_bytes() == before
+    result = asyncio.run(fn(ctx, purpose=purpose, request_id=pending['requestId'],
+                            selection='current', path=str(setup.project), confirmed=True))
     assert result['selected'] and result['path'] == str(setup.project)
-    assert ctx.prompts[0]['properties']['selection']['default'] == '현재 프로젝트 · ' + str(setup.project)
-    if purpose == 'install':
-        assert setup.config.read_bytes() == before
-    else:
-        assert setup.project in Settings(setup.config).roots
-    assert Settings(setup.config).downloads == setup.downloads
-    assert not (setup.project / '.claude').exists()
-
-
-@pytest.mark.parametrize('capability', ['none', 'url'])
-def test_server_without_form_collects_explicit_chat_selection_without_native_fallback(setup, monkeypatch, capability):
-    fn = chat_tool(setup, monkeypatch)
-    ctx = ChatContext([setup.project], capability=capability)
-    first = asyncio.run(fn(ctx, purpose='install', selection='other', path=str(setup.project), confirmed=True))
-    assert first['status'] == 'pending' and first['confirmationRequired']
-    assert setup.project not in Settings(setup.config).roots and not ctx.prompts
-    pending = asyncio.run(fn(ctx, purpose='install', request_id=first['requestId'],
-                             selection='other', path=str(setup.project)))
-    assert pending['confirmationRequired'] and not pending['selected']
-    chosen = asyncio.run(fn(ctx, purpose='install', request_id=first['requestId'],
-                            selection='other', path=str(setup.project), confirmed=True))
-    assert chosen['selected'] and setup.project in Settings(setup.config).roots
     assert not ctx.prompts
+    assert (setup.project in Settings(setup.config).roots) == (purpose == 'publish')
 
 
-def test_server_multiple_projects_has_no_default_and_uses_selected_candidate(setup, monkeypatch, tmp_path):
+def test_multiple_projects_choose_only_confirmed_candidate(setup, monkeypatch, tmp_path):
     second = tmp_path / 'second'
     second.mkdir()
     fn = chat_tool(setup, monkeypatch)
-    ctx = ChatContext([setup.project, second], path=str(second))
-    result = asyncio.run(fn(ctx, purpose='install'))
-    field = ctx.prompts[0]['properties']['selection']
-    assert 'default' not in field and 'selection' in ctx.prompts[0]['required']
+    ctx = ChatContext([setup.project, second])
+    pending = asyncio.run(fn(ctx, purpose='publish'))
+    assert not pending['defaultPath'] and len(pending['projectCandidates']) == 2
+    result = asyncio.run(fn(ctx, purpose='publish', request_id=pending['requestId'],
+                            selection='current', path=str(second), confirmed=True))
     assert result['selected'] and result['path'] == str(second)
-    assert Settings(setup.config).roots == [setup.downloads]
+    assert second in Settings(setup.config).roots and setup.project not in Settings(setup.config).roots
+    assert not ctx.prompts
 
 
-def test_server_no_roots_can_select_common_without_guessing_current(setup, monkeypatch):
+def test_missing_host_root_can_only_grant_explicit_other_path(setup, monkeypatch):
     fn = chat_tool(setup, monkeypatch)
-    ctx = ChatContext([], selection='user')
-    result = asyncio.run(fn(ctx, purpose='install'))
-    field = ctx.prompts[0]['properties']['selection']
-    assert 'default' not in field
-    assert field['enum'] == ['공통 (내 계정)', '기타 경로']
-    assert result['scope'] == 'user' and result['path'] == str(setup.home)
-    assert Settings(setup.config).roots == [setup.downloads]
-
-
-@pytest.mark.parametrize('action', ['decline', 'cancel'])
-def test_server_host_decline_or_cancel_does_not_grant_access(setup, monkeypatch, action):
-    fn = chat_tool(setup, monkeypatch)
+    ctx = ChatContext([])
     before = setup.config.read_bytes()
-    result = asyncio.run(fn(ChatContext([setup.project], action=action), purpose='publish'))
-    assert result['status'] == 'cancelled' and not result['selected']
+    pending = asyncio.run(fn(ctx, purpose='publish'))
+    assert not pending['defaultPath'] and not ctx.prompts
+    with pytest.raises(SquareError, match='프로젝트가 바뀌었습니다'):
+        asyncio.run(fn(ctx, purpose='publish', request_id=pending['requestId'],
+                       selection='current', path=str(setup.project), confirmed=True))
     assert setup.config.read_bytes() == before
+    fresh = asyncio.run(fn(ctx, purpose='publish'))
+    selected = asyncio.run(fn(ctx, purpose='publish', request_id=fresh['requestId'],
+                              selection='other', path=str(setup.project), confirmed=True))
+    assert selected['selected'] and setup.project in Settings(setup.config).roots
 
 
-def test_server_roots_withdrawn_while_hitl_is_open_cannot_be_granted(setup, monkeypatch):
+def test_changed_host_roots_reject_current_without_grant(setup, monkeypatch):
     fn = chat_tool(setup, monkeypatch)
     ctx = ChatContext([setup.project])
-    ctx.hook = lambda: ctx.roots.clear()
+    pending = asyncio.run(fn(ctx, purpose='publish'))
     before = setup.config.read_bytes()
+    ctx.roots.clear()
     with pytest.raises(SquareError, match='프로젝트가 바뀌었습니다'):
-        asyncio.run(fn(ctx, purpose='publish'))
+        asyncio.run(fn(ctx, purpose='publish', request_id=pending['requestId'],
+                       selection='current', path=str(setup.project), confirmed=True))
     assert setup.config.read_bytes() == before
 
 
-def test_server_config_changed_while_hitl_is_open_preserves_new_config(setup, monkeypatch):
+def test_connection_change_between_chat_calls_cancels_without_grant(setup, monkeypatch):
     fn = chat_tool(setup, monkeypatch)
-    def change():
-        data = read_json(setup.config)
-        data['baseUrl'] = 'https://changed.example'
-        atomic_json(setup.config, data)
-    ctx = ChatContext([setup.project], hook=change)
-    result = asyncio.run(fn(ctx, purpose='publish'))
+    ctx = ChatContext([setup.project])
+    pending = asyncio.run(fn(ctx, purpose='publish'))
+    data = read_json(setup.config)
+    data['baseUrl'] = 'https://changed.example'
+    atomic_json(setup.config, data)
+    result = asyncio.run(fn(ctx, purpose='publish', request_id=pending['requestId'],
+                            selection='current', path=str(setup.project), confirmed=True))
     assert result['status'] == 'cancelled'
     assert Settings(setup.config).url == 'https://changed.example'
     assert setup.project not in Settings(setup.config).roots
@@ -528,34 +516,19 @@ def test_server_connection_changed_during_root_discovery_cannot_create_selection
     assert not (Settings(setup.config).state / 'workspace-selections' / 'publish.json').exists()
 
 
-def test_server_elicitation_exception_is_sanitized_without_native_fallback(setup, monkeypatch):
+def test_explicit_cancel_remains_cancelled_and_cannot_be_reused(setup, monkeypatch):
     fn = chat_tool(setup, monkeypatch)
-    def fail():
-        raise RuntimeError('private host failure must not leak')
+    ctx = ChatContext([setup.project], action='cancel')
     before = setup.config.read_bytes()
-    result = asyncio.run(fn(ChatContext([setup.project], hook=fail), purpose='publish'))
-    assert result['status'] == 'pending' and not result['selected']
-    assert 'private host failure' not in json.dumps(result)
-    assert setup.config.read_bytes() == before
-
-
-def test_server_task_cancellation_invalidates_pending_selection(setup, monkeypatch):
-    fn = chat_tool(setup, monkeypatch)
-    request = start(setup, 'publish')
-    before = setup.config.read_bytes()
-    async def scenario():
-        reached = asyncio.Event()
-        async def wait():
-            reached.set()
-            await asyncio.Future()
-        task = asyncio.create_task(fn(ChatContext([setup.project], hook=wait), purpose='publish'))
-        await asyncio.wait_for(reached.wait(), 3)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    asyncio.run(scenario())
-    assert jobs.selection_status(setup.config, request['requestId'])['status'] == 'cancelled'
-    assert setup.config.read_bytes() == before
+    pending = asyncio.run(fn(ctx, purpose='publish'))
+    cancelled = jobs.cancel_selection(setup.config, pending['requestId'])
+    assert cancelled['status'] == 'cancelled'
+    result = asyncio.run(fn(ctx, purpose='publish', request_id=pending['requestId'],
+                            selection='current', path=str(setup.project), confirmed=True))
+    assert result['status'] == 'cancelled' and setup.config.read_bytes() == before
+    assert 'request_id 없이' in result['guidance']
+    fresh = asyncio.run(fn(ctx, purpose='publish'))
+    assert fresh['status'] == 'pending' and fresh['requestId'] != pending['requestId']
 
 
 STDIO_CHAT_FOLDER = '''import subprocess, sys
@@ -572,7 +545,7 @@ make_server(config_path).run(transport='stdio')
 
 
 @pytest.mark.parametrize('action', ['accept', 'cancel'])
-def test_actual_sdk_stdio_folder_hitl_uses_current_project_without_native_ui(tmp_path, monkeypatch, action):
+def test_actual_sdk_stdio_ignores_host_elicitation_and_uses_explicit_chat(tmp_path, monkeypatch, action):
     pytest.importorskip('mcp')
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -592,13 +565,8 @@ def test_actual_sdk_stdio_folder_hitl_uses_current_project_without_native_ui(tmp
     async def roots(_ctx):
         return ListRootsResult(roots=[Root(uri=project.as_uri(), name='Current project')])
     async def confirm(_ctx, request):
-        doc = request.model_dump(mode='json')
-        prompts.append(doc)
-        fields = doc['requestedSchema']['properties']
-        assert set(fields) == {'selection', 'path'} and doc['mode'] == 'form'
-        assert fields['selection']['default'] == '현재 프로젝트 · ' + str(project)
-        return ElicitResult(action=action, content={
-            'selection': fields['selection']['default'], 'path': ''} if action == 'accept' else None)
+        prompts.append(request)
+        return ElicitResult(action=action)
     async def scenario():
         environment = {k: v for k, v in os.environ.items() if k != 'PTAI_API_TOKEN'}
         params = StdioServerParameters(command=sys.executable,
@@ -614,15 +582,16 @@ def test_actual_sdk_stdio_folder_hitl_uses_current_project_without_native_ui(tmp
                     assert set(tool.inputSchema['properties']) == {'purpose', 'request_id', 'selection', 'path', 'confirmed'}
                     response = await session.call_tool('select_workspace', {'purpose': 'publish'})
                     assert not response.isError, response.content
-                    result = json.loads(response.content[0].text)
-                    assert result['selectionMethod'] == 'chat'
-                    assert result['selected'] is (action == 'accept'), result
-                    assert result['status'] == ('selected' if action == 'accept' else 'cancelled'), result
+                    pending = json.loads(response.content[0].text)
+                    assert pending['status'] == 'pending' and not pending['selected']
+                    assert pending['defaultPath'] == str(project)
+                    assert config_path.read_bytes() == before
+                    result = await session.call_tool('select_workspace', {
+                        'purpose': 'publish', 'request_id': pending['requestId'],
+                        'selection': 'current', 'path': str(project), 'confirmed': True})
+                    assert not result.isError, result.content
+                    assert json.loads(result.content[0].text)['selected']
     asyncio.run(scenario())
-    assert len(prompts) == 1
-    assert Settings(config_path).downloads == downloads
-    if action == 'accept':
-        assert Settings(config_path).roots == [downloads, project]
-    else:
-        assert config_path.read_bytes() == before
+    assert not prompts
+    assert Settings(config_path).roots == [downloads, project]
     assert not (project / '.claude').exists()

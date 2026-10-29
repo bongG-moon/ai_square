@@ -244,7 +244,11 @@ def test_actual_stdio_mcp_chat_publish_and_owned_update_without_browser(app,serv
                         assert key['token'] not in str(response.content)
                         assert bool(response.isError) is error,response.content
                         return None if error else json.loads(response.content[0].text)
-                    first=await call('prepare_publish',{'metadata':values,'target':'new'})
+                    choose=await call('prepare_publish',{'metadata':values,'target':'new'})
+                    assert choose['organizationSelectionRequired'] and not choose['ready']
+                    assert any(org['id']==values['orgId'] for org in choose['options']['organizations'])
+                    with app.app_context(): assert db().publish_drafts.count_documents({})==0
+                    first=await call('prepare_publish',{'metadata':values,'target':'new','organization_confirmed':True})
                     assert first['requiresConfirmation'] and first['approvalMethod']=='chat'
                     assert not first['serverReviewRequired']
                     await call('publish_item',{'draft_id':first['id']},error=True)
@@ -261,7 +265,11 @@ def test_actual_stdio_mcp_chat_publish_and_owned_update_without_browser(app,serv
                     member,_=ready(app,'member')
                     assert member.get(f'/api/tools/{tid}').status_code==403
                     values.update(url='http://internal.example.test/v2/mcp',changes='Second endpoint',approval=False)
-                    second=await call('prepare_publish',{'metadata':values,'target':'update','tool_id':tid})
+                    choose=await call('prepare_publish',{'metadata':values,'target':'update','tool_id':tid})
+                    assert choose['organizationSelectionRequired'] and not choose['ready']
+                    assert choose['options']['currentOrganization']['id']==values['orgId']
+                    with app.app_context(): assert db().publish_drafts.count_documents({})==1
+                    second=await call('prepare_publish',{'metadata':values,'target':'update','tool_id':tid,'organization_confirmed':True})
                     assert second['toolId']==tid and second['expectedRevision']==1
                     updated=await call('publish_item',{'draft_id':second['id'],'review_digest':second['reviewDigest'],'confirmed':True})
                     assert updated['id']==tid and updated['version']==2

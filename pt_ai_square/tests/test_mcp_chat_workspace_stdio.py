@@ -82,22 +82,26 @@ def test_real_stdio_choices_no_native_window(settings,tmp_path,purpose,mode):
                         elicitation_callback=None if mode=='fallback' else choose) as session:
                     await session.initialize()
                     result = await session.call_tool('select_workspace',{'purpose':purpose})
+                    state = decoded(result)
+                    assert state['status']=='pending' and state['defaultPath']==str(project)
+                    assert requests==[] and settings.path.read_bytes()==before
+                    if mode=='cancel':
+                        state = decoded(await session.call_tool('cancel_workspace_selection',{'request_id':state['requestId']}))
+                        assert state['status']=='cancelled' and not state['selected']
+                        return
+                    if mode=='changed':
+                        roots[:] = [other]
+                    selection = 'other' if mode=='other' else 'user' if mode=='user' else 'current'
+                    result = await session.call_tool('select_workspace',{
+                        'purpose':purpose,'request_id':state['requestId'],
+                        'selection':selection,'path':str(other) if mode=='other' else '', 'confirmed':True})
                     if mode=='changed':
                         assert result.isError and '프로젝트가 바뀌었' in result.content[0].text
                         return
                     state = decoded(result)
-                    if mode=='fallback':
-                        assert state['status']=='pending' and state['defaultPath']==str(project)
-                        assert requests==[] and settings.path.read_bytes()==before
-                        state = decoded(await session.call_tool('select_workspace',{
-                            'purpose':purpose,'request_id':state['requestId'],
-                            'selection':'current','confirmed':True}))
-                    if mode=='cancel':
-                        assert state['status']=='cancelled' and not state['selected']
-                    else:
-                        assert state['selected'] and state['selectionMethod']=='chat'
-                        expected = Path.home() if mode=='user' else other if mode=='other' else project
-                        assert state['path']==str(expected)
+                    assert state['selected'] and state['selectionMethod']=='chat'
+                    expected = Path.home() if mode=='user' else other if mode=='other' else project
+                    assert state['path']==str(expected)
     asyncio.run(scenario())
     assert not (project/'.claude').exists() and not (other/'.claude').exists()
     expected_grant = purpose=='publish' and mode not in {'cancel','changed'}
@@ -106,5 +110,5 @@ def test_real_stdio_choices_no_native_window(settings,tmp_path,purpose,mode):
     else:
         assert settings.path.read_bytes()==before
     assert Settings(settings.path).downloads==settings.downloads
-    assert len(requests)==(0 if mode=='fallback' else 1)
+    assert not requests
     assert KEY not in (tmp_path/'stdio-errors.txt').read_text(encoding='utf-8')

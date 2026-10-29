@@ -74,6 +74,27 @@ class Runtime:
     def inspect_source(self,source_path):
         return dict(inspect(source_path,self.settings.roots),options=self.client.json('/api/catalog/options'))
 
+    def publish_options(self, tool_id=None):
+        """Show enabled organizations without choosing one for the user.
+
+        For an update, offer the original classification as context only. A
+        caller still has to obtain the user's explicit choice before preparing.
+        """
+        options = self.client.json('/api/catalog/options')
+        result = {'organizations': options['organizations'], 'categories': options['categories']}
+        if tool_id is not None:
+            existing = self.get_item(positive(tool_id))
+            identity = self.client.json('/api/integration/me')['user']['id']
+            if existing.get('ownerId') != identity:
+                raise SquareError('본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
+            org_id, name = existing.get('orgId'), existing.get('org')
+            if isinstance(org_id, str) and org_id:
+                result['currentOrganization'] = {
+                    'id': org_id, 'name': name or '',
+                    'available': any(row.get('id') == org_id for row in options['organizations']),
+                }
+        return result
+
     def prepare_publish(self,metadata,source_path='',target='review',tool_id=None):
         if target not in {'review','new','update'}:
             raise SquareError('target은 review/new/update 중 선택하세요. 비슷한 이름만으로 업데이트하지 않습니다.')

@@ -593,13 +593,92 @@ def test_mcp_draft_preserves_confirmed_copy_identity_and_source(settings,monkeyp
                   guide='사내 메일 조회 권한이 필요합니다. KEY는 포함하지 않습니다.')
     before=copy.deepcopy(values)
     asyncio.run(server.make_server(settings.path).call_tool('prepare_publish',{
-        'metadata':values,'source_path':str(source),'target':'new'}))
+        'metadata':values,'source_path':str(source),'target':'new','organization_confirmed':True}))
     posted,raw=client.drafts[0]
     for key in ('name','desc','workTags','guide','packageId','orgId','categoryId','approval'):
         assert posted[key]==before[key]
     assert values==before and source.read_bytes()==original and raw==original
     assert not any('/commit' in route for route,_,_ in client.calls)
     assert not client.downloads
+
+
+def tool_result(value):
+    if isinstance(value, tuple): return value[1]
+    if isinstance(value, dict): return value
+    return json.loads(''.join(block.text for block in value if hasattr(block, 'text')))
+
+
+@pytest.mark.parametrize('target', ['new', 'update'])
+def test_mcp_publish_requires_explicit_organization_before_draft(settings, monkeypatch, target):
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    class OrganizationClient(FakeClient):
+        def json(self, path, method='GET', data=None):
+            if path == '/api/tools/1':
+                self.calls.append((path, method, data))
+                return {'ownerId': self.owner, 'revision': 3, 'orgId': 'org', 'org': '공통'}
+            return super().json(path, method, data)
+    client = OrganizationClient()
+    monkeypatch.setattr(server, 'Runtime', lambda config: Runtime(settings, client))
+    source = settings.roots[0] / 'SKILL.md'; source.write_text('# demo', encoding='utf-8')
+    args = {'metadata': metadata(), 'source_path': str(source), 'target': target}
+    if target == 'update': args['tool_id'] = 1
+    mcp = server.make_server(settings.path)
+    response = tool_result(asyncio.run(mcp.call_tool('prepare_publish', args)))
+    assert response['organizationSelectionRequired'] and response['ready'] is False
+    assert response['options']['organizations'] == [{'id': 'org', 'name': '공통'}]
+    assert not client.drafts and not (settings.state / 'publish').exists()
+    if target == 'new':
+        assert not any(path == '/api/integration/me' for path, _, _ in client.calls)
+    if target == 'update':
+        assert response['options']['currentOrganization'] == {'id': 'org', 'name': '공통', 'available': True}
+    args['organization_confirmed'] = True
+    asyncio.run(mcp.call_tool('prepare_publish', args))
+    assert client.drafts[-1][0]['orgId'] == 'org'
+
+
+def test_mcp_publish_rejects_missing_or_invalid_organization(settings, monkeypatch):
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    client = FakeClient(); monkeypatch.setattr(server, 'Runtime', lambda config: Runtime(settings, client))
+    source = settings.roots[0] / 'SKILL.md'; source.write_text('# demo', encoding='utf-8')
+    mcp = server.make_server(settings.path)
+    values = metadata(); values.pop('orgId')
+    args = {'metadata': values, 'source_path': str(source), 'target': 'new', 'organization_confirmed': True}
+    response = tool_result(asyncio.run(mcp.call_tool('prepare_publish', args)))
+    assert response['organizationSelectionRequired'] and not client.drafts
+    args['metadata'] = {**values, 'orgId': 'no-such-organization'}
+    with pytest.raises(Exception, match='조직'):
+        asyncio.run(mcp.call_tool('prepare_publish', args))
+    assert not client.drafts and not (settings.state / 'publish').exists()
+    args['metadata'] = metadata(); args['organization_confirmed'] = 'true'
+    with pytest.raises(Exception):
+        asyncio.run(mcp.call_tool('prepare_publish', args))
+    assert not client.drafts
+
+
+def test_mcp_review_does_not_confirm_guessed_organization(settings, monkeypatch):
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    client = FakeClient(); monkeypatch.setattr(server, 'Runtime', lambda config: Runtime(settings, client))
+    source = settings.roots[0] / 'SKILL.md'; source.write_text('# demo', encoding='utf-8')
+    values = metadata()
+    response = tool_result(asyncio.run(server.make_server(settings.path).call_tool('prepare_publish', {
+        'metadata': values, 'source_path': str(source), 'target': 'review'})))
+    assert response['targetSelectionRequired'] and response['organizationSelectionRequired']
+    assert 'orgId' not in response['metadata'] and values['orgId'] == 'org'
+    assert not client.drafts and not (settings.state / 'publish').exists()
+
+
+def test_mcp_update_organization_options_require_tool_ownership(settings, monkeypatch):
+    pytest.importorskip('mcp')
+    from pt_square_mcp import server
+    client = FakeClient(); client.owner = 'somebody-else'
+    monkeypatch.setattr(server, 'Runtime', lambda config: Runtime(settings, client))
+    with pytest.raises(Exception, match='본인'):
+        asyncio.run(server.make_server(settings.path).call_tool('prepare_publish', {
+            'metadata': metadata(), 'target': 'update', 'tool_id': 1}))
+    assert not client.drafts and not (settings.state / 'publish').exists()
 
 
 @pytest.fixture
