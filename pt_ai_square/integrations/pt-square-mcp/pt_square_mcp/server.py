@@ -226,6 +226,11 @@ def make_server(config_path=DEFAULT_CONFIG):
         return run('get_item',tool_id)
 
     @mcp.tool(annotations=write)
+    def like_item(tool_id:int,liked:StrictBool)->dict:
+        """사용자가 요청한 도구에 좋아요를 누르거나 취소합니다. liked=true는 좋아요, false는 취소입니다. 반드시 사용자의 명시적 요청에 따라 선택하며 검색·다운로드만으로 임의로 누르지 않습니다. 반복 호출은 같은 상태를 유지합니다. count가 null이면 상태는 저장되었지만 총 개수는 아직 확인하지 못한 것입니다."""
+        return run('like_item',tool_id,liked)
+
+    @mcp.tool(annotations=write)
     def download_item(tool_id:int,output_directory:str='',update:bool=False)->dict:
         """경로 생략 시 AI_SQUARE/downloads 아래 서버·도구·버전별 자동 저장. SHA-256 확인 및 웹과 동일 고유 다운로드 집계. 업데이트는 update=true. 설치·실행하지 않습니다."""
         return run('download_item',tool_id,output_directory,update)

@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from .client import Client, positive, automatic_download_directory
 from .config import AuthenticationRequired, SquareError, Settings, atomic_json, scoped_path, no_links
 from .files import inspect, package, sha256
-from .install import Installer
+from .install import Installer, digest
 from .profiles import validate_profile
 
 
@@ -53,12 +53,44 @@ class Runtime:
     def get_item(self,tool_id):
         return self.client.json(f'/api/tools/{positive(tool_id)}')
 
+    def like_item(self,tool_id,liked):
+        # Use an explicit desired state so retries cannot toggle the selection.
+        if type(liked) is not bool:
+            raise SquareError('좋아요 상태는 true 또는 false로 지정해 주세요.')
+        return self.client.json(f'/api/tools/{positive(tool_id)}/like', 'PUT', {'liked': liked})
+
     def download_item(self,tool_id,output_directory='',update=False):
+        if type(update) is not bool:
+            raise SquareError('수신 용도는 true 또는 false여야 합니다.')
+        tool_id=positive(tool_id)
+        identity=self.client.json('/api/integration/me').get('user')
+        user_id=identity.get('id') if isinstance(identity,dict) else None
+        if not isinstance(user_id,str) or not user_id:
+            raise SquareError('연결된 사용자 정보를 확인할 수 없습니다. 다시 연결해 주세요.')
+        account_binding=digest([self.settings.url,user_id])
+        receipt=no_links(self.settings.state/'download-receipts'/(digest([self.settings.url,user_id,tool_id])+'.json'))
+        installed=any(record.get('origin')==self.settings.url and record.get('toolId')==tool_id
+                      and record.get('accountBinding')==account_binding
+                      for record in self.installer.records().values() if isinstance(record,dict))
+        # An update requested with a newly switched employee KEY is that
+        # employee's first receipt, even if another account populated the cache.
+        # An existing installation or a successful previous receipt for this
+        # account retains the ordinary update purpose.
+        known=receipt.is_file() or installed
         manifest=self.client.manifest(tool_id)
         output=scoped_path(output_directory,self.settings.roots) if output_directory else automatic_download_directory(self.settings,manifest)
-        artifact=self.client.download(manifest,output,update=update)
+        artifact=self.client.download(manifest,output,update=update and known)
+        receipt_pending=False
+        try:
+            atomic_json(receipt,{'schemaVersion':1})
+        except (OSError,SquareError):
+            # A receipt is an optimization for the next call; the server
+            # already accepted this download. Its per-user deduplication
+            # prevents another rank point if a later call needs to retry it.
+            receipt_pending=True
         return {'downloaded':True,'installed':False,'file':str(artifact),'toolId':tool_id,'release':manifest['release'],
-                'sha256':manifest['sha256'],'notice':'웹과 동일한 다운로드 API를 사용합니다. 업데이트 수신은 추가 집계하지 않습니다.'}
+                'sha256':manifest['sha256'],'receiptPending':receipt_pending,
+                'notice':'웹과 동일한 다운로드 API를 사용합니다. 같은 사번의 반복 수신은 추가 점수가 없습니다.'}
 
     def check_updates(self,tool_id=None):
         results=[]

@@ -17,6 +17,9 @@ from pt_square_mcp import transactions
 class FixtureClient:
     def __init__(self, kind, directory):
         self.kind, self.directory, self.release = kind, directory, 1
+    def json(self, path):
+        assert path == '/api/integration/me'
+        return {'user': {'id': 'crash-fixture-user'}}
     def content(self):
         raw = ('# version ' + str(self.release) + '\n').encode()
         if self.kind == 'skill':

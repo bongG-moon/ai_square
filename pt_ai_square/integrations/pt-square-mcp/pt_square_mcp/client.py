@@ -12,7 +12,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from .config import AuthenticationRequired, SquareError, no_links
 
 MAX_FILE_BYTES = 128 * 1024 * 1024
-ENDPOINTS = re.compile(r'^/(?:api/integration/me|api/catalog(?:/options)?|api/publish-targets|api/tools/[1-9][0-9]*(?:/manifest|/version-check)?|api/publish-drafts(?:/[a-f0-9-]+(?:/commit)?)?|download/[1-9][0-9]*/[1-9][0-9]*)$')
+ENDPOINTS = re.compile(r'^/(?:api/integration/me|api/catalog(?:/options)?|api/publish-targets|api/tools/[1-9][0-9]*(?:/manifest|/version-check|/like)?|api/publish-drafts(?:/[a-f0-9-]+(?:/commit)?)?|download/[1-9][0-9]*/[1-9][0-9]*)$')
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -45,7 +45,11 @@ class Client:
         if (parsed.scheme or parsed.netloc or parsed.fragment or '\\' in path
                 or any(ord(c) < 32 for c in path) or not ENDPOINTS.fullmatch(parsed.path)):
             raise SquareError('허용되지 않은 API 경로입니다.')
-        if method not in {'GET', 'POST'} or (method == 'POST' and not parsed.path.startswith('/api/publish-drafts')):
+        like_path = re.fullmatch(r'/api/tools/[1-9][0-9]*/like', parsed.path) is not None
+        if (method not in {'GET', 'POST', 'PUT'}
+                or (method == 'POST' and not parsed.path.startswith('/api/publish-drafts'))
+                or (method == 'PUT' and (not like_path or parsed.query))
+                or (like_path and method != 'PUT')):
             raise SquareError('허용되지 않은 API 작업입니다.')
         headers = {'Authorization': 'Bearer ' + self.settings.token(), 'Accept': 'application/json,application/octet-stream',
                    'User-Agent': 'PT-AI-SQUARE-MCP/1'}
@@ -135,10 +139,28 @@ class Client:
         directory.mkdir(parents=True, exist_ok=True)
         target = no_links(directory / f'tool-{tool_id}-v{release}{suffix}')
         if target.exists():
-            # Reuse a verified already downloaded file; do not count an artificial second transfer.
-            if target.stat().st_size == size and hashlib.sha256(target.read_bytes()).hexdigest() == sha:
-                return target
-            raise SquareError('대상에 다른 내용의 파일이 있습니다. 새 폴더를 선택하세요.')
+            if target.stat().st_size != size or hashlib.sha256(target.read_bytes()).hexdigest() != sha:
+                raise SquareError('대상에 다른 내용의 파일이 있습니다. 새 폴더를 선택하세요.')
+            # The same Windows folder can be used with another employee's KEY.
+            # Always request the download as the current user so the server can
+            # record that user's first download and subscription. Its existing
+            # per-user deduplication prevents repeated downloads adding rank points.
+            # Verify the response even though we preserve the existing file.
+            received, digest = 0, hashlib.sha256()
+            with self.open(url + ('?purpose=update' if update else '')) as response:
+                while chunk := response.read(1024 * 1024):
+                    received += len(chunk)
+                    if received > size:
+                        raise SquareError('수신 파일이 선언된 크기를 초과합니다.')
+                    digest.update(chunk)
+            if received != size or digest.hexdigest() != sha:
+                raise SquareError('파일 SHA-256 또는 크기가 다릅니다. 설치하지 않았습니다.')
+            current = self.manifest(tool_id)
+            if (current.get('release'), current.get('sha256'), current.get('installProfile')) != (release, sha, manifest.get('installProfile')):
+                raise SquareError('다운로드 중 배포 정보가 바뀌었습니다. 다시 준비하세요.')
+            if target.stat().st_size != size or hashlib.sha256(target.read_bytes()).hexdigest() != sha:
+                raise SquareError('다운로드 중 기존 파일이 변경되었습니다. 다시 확인해 주세요.')
+            return target
         part = no_links(directory / (uuid.uuid4().hex + '.part'))
         try:
             received, digest = 0, hashlib.sha256()

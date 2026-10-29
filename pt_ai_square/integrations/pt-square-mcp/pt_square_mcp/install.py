@@ -172,7 +172,18 @@ class Installer:
         config_file = no_links(plan['configFile']) if plan['configFile'] else None
         if config_file and (sha256(config_file) if config_file.exists() else None)!=plan['configHash']:
             raise SquareError('MCP 설정이 변경되었습니다. 다른 작업을 보존하기 위해 중단했습니다.')
-        artifact = self.client.download(current,automatic_download_directory(self.settings,current),update=bool(previous))
+        # An installation on this PC may have been made by a different employee.
+        # Bind the record to the server-authenticated user, not the rotating KEY,
+        # so a new account gets its own first-download accounting. Legacy records
+        # without a binding are treated as an ordinary download; the server's
+        # per-user deduplication prevents a second ranking point for existing users.
+        identity = self.client.json('/api/integration/me').get('user')
+        user_id = identity.get('id') if isinstance(identity, dict) else None
+        if not isinstance(user_id, str) or not user_id:
+            raise SquareError('연결된 사용자 정보를 확인할 수 없습니다. 다시 연결해 주세요.')
+        account_binding = digest([self.settings.url, user_id])
+        same_account = bool(previous and previous.get('accountBinding') == account_binding)
+        artifact = self.client.download(current,automatic_download_directory(self.settings,current),update=same_account)
         staging = no_links(self.settings.state/'staging'/plan_id)
         staging.parent.mkdir(parents=True,exist_ok=True)
         if artifact.suffix.lower()=='.zip':
@@ -213,6 +224,7 @@ class Installer:
         planned_config_hash = (hashlib.sha256(transactions.json_bytes(planned_config)).hexdigest()
                                if planned_config is not None else None)
         record = dict(origin=self.settings.url,toolId=plan['toolId'],release=current['release'],sha256=current['sha256'],
+                      accountBinding=account_binding,
                       host=profile['host'],scope=plan['scope'],scopeDir=str(scope_dir),scopeIdentity=plan['scopeIdentity'],target=str(target),treeHash=tree_digest(staging),
                       configFile=str(config_file) if config_file else None,configEntry=entry_data,configHash=planned_config_hash,
                       serverName=plan['serverName'],status='configured' if profile['kind']=='mcp' else 'installed' if profile['kind']=='skill' else 'ready-to-launch',
