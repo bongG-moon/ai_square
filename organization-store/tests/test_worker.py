@@ -187,6 +187,13 @@ def test_other_directory_requires_host_grant_and_matches_plan_on_commit(configur
     assert store.settings().roots == [store.directory]
 
 
+@pytest.mark.parametrize('permission', [True, False])
+def test_detail_preserves_owner_update_capability(configured, permission):
+    store, client, _, _ = configured
+    client.json = lambda path, *args: {'id': 1, 'name': 'Fixture', 'canPublishOwnUpdate': permission}
+    assert store.dispatch('detail', {'toolId': 1})['item']['canPublishOwnUpdate'] is permission
+
+
 def test_detail_counts_only_explicit_open_and_old_server_does_not_block(configured):
     store, client, *_ = configured
     calls = []

@@ -35,7 +35,7 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
      if(m.action==='status')result={configured:true,baseUrl:'https://square.example.test',existingConnectionAvailable:true};
      if(m.action==='options')result=options;
      if(m.action==='catalog')result={items,total:items.length};
-     if(m.action==='detail')result={item:{...items.find(i=>i.id===m.payload.toolId),guide:metadata.guide},canInstall:false};
+     if(m.action==='detail')result={item:{...items.find(i=>i.id===m.payload.toolId),guide:metadata.guide,...(typeof config.detailAccess==='boolean'?{canPublishOwnUpdate:config.detailAccess}:{})},canInstall:false};
      if(m.action==='publishUpdateAccess'){
       result={canUpdate:config.direct===true&&!config.readonly&&m.payload.toolId===1};
       if(window.failAccess){error='private-key-or-server-detail';}
@@ -116,6 +116,11 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
   await fixture({direct:true});await page.locator('.tool-card').first().click();await page.locator('#detail-tab-versions').click();const uncertainOwn=page.getByRole('button',{name:'업무 보고서 작성 새 버전 등록'});await uncertainOwn.waitFor();await uncertainOwn.click();await page.locator('#publish-dialog').waitFor({state:'visible'});await page.locator('#publish-pick-file').click();await page.locator('#publish-file-name').filter({hasText:'weekly.zip'}).waitFor();await page.evaluate(()=>window.failCommit=true);await page.locator('#publish-prepare').click();await page.locator('#publish-message').filter({hasText:'등록 결과를 확인하지 못했습니다.'}).waitFor();
   await page.locator('#publish-close').click();await uncertainOwn.click();await page.locator('#detail-feedback').filter({hasText:'결과를 먼저 확인'}).waitFor();assert.equal(await page.locator('#publish-dialog').evaluate(n=>n.open),false);await page.locator('#detail-close').click();await page.locator('#publish-open').click();assert.equal(await page.locator('#publish-review').isVisible(),true);
   // A non-owner never receives the direct action.
+  await fixture({direct:true,detailAccess:true});await page.locator('.tool-card').first().click();await page.locator('#detail-tab-versions').click();
+  await page.getByRole('button',{name:'업무 보고서 작성 새 버전 등록'}).click();await page.locator('#publish-dialog').waitFor({state:'visible'});
+  assert.equal(await count('publishUpdateAccess'),0);assert.equal(await page.evaluate(()=>requests.filter(r=>r.action==='publishOptions'&&r.payload.toolId===1).length),1);
+  await fixture({detailAccess:false});await page.locator('.tool-card').first().click();await page.locator('#detail-tab-versions').click();
+  assert.equal(await page.getByRole('button',{name:/새 버전 등록/}).count(),0);assert.equal(await count('publishUpdateAccess'),0);
   await fixture({direct:true});await page.locator('.tool-card').nth(1).click();await page.locator('#detail-tab-versions').click();await page.waitForFunction(()=>requests.some(r=>r.action==='publishUpdateAccess'));await page.waitForTimeout(50);assert.equal(await page.getByRole('button',{name:/새 버전 등록/}).count(),0);
   // Unsubmitted text and selected file survive a cancelled transition.
   await fixture({direct:true});await page.locator('#publish-open').click();await page.waitForFunction(()=>!document.querySelector('#publish-prepare').disabled);await page.locator('#publish-name').fill('보존할 원고');await page.locator('#publish-pick-file').click();await page.locator('#publish-file-name').filter({hasText:'weekly.zip'}).waitFor();await page.locator('#publish-close').click();await page.locator('.tool-card').first().click();await page.locator('#detail-tab-versions').click();await page.getByRole('button',{name:'업무 보고서 작성 새 버전 등록'}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.locator('#confirm-no').click();await page.locator('#detail-close').click();await page.locator('#publish-open').click();assert.equal(await page.locator('#publish-name').inputValue(),'보존할 원고');assert.match(await page.locator('#publish-file-name').innerText(),/weekly.zip/);

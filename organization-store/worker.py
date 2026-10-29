@@ -61,7 +61,7 @@ _zip_spec.loader.exec_module(zip_install)
 VERSION = '0.1.0'
 PUBLISH_ACCESS_DEADLINE = 6.0
 ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail', 'requestAccess', 'cancelAccessRequest',
-                     'like', 'download', 'prepareInstallRequest', 'prepareInstall', 'install', 'installations',
+                     'like', 'download', 'prepareInstallRequest', 'prepareInstall', 'install', 'installations', 'removeInstallationRecord',
                      'checkUpdates', 'verify', 'rollback', 'publishOptions', 'publishUpdateAccess',
                      'inspectPublishSource', 'preparePublish', 'publishStatus', 'publish'})
 PUBLISH_FIELDS = frozenset({'name', 'desc', 'owner', 'platform', 'type', 'guide', 'orgId',
@@ -498,6 +498,27 @@ class Store:
         return {key: record for key, record in runtime.installer.records().items()
                 if record.get('origin') == runtime.settings.url}
 
+    def hidden_records_path(self, runtime):
+        origin = hashlib.sha256(runtime.settings.url.encode()).hexdigest()
+        return no_links(self.directory / 'hidden-installations' / (origin + '.json'))
+
+    def hidden_records(self, runtime):
+        path = self.hidden_records_path(runtime)
+        if not path.exists():
+            return {}
+        value = read_json(path)
+        rows = value.get('items') if isinstance(value, dict) else None
+        if (not isinstance(rows, dict) or value.get('schemaVersion') != 1
+                or value.get('origin') != runtime.settings.url
+                or any(not isinstance(key, str) or not isinstance(mark, str)
+                       or not re.fullmatch(r'[0-9a-f]{64}', mark) for key, mark in rows.items())):
+            raise SquareError('설치 목록 설정을 확인하지 못했어요. 기록을 변경하지 않았습니다.')
+        return rows
+
+    def visible_records(self, runtime, records):
+        hidden = self.hidden_records(runtime)
+        return {key: record for key, record in records.items() if hidden.get(key) != digest(record)}
+
     @staticmethod
     def display_metadata(value):
         # Cosmetic snapshots never become installation authority or commands.
@@ -671,6 +692,7 @@ class Store:
         for key, record in records.items():
             saved = cache.get(str(record.get('toolId')), {})
             item = dict({field: record.get(field) for field in fields}, installationId=key,
+                        recordDigest=digest(record),
                         rollbackAvailable=record.get('status') in {'installed', 'configured'},
                         **self.display_metadata(saved))
             completed_plan = self.completed_plan_id(runtime, record)
@@ -1221,7 +1243,7 @@ class Store:
             # metadata/version requests do not. Another install can proceed.
             with operation_lock(settings.state):
                 recovery = runtime.installer.recover()
-                records = self.records(runtime)
+                records = self.visible_records(runtime, self.records(runtime))
             if action == 'installations':
                 return dict(recovery=recovery, items=self.installation_items(runtime, records))
             return self.check_updates(runtime, records, recovery,
@@ -1235,6 +1257,29 @@ class Store:
                 return self.install(runtime, payload)
             recovery = runtime.installer.recover()
             records = self.records(runtime)
+            if action == 'removeInstallationRecord':
+                if set(payload) != {'installationId', 'recordDigest', 'confirmed'} or payload.get('confirmed') is not True:
+                    raise SquareError('목록에서 제거할 설치 기록을 다시 확인해 주세요.')
+                installation_id, expected = payload.get('installationId'), payload.get('recordDigest')
+                if (not isinstance(installation_id, str) or installation_id not in records
+                        or not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected)):
+                    raise SquareError('현재 연결의 설치 기록을 찾을 수 없습니다.')
+                record = records[installation_id]
+                if digest(record) != expected:
+                    raise SquareError('설치 기록이 변경되었어요. 목록을 새로고침한 뒤 다시 확인해 주세요.')
+                if any(row.get('toolId') == record.get('toolId') for row in recovery.get('blocked', [])):
+                    raise SquareError('중단된 설치를 먼저 확인해 주세요. 설치 기록은 그대로 유지됩니다.')
+                hidden = self.hidden_records(runtime)
+                # Keep ownership and rollback authority in the installer; hiding
+                # only affects this extension's list and update checks.
+                hidden = {key: value for key, value in hidden.items()
+                          if key in records and digest(records[key]) == value}
+                hidden[installation_id] = expected
+                path = self.hidden_records_path(runtime)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_json(path, dict(schemaVersion=1, origin=runtime.settings.url, items=hidden))
+                return dict(removed=True, installationId=installation_id,
+                            notice='목록에서 제거했어요. 설치 파일과 설정은 그대로 유지됩니다.')
             if action == 'download':
                 tool_id = positive(payload.get('toolId'))
                 update = any(r.get('toolId') == tool_id and r.get('status') in {'installed', 'configured', 'verified-file'}

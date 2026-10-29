@@ -45,6 +45,7 @@ const font = fs.readFileSync(path.join(process.env.AX_WORKSPACE_SOURCE || path.j
             else result={item:{...item},manifest:item.access==='approved'?{release:1,downloadUrl:'/api/artifact',installProfile:{kind:'skill',scopes:['user','project']}}:{},canInstall:item.access==='approved',canInspectInstall:false,canRequestAccess:!config.legacy&&item.access==='none',webUrl:'https://square.example.test/'};
           }
           if(message.action==='publishUpdateAccess')result={canUpdate:false};
+          if(message.action==='like')result={liked:message.payload.liked,count:message.payload.liked?4:3};
           if(message.action==='requestAccess') {
             const item=window.items.find(item=>item.id===message.payload.toolId);
             if(window.requestMode==='error')error='private-server-detail';
@@ -78,6 +79,8 @@ const font = fs.readFileSync(path.join(process.env.AX_WORKSPACE_SOURCE || path.j
 
     await fixture({approved:true});await open();await connect();
     assert.equal(await requestButton().count(),0);assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),1);assert.equal(await count('requestAccess'),0);
+    await page.getByRole('button',{name:/좋아요/}).click();await page.getByRole('button',{name:/좋아요 4/}).waitFor();
+    assert.deepEqual(await page.evaluate(()=>requests.find(r=>r.action==='like').payload),{toolId:1,liked:true});
 
     await fixture();await open();await connect();
     assert.equal(await count('requestAccess'),0);assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),0);

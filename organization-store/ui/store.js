@@ -423,6 +423,21 @@
         rollback.title = '이 PC의 해당 설치를 되돌립니다. 업데이트는 직전 버전으로 복구하고, 최초 설치는 제거합니다. 변경 범위를 먼저 확인합니다.';
         rollback.setAttribute('aria-description', rollback.title); actions.append(rollback);
       }
+      if (record.installationId && /^[a-f0-9]{64}$/.test(record.recordDigest || '')) {
+        const remove = button('목록에서 제거', 'text-button', async () => {
+          const generation = state.connectionGeneration, origin = state.baseUrl;
+          if (!await confirm('설치 목록에서 제거할까요?', [el('p', '', '이 항목을 설치된 기능과 업데이트 목록에서 제외합니다. 설치된 파일과 연결 설정은 그대로 유지됩니다.'), el('p', 'detail-result', recordName(record))], '목록에서 제거')) return;
+          if (generation !== state.connectionGeneration || origin !== state.baseUrl) return;
+          if (installationActive()) throw Error('설치 진행이 끝난 뒤 목록에서 제거해 주세요.');
+          const result = await rpc('removeInstallationRecord', {installationId:record.installationId, recordDigest:record.recordDigest, confirmed:true});
+          if (generation !== state.connectionGeneration || origin !== state.baseUrl) return;
+          if (!result?.removed || result.installationId !== record.installationId) throw Error('목록 제거 결과를 확인하지 못했어요. 새로고침 후 확인해 주세요.');
+          feedback(result.notice || '목록에서 제거했어요. 설치 파일과 설정은 그대로 유지됩니다.');
+          if (state.tab === 'installed' || state.tab === 'updates') await loadTab(state.tab);
+        });
+        remove.title = '설치된 파일과 설정을 유지하고 이 항목을 설치·업데이트 목록에서 제외합니다.';
+        actions.append(remove);
+      }
     }
     n.append(symbol(type),main,actions); return n;
   }
@@ -617,23 +632,27 @@
       }
       const detailTicket=state.detailGeneration, connectionTicket=state.connectionGeneration, origin=state.baseUrl;
       const current=()=>state.detail===result&&state.detailGeneration===detailTicket&&state.detailPanelGeneration===panelTicket&&state.connectionGeneration===connectionTicket&&state.baseUrl===origin&&state.detailTab==='versions'&&$('detail-dialog').open;
+      function showUpdateButton(){
+        if(!current())return;
+        const update=button('새 버전 등록','secondary',()=>openOwnUpdate(result,current,update));
+        update.setAttribute('aria-label',`${item.name} 새 버전 등록`);heading.append(update);
+      }
       // Optional read only authorization runs only on this tab. An older host,
       // offline server or a different owner must not break the detail screen.
       function checkUpdateAccess(){
         if(!current())return;
         heading.querySelector('.detail-version-access')?.remove();
         rpc('publishUpdateAccess',{toolId:item.id},current).then(access=>{
-          if(current()&&access?.canUpdate===true){
-            const update=button('새 버전 등록','secondary',()=>openOwnUpdate(result,current,update));
-            update.setAttribute('aria-label',`${item.name} 새 버전 등록`);heading.append(update);
-          }
+          if(current()&&access?.canUpdate===true)showUpdateButton();
         }).catch(()=>{
           if(!current())return;
           const notice=el('div','detail-version-access');notice.setAttribute('role','status');
           notice.append(el('span','muted','등록 권한을 확인하지 못했어요.'),button('다시 확인','text-button',checkUpdateAccess));heading.append(notice);
         });
       }
-      checkUpdateAccess();
+      if (typeof item.canPublishOwnUpdate === 'boolean') {
+        if (item.canPublishOwnUpdate) showUpdateButton();
+      } else checkUpdateAccess();
       if (!versions.length) panel.append(el('p','muted detail-callout','확인할 수 있는 배포 이력이 없습니다.'));
       for (const version of versions) {
         const row=el('article','version-row'), heading=el('div','version-heading'); heading.append(el('strong','',`v${version.n}`));
@@ -678,7 +697,7 @@
     identityText.append(el('strong','',item.org || '등록 조직 미지정'),el('p','',`등록자 · ${registrant(item)}`),metrics(item)); identity.append(symbol(item.type),identityText);
     const actions=el('div','detail-top-actions');
     const like=button(`${item.liked?'♥':'♡'} 좋아요 ${number(item,'likes') ?? ''}`.trim(),'secondary',async()=>{
-      const response=await rpc('like',{toolId,liked:!item.liked}); item.liked=response.liked; item.likes=response.count; if(item.statistics)item.statistics.likes=response.count;
+      const response=await rpc('like',{toolId:item.id,liked:!item.liked}); item.liked=response.liked; item.likes=response.count; if(item.statistics)item.statistics.likes=response.count;
       like.textContent=`${response.liked?'♥':'♡'} 좋아요 ${response.count}`;like.setAttribute('aria-pressed',String(response.liked));identityText.querySelector('.metrics')?.replaceWith(metrics(item));updateCard(item);feedback('웹과 같은 좋아요 기록에 반영했어요.');
     }); like.setAttribute('aria-pressed',String(!!item.liked));
     const gated=item.access&&item.access!=='approved';like.disabled=!!gated;if(gated)like.title='사용 승인 후 좋아요를 남길 수 있어요.';

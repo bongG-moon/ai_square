@@ -44,6 +44,8 @@ def test_public_bundle_is_neutral_and_only_has_offline_material(distribution):
         assert b'requestAccess' in archive.read(manifest['entrypoint'])
         assert 'cancelAccessRequest' in manifest['actions']
         assert b'cancelAccessRequest' in archive.read(manifest['entrypoint'])
+        assert 'removeInstallationRecord' in manifest['actions']
+        assert b'removeInstallationRecord' in archive.read(manifest['entrypoint'])
     assert b'from build import' not in files['configure_server.py']
 
 

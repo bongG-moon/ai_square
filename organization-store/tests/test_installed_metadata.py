@@ -17,6 +17,80 @@ def seed(store, project, count=1):
     return rows
 
 
+def test_remove_from_list_preserves_files_authority_and_other_scope(configured):
+    store, client, project, _ = configured
+    rows = seed(store, project)
+    rows['another-scope'] = dict(rows['install-1'], scope='user', target=str(project / 'other'))
+    path = store.settings().state / 'installations.json'
+    worker.atomic_json(path, rows)
+    target = project / 'skill-1'
+    target.mkdir()
+    (target / 'SKILL.md').write_text('my instructions', encoding='utf-8')
+    before = path.read_bytes()
+    reader(client, lambda p: version(tid(p)) if 'version-check' in p else {'id': tid(p), 'name': 'Same name'})
+    listed = store.dispatch('installations')['items']
+    chosen = next(row for row in listed if row['installationId'] == 'install-1')
+    args = dict(installationId='install-1', recordDigest=chosen['recordDigest'], confirmed=True)
+    assert store.dispatch('removeInstallationRecord', args)['removed']
+    assert store.dispatch('removeInstallationRecord', args)['removed']  # safe retry
+    assert [row['installationId'] for row in store.dispatch('installations')['items']] == ['another-scope']
+    assert [row['installationId'] for row in store.dispatch('checkUpdates')['items']] == ['another-scope']
+    assert path.read_bytes() == before
+    assert (target / 'SKILL.md').read_text(encoding='utf-8') == 'my instructions'
+    # A fresh install at the same location (even the same version) has a new
+    # record identity and must reappear without losing other scope choices.
+    rows['install-1']['created'] = 2
+    worker.atomic_json(path, rows)
+    assert {row['installationId'] for row in store.dispatch('installations')['items']} == {'install-1', 'another-scope'}
+    with pytest.raises(worker.SquareError, match='변경'):
+        store.dispatch('removeInstallationRecord', args)
+    assert worker.read_json(path) == rows
+
+
+def test_remove_requires_explicit_confirmation_and_validates_scope(configured):
+    store, client, project, _ = configured
+    seed(store, project)
+    reader(client, lambda p: {'id': tid(p), 'name': 'Test'})
+    row = store.dispatch('installations')['items'][0]
+    args = dict(installationId=row['installationId'], recordDigest=row['recordDigest'])
+    with pytest.raises(worker.SquareError): store.dispatch('removeInstallationRecord', args)
+    with pytest.raises(worker.SquareError): store.dispatch('removeInstallationRecord', {**args, 'confirmed':True, 'installationId':'missing'})
+    with pytest.raises(worker.SquareError): store.dispatch('removeInstallationRecord', {**args, 'confirmed':True, 'extra':'x'})
+    assert len(store.dispatch('installations')['items']) == 1
+
+
+def test_real_install_same_version_can_reappear_without_losing_ownership(configured):
+    store, client, project, _ = configured
+    reader(client, lambda p: {'id': tid(p), 'name': '실제 도구'})
+    plan = store.dispatch('prepareInstall', dict(toolId=1, scope='project'))
+    first = store.dispatch('install', dict(plan, confirmed=True))
+    item = store.dispatch('installations')['items'][0]
+    target = project / '.claude' / 'skills' / 'fixture-store' / 'SKILL.md'
+    original = target.read_bytes()
+    state_path = store.settings().state / 'installations.json'
+    canonical_before = state_path.read_bytes()
+    store.dispatch('removeInstallationRecord', dict(installationId=item['installationId'], recordDigest=item['recordDigest'], confirmed=True))
+    assert store.dispatch('installations')['items'] == []
+    assert target.read_bytes() == original and state_path.read_bytes() == canonical_before
+    again = store.dispatch('prepareInstall', dict(toolId=1, scope='project'))
+    assert again['canInstall'] is True
+    second = store.dispatch('install', dict(again, confirmed=True))
+    assert first['installationId'] == second['installationId']
+    assert store.dispatch('installations')['items'][0]['release'] == 1
+    assert target.read_bytes() == original
+
+
+def test_interrupted_install_blocks_removing_its_list_record(configured, monkeypatch):
+    store, client, project, _ = configured
+    seed(store, project)
+    reader(client, lambda p: {'id': tid(p), 'name': 'Test'})
+    row = store.dispatch('installations')['items'][0]
+    monkeypatch.setattr(worker.Installer, 'recover', lambda self: {'blocked': [{'toolId': 1}], 'recovered': []})
+    with pytest.raises(worker.SquareError, match='중단된 설치'):
+        store.dispatch('removeInstallationRecord', dict(installationId=row['installationId'], recordDigest=row['recordDigest'], confirmed=True))
+    assert len(store.dispatch('installations')['items']) == 1
+
+
 def version(tool_id, release=1, active=2, status='update_available', **extra):
     return dict(toolId=tool_id, installedRelease=release, activeRelease=active,
                 status=status, updatePaused=False, **extra)

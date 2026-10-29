@@ -194,7 +194,15 @@ def bootstrap():
 @api.get('/api/tools/<int:tid>')
 def details(tid):
     t=tool(tid);usable(t)
-    return jsonify(serialize(t,activity.statistics([tid],g.user['id'],time.time())[tid],time.time()))
+    item=serialize(t,activity.statistics([tid],g.user['id'],time.time())[tid],time.time())
+    # This is only a UI hint for the current personal KEY. The actual publish
+    # operation repeats authentication, ownership, revision and lifecycle checks.
+    # A web administrator may manage other tools, but a KEY can update only its
+    # own tool; do not substitute the broader canManage flag for ownership.
+    item['canPublishOwnUpdate'] = bool(
+        getattr(g, 'api_token_id', None) and getattr(g, 'api_token_scope', None) == 'publish'
+        and t.get('owner') == g.user['id'] and not t.get('deleted') and 'purge' not in t)
+    return jsonify(item)
 
 
 @api.post('/api/tools/<int:tid>/view')

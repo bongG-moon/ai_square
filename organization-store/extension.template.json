@@ -20,6 +20,7 @@
     "prepareInstall",
     "install",
     "installations",
+    "removeInstallationRecord",
     "checkUpdates",
     "verify",
     "rollback",
