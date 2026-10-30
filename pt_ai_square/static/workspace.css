@@ -285,16 +285,30 @@
 @media(max-width:700px){#square-app .sq-home-shelves .sq-empty{min-height:184px}#square-app form[data-work-form="idea-reply"],#square-app form[data-work-form="feedback"]{gap:20px;padding-top:20px}}
 
 /* Distribution declaration: quiet glass surfaces, consistent with registration. */
-.ws-package-import{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;margin:0 0 22px;background:#f5f5f780;border:1px solid #e6e6eb;border-radius:20px}
+.ws-package-import{display:grid;gap:15px;padding:20px 22px;margin:0 0 22px;background:#f8f9fc;border:1px dashed #cfd7e7;border-radius:18px;transition:background .2s,border-color .2s,box-shadow .2s}
+.ws-package-import-main{display:flex;align-items:center;gap:16px;min-width:0}
+.ws-package-import-main>div{flex:1;min-width:0}
+.ws-package-import-main strong{font-size:14px;font-weight:600;color:#4c5e81}
+.ws-package-import-main small{display:block;font-size:11px;color:#9299a8;line-height:1.6}
+#square-app .ws-package-import-main button{flex-shrink:0;font-size:12px;padding:10px 15px;border-radius:11px}
+.ws-package-import .ws-package-import-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:13px;background:#fff;color:#657fd1;flex-shrink:0}
+.ws-package-import .ws-package-import-icon svg{width:23px;height:23px;margin:0;color:inherit}
+.ws-package-import.is-dragging{background:#eef3ff;border-color:#6b8ae0;box-shadow:0 0 0 4px #527de014}
+#square-app .ws-package-import .ws-selected-file{margin:0;padding-top:14px;border-top:1px solid #e4e8f0;background:transparent;border-radius:0}
+.ws-package-import .ws-selected-file strong{overflow-wrap:anywhere}
+.ws-package-replacement{padding:15px 17px;border:1px solid #e2e7f2;border-radius:13px;background:#f7f9ff;text-align:left;overflow-wrap:anywhere}
+.ws-package-replacement>span{display:flex;align-items:center;gap:7px;font-size:11px;color:#7b89a5}
+.ws-package-replacement svg{width:16px;height:16px;flex-shrink:0}
+.ws-package-replacement>strong{display:block;font-size:14px;line-height:1.6;color:#465b85;margin-top:10px}
+.ws-package-replacement>p{font-size:12px;line-height:1.7;color:#7b8496;margin:5px 0 0}
 .ws-package-import svg{width:20px;height:20px;vertical-align:middle;margin-right:8px;color:#6e6e73}
 .ws-package-import p,.ws-package p{font-size:13px;line-height:1.65;color:#6e6e73;margin:8px 0}
-.ws-package-import label{white-space:nowrap;cursor:pointer}.ws-package-import label:focus-within{outline:2px solid #0071e3;outline-offset:3px}
 .ws-package{border:1px solid #e1e4e9;border-radius:18px;padding:18px 20px;margin:18px 0;background:#ffffffb8;backdrop-filter:blur(16px);overflow-wrap:anywhere}
 .ws-package-heading{display:flex;align-items:center;gap:8px}.ws-package-heading svg{width:18px;color:#347648}.ws-package-heading .ws-badge{margin-left:auto}
 .ws-package small{display:block;color:#77777d;font-size:12px;line-height:1.7}.ws-package .sq-link{display:inline-block;margin:8px 12px 8px 0}
 .ws-package-facts{display:grid;gap:6px;margin:12px 0;color:#6e6e73;font-size:12px}.ws-package-facts b{font-weight:500;color:#36363b;margin-left:8px}
 .ws-package.is-error{border-color:#e2b4b4}.ws-package.is-error strong{color:#9c3737}
-@media(max-width:640px){.ws-package-import{align-items:flex-start;flex-direction:column;gap:12px}.ws-package-import label{width:100%;text-align:center}.ws-package-heading{flex-wrap:wrap}}
+@media(max-width:640px){.ws-package-import{padding:17px;gap:12px}.ws-package-import-main{align-items:flex-start;flex-wrap:wrap;gap:12px}.ws-package-import-main>div{flex-basis:calc(100% - 56px)}.ws-package-import-main button{width:100%;justify-content:center}.ws-package-heading{flex-wrap:wrap}}
 #square-app .ws-scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:20px 0}
 #square-app .ws-scope-choice{display:grid;gap:9px;padding:20px;text-align:left;border:1px solid rgba(0,0,0,.09);border-radius:18px;background:rgba(255,255,255,.75);color:inherit;font:inherit;cursor:pointer;transition:background .2s,border-color .2s,box-shadow .2s}
 #square-app .ws-scope-choice svg{width:24px;height:24px;color:var(--blue,#4774dd)}

@@ -4,6 +4,10 @@
 
 ## 기본 배포 자료와 한글 파일 다운로드
 
+최신 파일 배포 Skill은 로컬 ZIP과 설명 제작 및 검사까지만 수행합니다. 서버 연결과 검색, 다운로드, 설치, 업로드는 MCP가 담당합니다. `build_guides.py`는 호환용 CLI 원본을 보존하되 `square_client.py`와 `publish_client.py`를 다운로드 Skill ZIP에서 제외합니다. 예전 Skill을 설치한 사용자는 개인 수정분을 보관하고 기존 Skill 폴더를 최신 ZIP의 폴더로 교체해야 예전 스크립트가 남지 않습니다. MCP는 별도로 최신 ZIP을 반영하고 AI 프로그램을 다시 시작합니다.
+
+자연어 검색 및 조직 추천 보완은 서버의 `backend/catalog_search.py`에도 적용됩니다. MCP ZIP만 교체해서는 서버 검색 방식이 바뀌지 않으므로 웹 서버 코드와 MCP 1.6.5, 배포 Skill ZIP과 가이드를 함께 배포합니다. 운영 설정, MongoDB 데이터와 업로드 파일은 보존하며 기존 실행 방식과 포트를 유지합니다.
+
 상단 **파일 배포 Skill**과 **가이드 다운로드**는 플랫폼에 포함된 자료이며 다운로드 주소를 `runtime_config.py`에 지정하지 않습니다. 파일 배포 Skill 버튼은 같은 사이트의 `/resources/distribution-skill.zip`으로 연결되고, 서버는 `static/guides/pt-file-distribution.zip`을 `pt-file-distribution.zip`이라는 이름으로 제공합니다. 기존 `PT_AI_SQUARE_파일배포_Skill.zip`도 호환용으로 유지하며 영문 파일이 없는 이전 배포에서는 이 파일을 읽습니다. 사용자·등록자 가이드는 `/static/guides/pt-ai-square-user-guide.html`에서 받습니다. 두 버튼 모두 영문 URL과 저장 이름을 사용하므로 프록시의 한글 경로 처리에 의존하지 않습니다.
 
 404 또는 파일 누락 안내가 나오면 실제 웹 프로세스가 실행되는 폴더의 `static/guides`에 영문 ZIP과 가이드 HTML이 포함됐는지 확인합니다. 웹 소스·`static/app.js`·배포 ZIP·가이드 HTML을 함께 갱신하고 기존 실행 방식으로 재시작한 뒤 브라우저를 새로고침하세요. ZIP이 둘 다 없으면 새 경로는 503으로 배포 자료 누락을 알립니다. 기존 업로드 저장소·MongoDB 데이터·운영 설정은 이 기본 자료와 별개이므로 교체하거나 초기화하지 않습니다. 배포 준비 시 `python scripts/build_guides.py`로 영문·기존 한글 ZIP을 같은 내용으로 생성하고, `python scripts/build_docs.py`로 영문 사용자 가이드와 이전 한글 이름의 호환본을 생성합니다. 웹 요청 중에는 기본 Skill ZIP을 만들지 않습니다.

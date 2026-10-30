@@ -172,7 +172,7 @@ def test_department_is_server_identity_not_query_user_or_department(search_app, 
     assert data['items'][1]['departmentPreference']['status'] == 'insufficient_sample'
 
 
-def test_small_samples_no_department_name_inference_and_90_day_window(search_app):
+def test_small_samples_and_90_day_window_also_apply_to_exact_department_names(search_app):
     seed(search_app, 1)
     seed(search_app, 2)
     department(search_app, 1, 4)
@@ -181,11 +181,74 @@ def test_small_samples_no_department_name_inference_and_90_day_window(search_app
     data = c.get('/api/catalog').json
     assert data['recommendation']['status'] == 'insufficient_sample'
     assert all('distinctUsers' not in row['departmentPreference'] for row in data['items'])
-    # Similar names, prefixes, request orgId or shared taxonomy are not identity.
+    # Exact server-side department names can match if the code is unavailable,
+    # but the same sample threshold and time window still apply.
     with search_app.app_context():
         db().users.update_many({}, {'$set': {'dept': '개발팀', 'orgId': 'organization-0'}})
         db().users.update_one({'_id': 'member'}, {'$set': {'dept_cd': ''}})
-    assert c.get('/api/catalog?orgId=organization-0').json['recommendation']['status'] == 'department_unknown'
+    meta = c.get('/api/catalog?orgId=organization-0').json['recommendation']
+    assert meta['status'] == 'insufficient_sample'
+    assert meta['identitySource'] == 'department_name'
+
+
+def test_exact_department_name_fallback_ranks_peers_without_disclosing_people(search_app):
+    seed(search_app, 1, '메일 조회 A')
+    seed(search_app, 2, '메일 조회 B')
+    department(search_app, 1, code='')
+    department(search_app, 2, 8, code='D999', prefix='unrelated')
+    with search_app.app_context():
+        db().users.update_many({'_id': {'$regex': '^colleague'}}, {'$set': {'dept': 'AI 개발팀'}})
+        db().users.update_many({'_id': {'$regex': '^unrelated'}}, {'$set': {'dept': 'AI 개발팀 지원'}})
+    c, h = client(search_app, dept='')
+    with search_app.app_context():
+        db().users.update_one({'_id': 'member'}, {'$set': {'dept': 'AI 개발팀'}})
+    token = c.post('/api/local-tokens', headers=h, json={'name': '부서명 추천'}).json['token']
+    for caller, headers in [(c, {}), (search_app.test_client(), {'Authorization': 'Bearer ' + token})]:
+        response = caller.get('/api/catalog', query_string={'q': '메일 내용 찾아줘',
+                              'dept': 'AI 개발팀 지원', 'dept_cd': 'D999'}, headers=headers)
+        assert response.status_code == 200
+        data = response.json
+        assert [row['id'] for row in data['items']] == [1, 2]
+        assert data['recommendation']['identitySource'] == 'department_name'
+        assert data['items'][0]['departmentPreference'] == {
+            'status': 'applied', 'distinctUsers': 5, 'identitySource': 'department_name'}
+        assert data['items'][1]['departmentPreference']['status'] == 'insufficient_sample'
+        assert 'PRIVATE PERSON' not in json.dumps(data) and 'colleague0' not in json.dumps(data)
+
+
+def test_department_code_precedes_same_name_and_ambiguous_names_are_not_combined(search_app):
+    seed(search_app, 1)
+    seed(search_app, 2)
+    department(search_app, 1, code='D001')
+    department(search_app, 2, 8, code='D002', prefix='same-name')
+    c, _ = client(search_app)
+    with search_app.app_context():
+        db().users.update_many({}, {'$set': {'dept': '개발팀'}})
+    known = c.get('/api/catalog').json
+    assert known['items'][0]['id'] == 1
+    assert known['recommendation']['identitySource'] == 'department_code'
+    with search_app.app_context():
+        db().users.update_one({'_id': 'member'}, {'$set': {'dept_cd': ''}})
+    unknown = c.get('/api/catalog').json
+    assert unknown['recommendation']['status'] == 'department_ambiguous'
+    assert all('distinctUsers' not in row['departmentPreference'] for row in unknown['items'])
+    # A shared default label does not identify one team, either.
+    with search_app.app_context():
+        db().users.update_many({}, {'$set': {'dept': '공통', 'dept_cd': ''}})
+    assert c.get('/api/catalog').json['recommendation']['status'] == 'department_unknown'
+
+
+def test_department_name_fallback_requires_enough_enabled_current_peers(search_app):
+    seed(search_app, 1)
+    department(search_app, 1, 5, code='D001')
+    c, _ = client(search_app, dept='')
+    with search_app.app_context():
+        db().users.update_many({}, {'$set': {'dept': 'AI 개발팀'}})
+        db().users.update_one({'_id': 'colleague0'}, {'$set': {'enabled': False}})
+    assert c.get('/api/catalog').json['recommendation']['status'] == 'insufficient_sample'
+    with search_app.app_context():
+        db().users.update_one({'_id': 'colleague0'}, {'$set': {'enabled': True, 'dept': '개발팀'}})
+    assert c.get('/api/catalog').json['recommendation']['status'] == 'insufficient_sample'
 
 
 def test_moved_disabled_requester_and_update_only_users_do_not_create_team_sample(search_app):
@@ -311,6 +374,13 @@ def test_conversational_subject_ranking_precedes_popularity_and_candidate_cap(se
     ('전에 하던 업무를 이어서 하고 싶어', '업무 이어하기'),
     ('meeting minutes', '회의록'),
     ('코드에서', '코드에서'),
+    ('매주 받은 엑셀 여러 개를 한 파일로 합치고 싶어요', 'Excel 병합'),
+    ('회의록 길어서 핵심만 정리해주는 기능', '회의록 요약'),
+    ('PPT 발표자료 만들고 싶어요', 'PowerPoint 제작'),
+    ('메일 내용 찾아줘', 'Email 조회'),
+    ('메일에서 첨부파일만 모으고 싶어', 'Email attachment collect'),
+    ('두 엑셀에서 다른 부분 찾아주는 기능이 필요해요', 'Excel diff'),
+    ('이미지 속 글자를 엑셀로 바꾸고 싶어요', 'OCR 변환'),
 ])
 def test_conversational_and_literal_queries_reach_the_database_candidates(search_app, query, name):
     seed(search_app, 42, name, data={'desc': '등록 설명', 'workTags': [], 'category': '분류'})
@@ -321,6 +391,36 @@ def test_conversational_and_literal_queries_reach_the_database_candidates(search
         assert response.status_code == 200
         assert [row['id'] for row in response.json['items']] == [42]
         assert response.json['items'][0]['reasons']
+        assert response.json['queryInterpretation']['method'] == 'local_concept_matching'
+        assert response.json['queryInterpretation']['concepts']
+
+
+def test_natural_language_synonyms_are_ranked_before_popularity_and_cap(search_app, monkeypatch):
+    seed(search_app, 1, '폴더 정리', data={'desc': '여러 파일을 자동으로 정리합니다.',
+                                        'workTags': ['자료'], 'category': '공통 업무'})
+    seed(search_app, 99, 'OCR 변환', data={'desc': 'Excel로 결과를 저장합니다.',
+                                         'workTags': [], 'category': '공통 업무'})
+    department(search_app, 1, 8)
+    c, _ = client(search_app)
+    query = {'q': '이미지 속 글자를 엑셀로 바꾸고 싶어요'}
+    result = c.get('/api/catalog', query_string=query).json
+    assert result['items'][0]['id'] == 99
+    monkeypatch.setattr(catalog, 'CANDIDATE_LIMIT', 1)
+    assert c.get('/api/catalog', query_string=query).json['items'][0]['id'] == 99
+
+
+def test_related_ties_use_department_then_overall_popularity_with_evidence(search_app):
+    for tid in range(1, 4):
+        seed(search_app, tid, f'메일 조회 {tid}')
+    department(search_app, 1)
+    for i in range(8):
+        vote(search_app, 2, f'other{i}', kind='like')
+    vote(search_app, 3, 'one-reader')
+    c, _ = client(search_app)
+    results = c.get('/api/catalog', query_string={'q': '메일 내용 찾아줘'}).json
+    assert [row['id'] for row in results['items']] == [1, 2, 3]
+    assert any('같은 부서 구성원 5명' in reason for reason in results['items'][0]['reasons'])
+    assert any('좋아요 8개' in reason for reason in results['items'][1]['reasons'])
 
 
 def test_catalog_bulk_lookups_are_not_per_tool(search_app, monkeypatch):

@@ -1,2 +1,2 @@
 """Local-only P&T AI SQUARE integration. It never connects to MongoDB."""
-__version__ = '1.6.4'
+__version__ = '1.6.5'

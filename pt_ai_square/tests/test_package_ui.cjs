@@ -11,11 +11,12 @@ const fresh=()=>({file:{name:'test.zip'},mode:'file',name:'',desc:'',org:'장비
 (async()=>{
  let imported='';context.runtime.step=1;context.runtime.draft={};
  context.decoratePackageForm({id:'sq-register-form',insertAdjacentHTML:(_where,html)=>imported+=html});
- assert.match(imported,/accept="\.zip,\.axextension"/);
+ assert.match(imported,/accept="\.zip,\.axextension,\.exe,\.msi,\.ps1,\.md"/);
+ assert.match(imported,/data-upload="artifact"/);
  assert.match(imported,/배포 파일에서 불러오기/);
  let d=context.runtime.draft=fresh();
  let pending=context.inspectSelectedPackage(d.file);
- assert.equal(context.packageBlockingError(d),'');
+ assert.match(context.packageBlockingError(d),/검사가 끝난/);
  requests.shift().resolve(result);await pending;
  assert.equal(d.name,'선언 이름');assert.equal(d.guide,'안내');assert.equal(d.approval,true);assert.equal(d.org,'장비팀');assert.equal(d.owner,'사번 사용자');
  assert.equal(context.packageBlockingError(d),'');

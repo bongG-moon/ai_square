@@ -1,4 +1,8 @@
 // Inspect a declaration, never run or transform uploaded code.
+// Keep import history outside submitted metadata. Removing a file does not make
+// previously imported fields an empty first import again.
+const packageMetadataDrafts=new WeakSet();
+function hasImportedPackageMetadata(d){return !!d&&packageMetadataDrafts.has(d);}
 function updatePackageIdentity(){
  const item=runtime.releaseId?getItem(runtime.releaseId):null;if(!item)return null;
  // A platform identity survives replacement ZIPs, manual releases and rollback.
@@ -38,7 +42,7 @@ function decoratePackageForm(form){
  if(form.id!=='sq-register-form')return;
  const d=runtime.draft;
  if(runtime.step===1){
-  form.insertAdjacentHTML('afterbegin',`<div class="ws-package-import"><div>${icon('package-open')}<strong>배포 Skill로 준비하셨나요?</strong><p>ZIP·AX 확장 파일의 배포 정보로 유형과 설명을 채워드려요. 읽지 못해도 직접 입력하여 등록할 수 있어요.</p></div><label class="sq-secondary">배포 파일에서 불러오기<input type="file" name="artifact" accept=".zip,.axextension" class="sq-sr" data-package-import aria-label="ZIP 또는 AX 확장에서 정보 불러오기"></label></div>`);
+  form.insertAdjacentHTML('afterbegin',`<section class="ws-package-import" data-upload="artifact" aria-label="배포 파일 첨부"><div class="ws-package-import-main"><span class="ws-package-import-icon">${icon('cloud-upload')}</span><div><strong>배포 파일을 여기에 놓으세요</strong><p>배포 Skill로 만든 파일은 이름과 설명을 불러옵니다. 일반 파일도 첨부할 수 있어요.</p><small>ZIP, AX 확장, EXE, MSI, PS1, MD / 최대 128MB</small></div><button type="button" class="sq-secondary" data-file-pick="artifact">${icon('plus')} 배포 파일에서 불러오기</button><input type="file" name="artifact" accept=".zip,.axextension,.exe,.msi,.ps1,.md" class="sq-sr" aria-label="배포 파일 선택"></div>${d.file?`<div class="ws-selected-file" aria-live="polite">${icon('file')}<span><strong>${esc(d.file.name)}</strong><small>${fileSize(d.file.size)} / 게시할 때 업로드</small></span><button type="button" class="sq-icon" data-file-remove="artifact" aria-label="선택한 배포 파일 취소">${icon('x')}</button></div>`:''}</section>`);
  }
  if(d.mode==='file'&&d.file){
   const anchor=form.querySelector('[data-upload="artifact"]')||form.querySelector('.ws-package-import');
@@ -48,41 +52,74 @@ function decoratePackageForm(form){
  if(runtime.releaseId)form.insertAdjacentHTML('afterbegin',updatePackagePanel());
 }
 function applyPackageFields(d,result){
+ if(runtime.publishBusy)return;
  for(const key of ['name','desc','platform','type','environment','changes','guide'])d[key]=result.metadata[key];
  d.workflow=result.metadata.workflow||null;
  d.workTags=result.metadata.workTags.join(', ');
- d.mode='file';d.packageInspection.applied=true;
+ d.mode='file';d.packageInspection.applied=true;d.packageInspection.awaitingConfirmation=false;packageMetadataDrafts.add(d);
 }
-async function inspectSelectedPackage(file){
+function packageFormVisible(){return !!$('#sq-register-form')&&$('#sq-dialog')?.open!==false;}
+function clearPackageApplyConfirmation(){
+ const confirmation=runtime.packageApplyConfirmation;if(!confirmation)return;
+ confirmation.packageInspection.awaitingConfirmation=false;
+ if(runtime.confirm===confirmation){runtime.confirm=null;const dialog=$('#sq-confirm');if(dialog?.open)dialog.close();}
+ runtime.packageApplyConfirmation=null;
+}
+function confirmPackageReplacement(d,file,check){
+ if(runtime.publishBusy||!packageFormVisible())return;
+ const apply=()=>{
+  check.awaitingConfirmation=false;
+  if(runtime.packageApplyConfirmation===apply)runtime.packageApplyConfirmation=null;
+  // A stale confirmation must never apply metadata from a different file or draft.
+  if(runtime.publishBusy||runtime.draft!==d||d.file!==file||d.mode!=='file'||d.packageInspection!==check||!packageFormVisible())return;
+  captureDraft();applyPackageFields(d,check.result);wizard();
+ };
+ apply.packageInspection=check;check.awaitingConfirmation=true;runtime.packageApplyConfirmation=apply;
+ ask('신규 파일 내용을 적용하시겠습니까?',
+  '이름, 소개, 유형, 설치 안내와 동작 흐름을 새 파일의 내용으로 바꿉니다. 조직, 업무 분야, 담당자와 조회 권한은 유지합니다. 취소하면 선택한 파일은 유지하고 입력한 내용은 바꾸지 않습니다.',
+  apply,'새 파일 내용 적용',`<div class="ws-package-replacement"><span>${icon('file-check-2')} ${esc(file.name)}</span><strong>${esc(check.result.metadata.name)}</strong><p>${esc(check.result.metadata.desc)}</p></div>`);
+}
+async function inspectSelectedPackage(file,{replacement=runtime.draft?.packageInspection?.replacement||false}={}){
  const d=runtime.draft;
- const check={state:'loading'};d.packageInspection=check;
- if($('#sq-register-form'))wizard();
+ if(runtime.publishBusy||!d||d.file!==file)return;
+ clearPackageApplyConfirmation();
+ const check={state:'loading',replacement};d.packageInspection=check;
+ if(packageFormVisible())wizard();
  const body=new FormData();body.append('artifact',file);
  try{
   const result=await requestAPI('/api/packages/inspect','POST',body);
   if(runtime.draft!==d||d.file!==file||d.packageInspection!==check)return;
+  // A different mode may have been posted while this file preview was in flight.
+  if(runtime.publishBusy){check.state='ready';check.result=result;return;}
   // Keep edits entered while the request was in flight.
   captureDraft();check.state='ready';check.result=result;
-  if(result.recognized&&!runtime.releaseId&&!d.name.trim()&&!d.desc.trim())applyPackageFields(d,result);
+  if(result.recognized&&d.mode==='file'&&!replacement&&!runtime.releaseId&&!d.name.trim()&&!d.desc.trim())applyPackageFields(d,result);
  }catch(error){
   if(runtime.draft!==d||d.file!==file||d.packageInspection!==check)return;
   check.state='error';check.error=error.message;
  }
- if(runtime.draft===d&&$('#sq-register-form'))wizard();
+ if(!runtime.publishBusy&&runtime.draft===d&&packageFormVisible()){
+  wizard();
+  if(d.mode==='file'&&replacement&&check.state==='ready'&&check.result.recognized)confirmPackageReplacement(d,file,check);
+ }
 }
 function packageBlockingError(d){
- // Inspection is advisory. The selected tool, not a ZIP identity, determines
- // the update target; the server independently enforces permissions and bytes.
+ // Wait for an in-flight preview/decision so metadata cannot change after POST.
+ // A finished inspection failure remains advisory; manual publication is allowed.
+ if(d.mode!=='file'||!d.file)return '';
+ if(d.packageInspection?.state==='loading')return '배포 정보를 확인하고 있습니다. 검사가 끝난 뒤 다시 진행해 주세요.';
+ if(d.packageInspection?.awaitingConfirmation)return '새 파일의 내용을 적용할지 확인창에서 선택해 주세요.';
  return '';
 }
-root.addEventListener('change',e=>{
- if(!e.target.matches('[data-package-import]'))return;e.stopImmediatePropagation();
- try{selectFiles('artifact',[...e.target.files]);}catch(error){showError(error);}
-},true);
+// Cancel, Escape and dismissal all keep current metadata and release the decision
+// guard. Ignore a delayed close event if the same dialog has already reopened.
+root.addEventListener('click',e=>{if(e.target.closest('[data-action="cancel-confirm"]'))clearPackageApplyConfirmation();},true);
+$('#sq-confirm')?.addEventListener?.('cancel',()=>clearPackageApplyConfirmation());
+$('#sq-confirm')?.addEventListener?.('close',()=>{if(!$('#sq-confirm').open)clearPackageApplyConfirmation();});
 root.addEventListener('click',e=>{
  const copy=e.target.closest('[data-package-copy]');if(copy){e.preventDefault();copyPackageIdentity(copy);return;}
- if(e.target.closest('[data-package-retry]')){e.preventDefault();captureDraft();inspectSelectedPackage(runtime.draft.file);}
- if(e.target.closest('[data-package-apply]')){e.preventDefault();captureDraft();applyPackageFields(runtime.draft,runtime.draft.packageInspection.result);wizard();}
+ if(e.target.closest('[data-package-retry]')){e.preventDefault();if(runtime.publishBusy)return;captureDraft();inspectSelectedPackage(runtime.draft.file);}
+ if(e.target.closest('[data-package-apply]')){e.preventDefault();if(runtime.publishBusy)return;captureDraft();applyPackageFields(runtime.draft,runtime.draft.packageInspection.result);wizard();}
 });
 function deploymentLinks(x,tab){
  const versions=tab==='versions'?x.versions.filter(v=>v.deploymentUrl):x.versions.filter(v=>v.n===x.active&&v.deploymentUrl);

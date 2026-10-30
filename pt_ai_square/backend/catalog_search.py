@@ -25,7 +25,7 @@ SYNONYM_GROUPS = (
     ('메일', '이메일', 'email', 'e-mail', 'mail'),
     ('회의록', '회의메모', '회의 메모', 'meeting minutes'),
     ('엑셀', 'excel', '스프레드시트', 'spreadsheet'),
-    ('요약', 'summarize', 'summary'),
+    ('요약', 'summarize', 'summary', '간추리', '핵심만', '핵심 정리'),
     ('조회', '검색', 'search', 'lookup'),
     ('보고서', 'report'),
     ('ppt', 'powerpoint', '파워포인트', '슬라이드', '발표자료', '발표 자료'),
@@ -33,12 +33,24 @@ SYNONYM_GROUPS = (
     ('업무 기록', '작업 기록', '업무기록', '작업기록'),
     ('이어하기', '이어서', '재개', 'resume'),
     ('만들기', '만들', '생성', '작성', '제작', 'create'),
+    ('첨부파일', '첨부 파일', '첨부', 'attachment'),
+    ('취합', '수집', '모으기', '모으', '모아', 'collect'),
+    ('비교', '대조', '차이', '다른 부분', 'compare', 'diff'),
+    ('중복', 'duplicate', 'deduplicate', 'deduplication'),
+    ('삭제', '제거', '지우기', '지우', '지워', 'remove', 'delete'),
+    ('알림', '통지', '리마인더', 'notification', 'notify', 'reminder'),
+    ('일정', '달력', 'calendar', 'schedule'),
+    ('ocr', '문자 인식', '글자 추출', '텍스트 추출', '사진 속 글자', '이미지 속 글자'),
+    ('변환', 'convert', 'conversion'),
 )
 STOP_WORDS = {'도구', '기능', 'tool', 'tools', '찾아줘', '추천', '추천해줘',
               '우리', '우리팀', '팀', '부서', '쓸', '사용할', '알려줘',
               '좀', '줘', '주세요', '싶어', '싶어요', '싶습니다', '하고',
               '해', '할', '수', '있는', '있어', '있나요', '있을까',
-              '전에', '하던', '했던', '하나로'}
+              '전에', '하던', '했던', '하나로', '하고싶어', '하고싶어요',
+              '싶은데', '필요해', '필요한', '필요해요', '있으면', '좋겠어',
+              '좋겠어요', '찾고', '찾아주세요', '추천해주세요', '찾아줄', '있을까요',
+              '자동으로', '여러', '여러개', '각각', '매번', '매일', '매주', '대신'}
 # Explicit everyday action forms, not an unrestricted Korean stemmer. Keep the
 # original token too, so a literal tool/registrant name remains discoverable.
 ACTION_FORMS = {
@@ -47,6 +59,14 @@ ACTION_FORMS = {
     '만드는': '만들기', '만들어': '만들기', '만들고': '만들기',
     '만들어줘': '만들기', '만들어주세요': '만들기',
     '이어갈': '이어하기', '이어가고': '이어하기',
+    '합쳐서': '병합', '합친': '병합', '합쳐주는': '병합',
+    '모아서': '취합', '모으고': '취합', '모아주는': '취합', '모아줘': '취합',
+    '모아주세요': '취합', '모은': '취합',
+    '찾는': '검색', '찾아주는': '검색', '찾을': '검색',
+    '지워줘': '삭제', '지워주세요': '삭제', '지우고': '삭제', '지워주는': '삭제',
+    '알려주는': '알림', '알려주고': '알림',
+    '간추려': '요약', '간추려줘': '요약', '간추리는': '요약',
+    '바꾸는': '변환', '바꿔주는': '변환', '바꾸고': '변환',
 }
 # Generic words may help, but must not outweigh the subject of a longer request
 # (e.g. 회의 in "회의 내용을 정리해 줘"). Apply this both before and after the
@@ -63,7 +83,14 @@ def normalize(value):
 def _query_stem(term):
     if term in ACTION_FORMS:
         return ACTION_FORMS[term]
-    stem = re.sub(r'(?:해주는|해주세요|해줘|하는|하기|하고|해|으로|에서|을|를)$', '', term)
+    # Strip noun particles only when the remaining word is a known catalog
+    # concept. This recognizes 엑셀로 / 메일에 without chopping arbitrary names.
+    aliases = {value for group in SYNONYM_GROUPS for value in group if ' ' not in value}
+    for suffix in ('으로', '에서', '에게', '부터', '까지', '처럼', '보다',
+                   '들을', '들이', '만', '도', '은', '는', '이', '가', '을', '를', '에', '로', '와', '과', '의'):
+        if term.endswith(suffix) and term[:-len(suffix)] in aliases:
+            return term[:-len(suffix)]
+    stem = re.sub(r'(?:해주는|해주세요|해줘|하는|하기|하고|해|으로|에서|들을|들이|만|을|를)$', '', term)
     return stem if len(stem) >= 2 else term
 
 
@@ -177,23 +204,44 @@ def _statistics(ids, now):
     return result
 
 
-def _department_signals(ids, now):
+def _department_members(meta):
+    # Only authenticated SSO profile fields identify peers, never a requested
+    # organization filter or the tool's editable catalog organization label.
     code = g.user.get('dept_cd')
-    meta = {'status': 'department_unknown', 'windowDays': DEPARTMENT_DAYS,
-            'minimumDistinctUsers': MIN_DEPARTMENT_USERS}
-    if not isinstance(code, str) or not code.strip() or not ids:
-        return {}, meta
-    # One bounded bulk lookup. Department names/prefixes and orgId are never
-    # treated as proof of team membership. Exclude the requester and disabled
-    # users, and use today's recorded department rather than a historical one.
+    code = code.strip() if isinstance(code, str) else ''
+    name = g.user.get('dept')
+    name = name.strip() if isinstance(name, str) else ''
+    # Common/default labels are not evidence of membership in one department.
+    usable_name = bool(name and name not in {'공통', '전체', '미지정', '기타', '없음', '-'})
+    identity = {'dept_cd': code} if code else ({'dept': name} if usable_name else None)
+    if identity is None:
+        return []
+    meta['identitySource'] = 'department_code' if code else 'department_name'
     members = list(db().users.find(
-        {'dept_cd': code, 'enabled': {'$ne': False}, '_id': {'$ne': g.user['id']}},
-        {'_id': 1}).limit(DEPARTMENT_MEMBER_LIMIT + 1))
+        {**identity, 'enabled': {'$ne': False}, '_id': {'$ne': g.user['id']}},
+        {'_id': 1, 'dept_cd': 1}).limit(DEPARTMENT_MEMBER_LIMIT + 1))
     if len(members) > DEPARTMENT_MEMBER_LIMIT:
         meta['status'] = 'department_too_large'
+        return []
+    if not code:
+        codes = {value.strip() for row in members
+                 if isinstance(value := row.get('dept_cd'), str) and value.strip()}
+        # Identical names can belong to separate organizations. Without the
+        # requester's code there is no safe way to choose between them.
+        if len(codes) > 1:
+            meta['status'] = 'department_ambiguous'
+            return []
+    meta['status'] = 'insufficient_sample'
+    return members
+
+
+def _department_signals(ids, now):
+    meta = {'status': 'department_unknown', 'windowDays': DEPARTMENT_DAYS,
+            'minimumDistinctUsers': MIN_DEPARTMENT_USERS, 'identitySource': None}
+    if not ids:
         return {}, meta
+    members = _department_members(meta)
     if len(members) < MIN_DEPARTMENT_USERS:
-        meta['status'] = 'insufficient_sample'
         return {}, meta
     cutoff = now - DEPARTMENT_DAYS * 86400
     rows = db().activity_state.aggregate([
@@ -310,11 +358,12 @@ def search_catalog():
     stats = _statistics(ids, now)
     signals, recommendation = _department_signals(ids, now) if mode == 'recommended' else ({}, {
         'status': 'not_used_for_ranking', 'windowDays': DEPARTMENT_DAYS,
-        'minimumDistinctUsers': MIN_DEPARTMENT_USERS})
+            'minimumDistinctUsers': MIN_DEPARTMENT_USERS, 'identitySource': None})
     recommendation['explanation'] = {
         'applied': '최근 90일 같은 부서의 서로 다른 구성원 5명 이상이 활용한 경우에만 추천에 반영합니다.',
         'insufficient_sample': '같은 부서 활용 표본이 부족한 항목은 검색 관련도와 전사 집계로 추천합니다.',
-        'department_unknown': '확인된 부서 코드가 없어 조직 선호를 사용하지 않습니다.',
+        'department_unknown': '확인된 부서 코드나 부서명이 없어 조직 선호를 사용하지 않습니다.',
+        'department_ambiguous': '같은 부서명에 여러 부서 코드가 있어 조직 선호를 생략했습니다. 검색 관련도와 전체 집계를 사용합니다.',
         'department_too_large': '부서 구성원 범위가 커 조직 선호를 생략했습니다. 검색 관련도와 전사 집계를 사용합니다.',
         'not_used_for_ranking': '이 정렬은 조직 선호를 반영하지 않습니다.',
     }[recommendation['status']]
@@ -354,11 +403,13 @@ def search_catalog():
         if exact:
             reasons.append('이름 또는 항목 번호가 정확히 일치합니다.')
         elif fields:
-            reasons.append('검색어 또는 비슷한 업무 표현이 ' + '·'.join(labels[f] for f in fields) + '에 포함됩니다.')
+            reasons.append('검색어 또는 비슷한 업무 표현이 ' + ', '.join(labels[f] for f in fields) + '에 포함됩니다.')
         if signal:
             reasons.append(f'최근 {DEPARTMENT_DAYS}일 같은 부서 구성원 {signal["distinctUsers"]}명이 좋아요 또는 최초 다운로드로 활용했습니다.')
         if mode in {'realtime', 'cumulative'}:
-            reasons.append(('최근 7일' if recent else '전체 기간') + ' 좋아요 × 2 + 고유 다운로드 × 1 기준입니다.')
+            reasons.append(('최근 7일' if recent else '전체 기간') + ' 좋아요 × 2 + 다운로드 수 × 1 기준입니다.')
+        elif mode == 'recommended' and (metric['likes'] or metric['downloads']):
+            reasons.append(f'전체 기간 좋아요 {metric["likes"]}개, 다운로드 {metric["downloads"]}회를 참고했습니다.')
         if not reasons:
             reasons.append('최근 등록 순서입니다.' if mode == 'newest' else '검색 관련도가 같은 경우 전사 누적 집계를 참고합니다.')
         access = can_read(row, g.user['id'], profile, administrator=is_admin,
@@ -371,7 +422,8 @@ def search_catalog():
                     category=taxonomy.get(data.get('categoryId'), data.get('category', '')),
                     access='approved' if access else 'permission_required',
                     statistics=metric, reasons=reasons, liked=tid in liked,
-                    departmentPreference=({'status': 'applied', 'distinctUsers': signal['distinctUsers']}
+                    departmentPreference=({'status': 'applied', 'distinctUsers': signal['distinctUsers'],
+                                           'identitySource': recommendation['identitySource']}
                                           if signal else {'status': recommendation['status'] if recommendation['status'] != 'applied' else 'insufficient_sample'}))
         prepared.append((key, item))
     prepared.sort(key=lambda pair: pair[0])
@@ -380,5 +432,7 @@ def search_catalog():
     return jsonify(items=[item for _, item in prepared[offset:offset + limit]], total=total,
                    nextOffset=offset + limit if offset + limit < available else None,
                    sort=mode, dataAsOf=now, recommendation=recommendation,
+                   queryInterpretation={'method': 'local_concept_matching',
+                                        'concepts': [variants[0] for variants in groups]},
                    complete=complete, evaluatedCount=available, candidateLimit=CANDIDATE_LIMIT,
-                   warning=None if complete else '검색 결과가 많아 일부 후보만 평가했습니다. 조직·유형·검색어로 범위를 좁혀 주세요. 전체 순위가 아닙니다.')
+                   warning=None if complete else '검색 결과가 많아 일부 후보만 평가했습니다. 조직, 유형, 검색어로 범위를 좁혀 주세요. 전체 순위가 아닙니다.')

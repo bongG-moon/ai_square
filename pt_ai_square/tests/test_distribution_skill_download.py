@@ -157,6 +157,8 @@ def test_builder_writes_identical_ascii_and_legacy_archives(tmp_path):
         'receiver/pt-square-receiver/scripts/square_client.py': '# client',
         'static/guides/pt-file-distribution/SKILL.md': '# distribution skill',
         'static/guides/pt-file-distribution/scripts/local.py': '# helper',
+        'static/guides/pt-file-distribution/scripts/publish_client.py': '# legacy upload',
+        'static/guides/pt-file-distribution/scripts/square_client.py': '# legacy network',
         'static/guides/pt-file-distribution/scripts/__pycache__/local.pyc': 'exclude',
     }.items():
         target = tmp_path / relative
@@ -171,4 +173,12 @@ def test_builder_writes_identical_ascii_and_legacy_archives(tmp_path):
         assert archive.testzip() is None
         assert 'pt-file-distribution/SKILL.md' in archive.namelist()
         assert 'pt-file-distribution/scripts/package_contract.py' in archive.namelist()
+        assert 'pt-file-distribution/scripts/local.py' in archive.namelist()
+        assert not any(name.endswith(('/publish_client.py', '/square_client.py'))
+                       for name in archive.namelist())
         assert not any('__pycache__' in name or name.endswith('.pyc') for name in archive.namelist())
+    # Building the local-only Skill must neither remove compatibility source
+    # files nor replace them with a different receiver version.
+    scripts = guides / 'pt-file-distribution' / 'scripts'
+    assert (scripts / 'square_client.py').read_text() == '# legacy network'
+    assert (scripts / 'publish_client.py').read_text() == '# legacy upload'

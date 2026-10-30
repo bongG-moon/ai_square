@@ -22,6 +22,21 @@ def item(name, desc='', tags=()):
     ('전에 하던 업무를 이어서 하고 싶어',
      item('작업 기록 모아 보기', '지난 기록을 보고 업무를 이어서 합니다.'),
      item('업무 자료 작성', '업무 내용을 문서로 만듭니다.')),
+    ('매주 받은 엑셀 여러 개를 한 파일로 합치고 싶어요',
+     item('Excel 병합', '표를 합칩니다.'),
+     item('파일 정리', '받은 파일을 분류합니다.')),
+    ('회의록 길어서 핵심만 정리해주는 기능',
+     item('회의록 요약', '중요한 결정을 간단히 정리합니다.'),
+     item('폴더 정리', '파일 내용을 분류합니다.')),
+    ('메일에서 첨부파일만 모으고 싶어',
+     item('Email attachment collect', '수신 문서 취합'),
+     item('메일 작성', '답장 작성')),
+    ('두 엑셀에서 다른 부분 찾아주는 기능이 필요해요',
+     item('Excel diff', '행별 비교 결과를 보여줍니다.'),
+     item('Excel 파일 목록', '파일 이름을 조회합니다.')),
+    ('이미지 속 글자를 엑셀로 바꾸고 싶어요',
+     item('OCR 변환', 'Excel로 인식 결과를 보냅니다.'),
+     item('Excel 차트', '통계 그림을 만듭니다.')),
 ])
 def test_everyday_requests_rank_the_subject_above_generic_words(query, intended, other):
     groups = query_groups(query)
