@@ -11,7 +11,7 @@ import re
 import zipfile
 from pathlib import Path
 
-from pt_square_mcp.client import automatic_download_directory
+from pt_square_mcp.client import installation_download_directory
 from pt_square_mcp.config import SquareError, no_links
 from pt_square_mcp.files import safe_entries, sha256
 from pt_square_mcp.install import digest
@@ -118,6 +118,9 @@ class ZipSkillClient:
         self.source_digest, self.update = source_digest, update
         self.snapshot = None
 
+    def json(self, path, method='GET', data=None):
+        return self.client.json(path, method=method, data=data)
+
     def _source(self, tool_id):
         manifest = self.client.manifest(tool_id)
         if not can_inspect(manifest) or digest(manifest) != self.source_digest:
@@ -138,7 +141,7 @@ class ZipSkillClient:
             effective, artifact = self.snapshot
             self._verify(artifact, source)
             return json.loads(json.dumps(effective))
-        directory = automatic_download_directory(self.settings, source)
+        directory = installation_download_directory(self.settings, source)
         artifact = self.client.download(source, directory, update=self.update)
         self._verify(artifact, source)
         profile = inspect_skill(artifact)

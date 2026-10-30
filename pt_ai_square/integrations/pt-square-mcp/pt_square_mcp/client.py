@@ -34,6 +34,34 @@ def automatic_download_directory(settings, manifest):
                     / f'v{positive(manifest.get("release"))}')
 
 
+def installation_download_directory(settings, manifest):
+    """Choose a verified install cache without replacing old or changed files.
+
+    Older store builds keyed cache only by server/tool/release. A stale or
+    damaged file there must not block an unrelated install scope. Explicit
+    user-selected downloads retain Client.download's no-overwrite behavior.
+    """
+    base = automatic_download_directory(settings, manifest)
+    tool, release = positive(manifest.get('toolId')), positive(manifest.get('release'))
+    size, sha = manifest.get('bytes'), manifest.get('sha256')
+    suffix = Path(str(manifest.get('filename', ''))).suffix.lower()
+    if (type(size) is not int or not 0 < size <= MAX_FILE_BYTES
+            or not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{64}', sha)
+            or suffix not in {'.md', '.zip', '.axextension', '.exe', '.msi', '.ps1'}):
+        raise SquareError('파일의 크기·무결성 정보 또는 형식을 확인할 수 없습니다.')
+    name = f'tool-{tool}-v{release}{suffix}'
+    for index in range(33):
+        candidate = base if index == 0 else no_links(base / ('install-' + sha[:20] + '-' + str(index)))
+        target = no_links(candidate / name)
+        if not target.exists():
+            return candidate
+        if target.is_file() and target.stat().st_size == size:
+            with target.open('rb') as stream:
+                if hashlib.file_digest(stream, 'sha256').hexdigest() == sha:
+                    return candidate
+    raise SquareError('이전 다운로드 파일을 보관한 상태에서 설치 자료를 준비하지 못했습니다. 담당자에게 문의하세요.')
+
+
 class Client:
     def __init__(self, settings, opener=None):
         self.settings = settings
@@ -178,10 +206,20 @@ class Client:
             current = self.manifest(tool_id)
             if (current.get('release'), current.get('sha256'), current.get('installProfile')) != (release, sha, manifest.get('installProfile')):
                 raise SquareError('다운로드 중 배포 정보가 바뀌었습니다. 다시 준비하세요.')
-            if os.name == 'nt':
-                os.rename(part, target)
-            else:
-                os.link(part, target)
+            try:
+                if os.name == 'nt':
+                    os.rename(part, target)
+                else:
+                    os.link(part, target)
+            except FileExistsError:
+                # Another download won the atomic create. Reuse only the exact
+                # reviewed bytes; never overwrite a different user's file.
+                target = no_links(target)
+                if not target.is_file() or target.stat().st_size != size:
+                    raise SquareError('대상에 다른 내용의 파일이 있습니다. 새 폴더를 선택하세요.') from None
+                with target.open('rb') as stream:
+                    if hashlib.file_digest(stream, 'sha256').hexdigest() != sha:
+                        raise SquareError('대상에 다른 내용의 파일이 있습니다. 새 폴더를 선택하세요.') from None
         finally:
             part.unlink(missing_ok=True)
         return target

@@ -11,7 +11,7 @@ import uuid
 from .config import SquareError, atomic_json, read_json, no_links, scoped_path
 from .files import extract, sha256
 from .profiles import validate_profile
-from .client import automatic_download_directory
+from .client import installation_download_directory
 from . import transactions
 
 
@@ -183,7 +183,7 @@ class Installer:
             raise SquareError('연결된 사용자 정보를 확인할 수 없습니다. 다시 연결해 주세요.')
         account_binding = digest([self.settings.url, user_id])
         same_account = bool(previous and previous.get('accountBinding') == account_binding)
-        artifact = self.client.download(current,automatic_download_directory(self.settings,current),update=same_account)
+        artifact = self.client.download(current,installation_download_directory(self.settings,current),update=same_account)
         staging = no_links(self.settings.state/'staging'/plan_id)
         staging.parent.mkdir(parents=True,exist_ok=True)
         if artifact.suffix.lower()=='.zip':

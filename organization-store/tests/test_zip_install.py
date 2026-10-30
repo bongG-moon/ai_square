@@ -50,7 +50,10 @@ class ArchiveClient(Client):
         return io.BytesIO(b'corrupted' if self.corrupt else self.content)
 
     def json(self, path, method='GET', data=None):
-        assert path == '/api/tools/1' and method == 'GET'
+        assert method == 'GET'
+        if path == '/api/integration/me':
+            return {'user': {'id': 'E1'}}
+        assert path == '/api/tools/1'
         return {'id': 1, 'name': 'Verified archive'}
 
 
@@ -85,7 +88,7 @@ def test_root_skill_zip_is_reviewed_then_installed_and_rolled_back(configured, s
     assert installed['installed'] and installed['status'] == 'installed'
     assert (target/'SKILL.md').read_text(encoding='utf-8') == SKILL
     assert (target/'scripts/install.py').is_file()
-    assert len(client.transfers) == 1  # Preparation and installation reuse verified bytes.
+    assert client.transfers == ['/download/1/1', '/download/1/1']  # Revalidated for the current account; server deduplicates.
     assert store.dispatch('verify', {'installationId': installed['installationId']})['filesIntact']
     assert not ((home if scope == 'project' else project)/'.claude').exists()
     store.dispatch('rollback', dict(installationId=installed['installationId'], confirmed=True))
@@ -232,7 +235,7 @@ def test_repeat_inspection_and_updates_do_not_add_fake_download_counts(configure
     store, client, project, _ = configured
     first = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
     second = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
-    assert len(client.transfers) == 1
+    assert len(client.transfers) == 2
     store.dispatch('install', dict(first, confirmed=True))
     with pytest.raises(worker.SquareError, match='설치 상태가 변경'):
         store.dispatch('install', dict(second, confirmed=True))
@@ -240,5 +243,89 @@ def test_repeat_inspection_and_updates_do_not_add_fake_download_counts(configure
     client.content = zipped([('SKILL.md', SKILL + 'Version two')])
     update = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
     store.dispatch('install', dict(update, confirmed=True))
-    assert client.transfers == ['/download/1/1', '/download/1/2?purpose=update']
+    assert client.transfers == ['/download/1/1', '/download/1/1', '/download/1/1', '/download/1/1',
+                                '/download/1/2?purpose=update', '/download/1/2?purpose=update']
     assert (project/'.claude/skills/verified-skill/SKILL.md').read_text(encoding='utf-8').endswith('Version two')
+
+
+@pytest.mark.parametrize('scope', ['project-a', 'project-b', 'user'])
+def test_stale_automatic_cache_recovers_without_touching_it(configured, scope):
+    store, client, project, home = configured
+    other = project.parent / 'another-project'
+    other.mkdir()
+    if scope == 'project-b':
+        store.context['workspace'] = str(other)
+    manifest = client.manifest(1)
+    legacy = automatic_download_directory(store.settings(), manifest)
+    legacy.mkdir(parents=True)
+    old = legacy / 'tool-1-v1.zip'
+    old.write_bytes(b'previous different archive')
+    target_scope = 'user' if scope == 'user' else 'project'
+    plan = store.dispatch('prepareInstall', {'toolId': 1, 'scope': target_scope})
+    assert plan['canInstall']
+    assert old.read_bytes() == b'previous different archive'
+    installed = store.dispatch('install', dict(plan, confirmed=True))
+    root = home if scope == 'user' else other if scope == 'project-b' else project
+    assert installed['installed'] and (root/'.claude/skills/verified-skill/SKILL.md').is_file()
+    assert old.read_bytes() == b'previous different archive'
+    assert client.transfers == ['/download/1/1', '/download/1/1']
+
+
+def test_changed_server_content_same_version_does_not_collide_with_prior_cache(configured):
+    store, client, project, _ = configured
+    first = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
+    cached = next(automatic_download_directory(store.settings(), client.manifest(1)).glob('*.zip'))
+    original = cached.read_bytes()
+    client.content = zipped([('SKILL.md', SKILL + 'Updated content')])
+    second = store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
+    assert second['canInstall'] and cached.read_bytes() == original
+    result = store.dispatch('install', dict(second, confirmed=True))
+    assert result['installed']
+    assert (project/'.claude/skills/verified-skill/SKILL.md').read_text(encoding='utf-8').endswith('Updated content')
+    with pytest.raises(worker.SquareError):
+        store.dispatch('install', dict(first, confirmed=True))
+
+
+def test_user_selected_download_conflict_still_preserves_existing_file(configured):
+    store, client, _, _ = configured
+    directory = store.directory / 'manual'
+    directory.mkdir()
+    target = directory / 'tool-1-v1.zip'
+    target.write_bytes(b'user existing file')
+    with pytest.raises(worker.SquareError, match='다른 내용'):
+        client.download(client.manifest(1), directory)
+    assert target.read_bytes() == b'user existing file'
+    assert not client.transfers
+
+
+def test_stale_cache_recovery_still_rejects_wrong_server_data(configured):
+    store, client, project, _ = configured
+    legacy = automatic_download_directory(store.settings(), client.manifest(1))
+    legacy.mkdir(parents=True)
+    (legacy/'tool-1-v1.zip').write_bytes(b'stale')
+    client.corrupt = True
+    with pytest.raises(worker.SquareError, match='SHA-256|크기'):
+        store.dispatch('prepareInstall', {'toolId': 1, 'scope': 'project'})
+    assert not (project/'.claude').exists()
+    assert (legacy/'tool-1-v1.zip').read_bytes() == b'stale'
+
+
+def test_simultaneous_cached_downloads_reuse_only_the_same_verified_bytes(configured):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    store, client, _, _ = configured
+    directory = store.directory / 'racing-downloads'
+    directory.mkdir()
+    manifest = client.manifest(1)
+    raw_open = client.open
+    barrier = Barrier(2)
+    def simultaneous_open(path, method='GET', body=None, content_type=None):
+        barrier.wait(timeout=5)
+        return raw_open(path, method=method, body=body, content_type=content_type)
+    client.open = simultaneous_open
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(client.download, manifest, directory) for _ in range(2)]
+        files = [future.result(timeout=10) for future in futures]
+    assert files[0] == files[1]
+    assert files[0].read_bytes() == client.content
+    assert not list(directory.glob('*.part'))

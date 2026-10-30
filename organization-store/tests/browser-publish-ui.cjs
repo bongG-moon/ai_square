@@ -29,7 +29,7 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
     let draft=null;
     window.addEventListener('message',event=>{
      const m=event.data;
-     if(m.type==='ax-extension-ready')return window.postMessage({type:'ax-extension-init',channel:'test',hostFeatures:config.legacy?[]:['workspaces','publishFiles'],theme:config.dark?'dark':'light',context:{kind:'work',title:'업무 보고서'}},'*');
+     if(m.type==='ax-extension-ready')return window.postMessage({type:'ax-extension-init',channel:'test',hostFeatures:config.legacy?[]:['workspaces','publishFiles',...(config.upload?['publishUpload']:[])],theme:config.dark?'dark':'light',context:{kind:'work',title:'업무 보고서'}},'*');
      if(m.type!=='ax-extension-request')return;
      window.requests.push(m);let result={},error;
      if(m.action==='status')result={configured:true,baseUrl:'https://square.example.test',existingConnectionAvailable:true};
@@ -44,6 +44,7 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
      if(m.action==='publishOptions'&&m.payload.toolId&&window.delayOptions){setTimeout(()=>window.postMessage({type:'ax-extension-response',channel:m.channel,requestId:m.requestId,ok:false,error:'old unauthorized failure'},'*'),250);return;}
      if(m.action==='publishOptions')result={canPublish:!config.readonly,options,candidates:[{id:41,name:'기존 보고서 도구'},...(config.direct?[{id:1,name:'업무 보고서 작성'}]:[])],...(m.payload.toolId?{existing:{toolId:m.payload.toolId,metadata:{...metadata,installProfile:profile,orgId:'org',categoryId:'cat',approval:true,mode:'file'}}}:{})};
      if(m.action==='host.pickFile')result=window.cancelFile?{cancelled:true}:{cancelled:false,fileToken:'token-'+requests.length,name:window.sourceProfile?'weekly.zip':'other.md',size:1024};
+     if(m.action==='host.uploadFile')result={cancelled:false,fileToken:'token-'+requests.length,name:m.payload.file.name,size:m.payload.file.size};
      if(m.action==='inspectPublishSource'){
       if(window.inspectFail)error='선택한 파일을 읽지 못했습니다. 다시 선택하세요.';
       else result={source:{name:window.sourceProfile?'weekly.zip':'other.md',bytes:1024},metadata:{...metadata,...(window.sourceProfile?{packageId:'weekly-report',installProfile:profile}:{})},options,candidates:[{id:41,name:'기존 보고서 도구'}]};
@@ -62,6 +63,26 @@ const script=fs.readFileSync(path.join(source,'ui/store.js'),'utf8');
   const count=action=>page.evaluate(action=>window.requests.filter(r=>r.action===action).length,action);
   async function select(label,value){await page.getByRole('button',{name:label,exact:true}).click();await page.getByRole('option',{name:value,exact:true}).click();}
   async function fillRequired(){await select('등록 방식','새 도구 등록');await select('등록 조직','업무 혁신팀');await select('업무 분류','문서 작성');await page.locator('input[name=publish-visibility][value=public]').check();}
+  // File drop uses the same host upload and metadata inspection as the picker.
+  await fixture({upload:true});await page.locator('#publish-open').click();await page.waitForFunction(()=>!document.querySelector('#publish-pick-file').disabled);
+  assert.match(await page.locator('#publish-file-name').innerText(),/끌어놓거나/);
+  const drop=async(files,type='drop')=>page.locator('#publish-file-panel').evaluate((node,{files,type})=>{
+    const transfer=new DataTransfer();for(const [name,content] of files)transfer.items.add(new File([content],name));
+    node.dispatchEvent(new DragEvent(type,{bubbles:true,cancelable:true,dataTransfer:transfer}));
+  },{files,type});
+  const originalHeight=await page.locator('#publish-file-panel').evaluate(node=>node.offsetHeight);
+  await drop([['weekly.zip','example']],'dragenter');assert.equal(await page.locator('#publish-file-panel').evaluate(node=>node.classList.contains('drag-over')),true);assert.equal(await page.locator('#publish-file-panel').evaluate(node=>node.offsetHeight),originalHeight);
+  await drop([['weekly.zip','example']],'dragleave');assert.equal(await page.locator('#publish-file-panel').evaluate(node=>node.classList.contains('drag-over')),false);
+  await drop([['invalid.txt','example']]);await page.locator('#publish-message').filter({hasText:'ZIP, MD'}).waitFor();assert.equal(await count('host.uploadFile'),0);
+  await drop([['a.zip','example'],['b.zip','example']]);await page.locator('#publish-message').filter({hasText:'파일 한 개'}).waitFor();assert.equal(await count('host.uploadFile'),0);
+  await drop([['empty.zip','']]);await page.locator('#publish-message').filter({hasText:'비어 있지 않은'}).waitFor();assert.equal(await count('host.uploadFile'),0);
+  await drop([['weekly.zip','example']]);await page.locator('#publish-file-name').filter({hasText:'weekly.zip'}).waitFor();
+  assert.equal(await count('host.uploadFile'),1);assert.equal(await count('inspectPublishSource'),1);
+  await drop([['replacement.txt','example']]);await page.locator('#publish-message').filter({hasText:'ZIP, MD'}).waitFor();
+  assert.equal(await page.locator('#publish-file-name').innerText(),'weekly.zip');assert.equal(await count('host.uploadFile'),1);
+  const outsidePrevented=await page.evaluate(()=>{const transfer=new DataTransfer();transfer.items.add(new File(['x'],'other.zip'));const event=new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer});document.querySelector('#publish-form').dispatchEvent(event);return event.defaultPrevented;});assert.equal(outsidePrevented,true);
+  assert.equal(await page.locator('#publish-file-panel').evaluate(node=>node.classList.contains('drag-over')),false);
+  await page.locator('#publish-close').click();await page.locator('#publish-open').click();assert.match(await page.locator('#publish-file-name').innerText(),/weekly.zip/);
   await fixture();
   const layout=await page.locator('.tool-card').evaluateAll(nodes=>nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop,height:n.offsetHeight,width:n.offsetWidth})));
   assert.equal(new Set(layout.slice(0,3).map(n=>n.y)).size,1);assert.ok(layout[3].y>layout[0].y);assert.ok(layout[0].height<300);

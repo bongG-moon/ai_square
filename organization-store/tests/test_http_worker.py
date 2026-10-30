@@ -18,7 +18,8 @@ TOKEN = 'ptsq_' + 'X' * 43
 @pytest.fixture
 def service():
     state = {'release': 1, 'body': b'---\nname: store-fixture\ndescription: Fixture\n---\n# First\n',
-             'liked': False, 'transfers': [], 'badHash': False}
+             'liked': False, 'transfers': [], 'badHash': False,
+             'firstDownloadUsers': set(), 'subscriptionUsers': set()}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -46,7 +47,14 @@ def service():
                     'installProfile': {'schemaVersion': 1, 'kind': 'skill', 'host': 'claude', 'slug': 'store-fixture',
                                        'scopes': ['project'], 'entrypoint': 'SKILL.md'}})
             if parsed.path.startswith('/download/1/'):
-                state['transfers'].append(parse_qs(parsed.query).get('purpose', ['download'])[0])
+                purpose = parse_qs(parsed.query).get('purpose', ['download'])[0]
+                state['transfers'].append(purpose)
+                # Minimal single-user fixture: the real Mongo policy is tested
+                # separately in test_mcp_account_downloads.py. Record HTTP
+                # traffic separately from first-download count/subscription.
+                state['subscriptionUsers'].add('fixture')
+                if purpose != 'update':
+                    state['firstDownloadUsers'].add('fixture')
                 return self.reply(state['body'], content_type='application/octet-stream')
             if parsed.path == '/api/tools/1/version-check':
                 current = int(parse_qs(parsed.query)['release'][0])
@@ -93,14 +101,20 @@ def test_fresh_stdio_processes_download_hash_install_update_and_rollback(service
     installed = call('install', dict(plan, confirmed=True))['result']
     target = Path(installed['destination'])/'SKILL.md'
     old = target.read_bytes()
-    assert old == state['body'] and state['transfers'] == ['download']
+    # A cache hit is re-requested for current KEY authorization/accounting;
+    # this is two HTTP transfers, but only one first-download user.
+    assert old == state['body'] and state['transfers'] == ['download', 'download']
+    assert state['firstDownloadUsers'] == {'fixture'}
+    assert state['subscriptionUsers'] == {'fixture'}
     assert call('like', {'toolId': 1, 'liked': True})['result']['count'] == 1
     assert call('like', {'toolId': 1, 'liked': True})['result']['count'] == 1
     state.update(release=2, body=b'# Second\n')
     assert call('checkUpdates')['result']['items'][0]['result']['status'] == 'update_available'
     plan = call('prepareInstall', {'toolId': 1, 'scope': 'project'})['result']
     updated = call('install', dict(plan, confirmed=True))['result']
-    assert state['transfers'] == ['download', 'update'] and target.read_bytes() == state['body']
+    assert state['transfers'] == ['download', 'download', 'update'] and target.read_bytes() == state['body']
+    assert state['firstDownloadUsers'] == {'fixture'}
+    assert state['subscriptionUsers'] == {'fixture'}
     assert call('verify', {'installationId': updated['installationId']})['result']['filesIntact']
     assert call('rollback', {'installationId': updated['installationId'], 'confirmed': True})['result']['restored']
     assert target.read_bytes() == old

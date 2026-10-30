@@ -836,6 +836,7 @@ class Store:
                 'scope': scope, 'scopeDir': plan['scopeDir'], 'created': time.time(),
                 'directoryToken': self.context.get('directoryToken') if scope == 'directory' else None,
                 'zipDetection': prepared['manifest'].get(zip_install.DETECTION_KEY) if inspect_zip else None,
+                'zipArtifact': str(runtime.installer.client.snapshot[1]) if inspect_zip else None,
                 'approvalDigest': plan['approvalDigest']})
             if inspect_zip:
                 plan['detectionNotice'] = zip_install.DETECTED_NOTICE
@@ -865,6 +866,16 @@ class Store:
                     or not isinstance(detection.get('sourceManifestDigest'), str)
                     or not re.fullmatch('[0-9a-f]{64}', detection['sourceManifestDigest'])):
                 raise SquareError('ZIP 설치 준비 내용이 변경되었습니다. 다시 확인해 주세요.')
+            # Bind the approved review to the exact inspected file. A changed
+            # file must fail, not silently fall back to a newly downloaded copy.
+            artifact_value = receipt.get('zipArtifact')
+            if not isinstance(artifact_value, str):
+                raise SquareError('ZIP 설치 확인 정보가 만료되었습니다. 다시 준비해 주세요.')
+            artifact = no_links(artifact_value)
+            downloads = no_links(runtime.settings.downloads)
+            if downloads not in artifact.parents:
+                raise SquareError('ZIP 설치 확인 위치가 변경되었습니다. 다시 준비해 주세요.')
+            zip_install.ZipSkillClient._verify(artifact, plan['manifest'])
             runtime.installer.client = zip_install.ZipSkillClient(runtime.client, runtime.settings,
                                                                 detection['sourceManifestDigest'],
                                                                 update=bool(plan.get('existingRecordDigest')))

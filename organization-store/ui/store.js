@@ -894,6 +894,7 @@
     $('publish-existing-field').hidden=$('publish-target').value!=='update';$('publish-install-info').hidden=mode!=='file'||!publication.extra.installProfile;
     $('publish-file-reapply').hidden=mode!=='file'||!publication.file||!publication.fileExtra.packageId;
     if(mode==='file'&&!state.hostFeatures.includes('publishFiles')) $('publish-file-help').textContent='파일을 선택하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.';
+    if(mode==='file'&&!publication.file) $('publish-file-name').textContent=state.hostFeatures.includes('publishUpload')?'파일을 끌어놓거나 선택하세요':'배포할 파일을 선택하세요';
   }
   function publishInstallInfo() {
     const profile=publication.extra.installProfile;
@@ -957,7 +958,7 @@
   function resetPublish() {
     $('publish-form').reset();publication.file=null;publication.draft=null;publication.requestId=null;publication.extra={};publication.existingExtra={};publication.fileExtra={};
     publication.fileFields={};publication.existingFields={};publication.manualFields.clear();publication.fileSourceSelected=false;
-    $('publish-file-name').textContent='배포할 파일을 선택하세요';$('publish-file-help').textContent='ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB';
+    $('publish-file-name').textContent=state.hostFeatures.includes('publishUpload')?'파일을 끌어놓거나 선택하세요':'배포할 파일을 선택하세요';$('publish-file-help').textContent='ZIP · MD · AXEXTENSION · EXE · MSI · PS1 / 최대 64MB';
     for(const id of publishSelects)$(id).dispatchEvent(new Event('optionschanged'));
     publishInstallInfo();publishMode();
   }
@@ -1042,6 +1043,8 @@
     publishMessage('기존 도구의 설정을 불러왔어요. 새 자료·변경 내용과 공개 범위를 확인하세요.');
   }));
   async function selectPublishFile(file) {
+    if(file&&!/\.(zip|md|axextension|exe|msi|ps1)$/i.test(file.name)) throw Error('ZIP, MD, AXEXTENSION, EXE, MSI, PS1 파일을 선택해 주세요.');
+    if(file&&(!Number.isFinite(file.size)||file.size<=0||file.size>64*1024*1024)) throw Error('비어 있지 않은 64MB 이하의 파일을 선택해 주세요.');
     publishMessage(file?'파일을 앱으로 전송하고 있어요…':'등록할 파일을 선택해 주세요.');
     const selected=file?await rpc('host.uploadFile',{file}):await rpc('host.pickFile');if(selected.cancelled)return;
     // A new picker choice revokes the old capability. Preserve all written
@@ -1072,18 +1075,43 @@
     const file=event.target.files?.[0];event.target.value='';if(file)publishAction(()=>selectPublishFile(file));
   });
   const publishDrop=$('publish-file-panel');
-  for(const type of ['dragenter','dragover'])publishDrop.addEventListener(type,event=>{
-    if(![...(event.dataTransfer?.types||[])].includes('Files'))return;
-    event.preventDefault();if(!publication.busy&&state.hostFeatures.includes('publishUpload'))publishDrop.classList.add('drag-over');
+  let publishDragDepth=0;
+  function clearPublishDrag(){publishDragDepth=0;publishDrop.classList.remove('drag-over');}
+  function isFileDrag(event){return [...(event.dataTransfer?.types||[])].includes('Files');}
+  function canPublishDrop(){return publication.allowed&&!publication.busy&&state.hostFeatures.includes('publishUpload');}
+  publishDrop.addEventListener('dragenter',event=>{
+    if(!isFileDrag(event))return;
+    event.preventDefault();publishDragDepth++;
+    if(canPublishDrop())publishDrop.classList.add('drag-over');
   });
-  publishDrop.addEventListener('dragleave',event=>{if(!publishDrop.contains(event.relatedTarget))publishDrop.classList.remove('drag-over');});
+  publishDrop.addEventListener('dragover',event=>{
+    if(!isFileDrag(event))return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect=canPublishDrop()?'copy':'none';
+    if(canPublishDrop())publishDrop.classList.add('drag-over');
+  });
+  publishDrop.addEventListener('dragleave',event=>{
+    if(!isFileDrag(event))return;
+    publishDragDepth=Math.max(0,publishDragDepth-1);
+    if(!publishDragDepth)publishDrop.classList.remove('drag-over');
+  });
   publishDrop.addEventListener('drop',event=>{
-    event.preventDefault();publishDrop.classList.remove('drag-over');
-    if(publication.busy)return;
+    if(!isFileDrag(event))return;
+    event.preventDefault();clearPublishDrag();
+    if(publication.busy||!publication.allowed)return;
     if(!state.hostFeatures.includes('publishUpload'))return publishMessage('끌어놓기로 등록하려면 AX Workspace를 최신 버전으로 업데이트해 주세요.',true);
-    if(event.dataTransfer.files.length!==1)return publishMessage('배포 파일 한 개를 놓아 주세요.',true);
-    const file=event.dataTransfer.files[0];publishAction(()=>selectPublishFile(file));
+    const transfer=event.dataTransfer;
+    if([...transfer.items].some(item=>item.webkitGetAsEntry?.()?.isDirectory))return publishMessage('폴더가 아닌 배포 파일 한 개를 놓아 주세요.',true);
+    if(transfer.files.length!==1)return publishMessage('배포 파일 한 개를 놓아 주세요.',true);
+    publishAction(()=>selectPublishFile(transfer.files[0]));
   });
+  // Avoid navigating away from an unsaved form when a file lands outside its target.
+  for(const type of ['dragover','drop'])document.addEventListener(type,event=>{
+    if($('publish-dialog').open&&isFileDrag(event)&&!publishDrop.contains(event.target)){
+      event.preventDefault();if(type==='drop')clearPublishDrag();
+    }
+  });
+  $('publish-dialog').addEventListener('close',clearPublishDrag);
   $('publish-file-reapply').addEventListener('click',()=>{
     if(publication.busy||!publication.file||!publication.fileExtra.packageId)return;
     for(const key of publishFileFields)publication.manualFields.delete(key);
