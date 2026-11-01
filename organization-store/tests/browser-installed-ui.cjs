@@ -6,12 +6,12 @@ const path = require('node:path');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || path.join(require('node:os').homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright'));
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, 'organization-store');
-const output = path.join(root, 'outputs/store-installed-refresh-20261026');
+const output = process.env.STORE_INSTALLED_OUTPUT || path.join(root, 'outputs/store-installed-refresh-20261026');
 const html = fs.readFileSync(path.join(source, 'ui/index.html'), 'utf8').replace('<!--STORE_STYLE-->', '<style>' + fs.readFileSync(path.join(source, 'ui/store.css'), 'utf8') + '</style>');
 const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
-const font = fs.readFileSync(path.join(root, 'build/workspace-local-repository/local_app/web/fonts/NotoSansKR-Variable.woff'));
+const font = fs.readFileSync(process.env.STORE_HOST_FONT || path.join(root, 'build/workspace-local-repository/local_app/web/fonts/NotoSansKR-Variable.woff'));
 const records = [
-  {installationId:'report', toolId:101, name:'주간 실적 보고서 작성', type:'Skill', kind:'skill', release:2, scope:'directory', target:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서/.claude/skills/weekly-performance-report', status:'installed', rollbackAvailable:true, metadataStatus:'current'},
+  {installationId:'report', toolId:101, name:'주간 실적 보고서 작성', type:'Skill', kind:'skill', release:2, scope:'directory', scopeDir:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서', target:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서/.claude/skills/weekly-performance-report', status:'installed', rollbackAvailable:true, metadataStatus:'current',recordDigest:'a'.repeat(64)},
   {installationId:'analysis', toolId:102, name:'제조 데이터 분석 도구', type:'MCP/Tool', kind:'mcp', release:4, scope:'user', target:'C:/Users/사용자/.claude.json', status:'configured', rollbackAvailable:false, metadataStatus:'current'},
   {installationId:'meeting', toolId:103, name:'회의록 정리와 후속 업무 실행을 함께 돕는 조직 공통 하네스', type:'하네스/플러그인', release:1, scope:'directory', target:'D:/Projects/이름이 매우 긴 업무 폴더/연구 개발 부서와 협업하는 2026년 하반기 프로젝트/공통 자료와 참고 문서/.claude/plugins/meeting-follow-up', status:'installed', rollbackAvailable:true, metadataStatus:'snapshot'},
 ];
@@ -44,6 +44,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
           if(message.action==='options')result={organizations:[]};
           if(message.action==='catalog')result={items:config.catalogRecords.map(item),total:config.catalogRecords.length};
           if(message.action==='installations')result={items:cfg.records,recovery:{recovered:[],blocked:[]}};
+          if(message.action==='installationInfo')result={skillName:'weekly-performance-report',connectionVerified:false,notice:'파일 설치 기록입니다. 현재 Claude 연결에서 사용할 수 있는지는 스킬·플러그인 관리에서 확인하세요.'};
           if(message.action==='checkUpdates')result=cfg.updates;
           if(message.action==='verify')result={filesIntact:!cfg.changedFiles,configurationIntact:true,notice:'설치 파일을 확인했습니다.'};
           if(message.action==='rollback')result={restored:true,notice:'이전 설치 상태로 복구했어요.'};
@@ -65,7 +66,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
         });
       }, {records, catalogRecords:records, updates:{items:[],summary:{total:0,checked:0,available:0,current:0,attention:0,failed:0,pending:0},complete:true},hold:{},...options});
       await page.addScriptTag({content:script});
-      await page.locator('.catalog-card').first().waitFor();
+      await page.waitForFunction(()=>['success','empty','error'].includes(document.querySelector('#results').dataset.state));
       await page.evaluate(()=>document.fonts.ready);
     }
     const tab=name=>page.locator(`[data-tab="${name}"]`);
@@ -86,6 +87,17 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.deepEqual(await page.locator('.record-title').allTextContents(),records.map(record=>record.name));
     for(const record of records)assert.equal(await row(record.installationId).locator('.record-target').getAttribute('title'),record.target);
     assert.equal(await page.locator('#results').innerText().then(text=>/기능\s*#\d+/.test(text)),false);
+    assert.equal(await count('installationInfo'),0,'Listing must not read skill files');
+    assert.equal(await row('report').locator('.record-target').innerText(),'주간 실적 보고서');
+    assert.equal(await row('analysis').locator('.record-target').innerText(),'모든 업무에서 사용');
+    await row('report').locator('.record-details summary').click();
+    await row('report').locator('.record-details dd').filter({hasText:/^weekly-performance-report$/}).waitFor();
+    assert.equal(await count('installationInfo'),1);
+    assert.match(await row('report').locator('.record-details').innerText(),/스킬·플러그인 관리/);
+    assert.match(await row('report').locator('.record-details').innerText(),/https:\/\/square.example.test/);
+    await row('report').locator('.record-details summary').click();
+    await row('report').locator('.record-details summary').click();
+    assert.equal(await count('installationInfo'),1,'Reopening details reuses its bounded result');
     await noOverflow(); await screenshot('01-installed-light.png');
     await page.evaluate(()=>window.postMessage({type:'ax-extension-theme',channel:'installed-fixture',theme:'dark'},'*'));
     await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
@@ -94,6 +106,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     for(const id of ['report','analysis','meeting'])assert.equal(await row(id).getByRole('button',{name:'상태 확인',exact:true}).isVisible(),true);
     await screenshot('03-installed-narrow.png');
     checks.push('Readable real tool names, full path on hover, all controls accessible at 420px, light and dark themes without horizontal overflow');
+    checks.push('Scope/workspace identity stays compact; installed source, release, full path and actual skill name expand on demand, without claiming CLI load success');
     await page.setViewportSize({width:1100,height:900});
     await row('report').getByRole('button',{name:'상태 확인',exact:true}).click();
     await page.waitForFunction(()=>window.requests.filter(request=>request.action==='verify').length===1);
@@ -188,6 +201,22 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await page.locator('#results').innerText().then(text=>text.includes('모두 최신')),false);
     checks.push('Empty installations, all-current, partial failure and total RPC failure have truthful distinct results without a false all-current claim');
 
+    await fixture({errors:{catalog:'서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.'}});
+    assert.equal(await page.locator('#catalog-view').isVisible(),true,'Catalog failure must not force a new KEY connection');
+    assert.equal(await page.locator('#results').getAttribute('data-state'),'error');
+    assert.equal(await page.locator('#results').getAttribute('aria-busy'),'false');
+    assert.doesNotMatch(await page.locator('#results-label').innerText(),/불러오는 중/);
+    assert.equal(await page.locator('#results .loading').count(),0);
+    await page.evaluate(()=>delete window.fixtureConfig.errors.catalog);
+    await page.locator('.list-error').getByRole('button',{name:'다시 시도',exact:true}).click();
+    await page.locator('.catalog-card').first().waitFor();
+    assert.equal(await page.locator('#feedback.error').isVisible(),false,'Successful retry clears only its prior list error');
+    assert.equal(await page.locator('#results').getAttribute('data-state'),'success');
+    await fixture({catalogRecords:[]});
+    assert.equal(await page.locator('#results').getAttribute('data-state'),'empty');
+    assert.match(await page.locator('#results').innerText(),/핵심 단어/);
+    checks.push('Initial catalog failure has one error state, no loading or reauthentication, and retry recovers the same connection; an empty unfiltered catalog offers relevant search guidance');
+
     await fixture({hold:{installations:true}});
     await tab('installed').click(); await page.waitForFunction(()=>window.heldRequests.length===1);
     await tab('catalog').click(); await page.evaluate(()=>window.releaseHost('installations'));
@@ -200,6 +229,14 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await page.locator('.update-record').count(),0);
     assert.equal(await tab('installed').getAttribute('aria-current'),'page');
     checks.push('Delayed old installations/updates responses cannot replace the newly selected tab');
+
+    await fixture({hold:{installations:true},errors:{installations:'old request error'}});
+    await tab('installed').click();await page.waitForFunction(()=>window.heldRequests.length===1);
+    await tab('catalog').click();await page.evaluate(()=>window.releaseHost('installations'));
+    await page.locator('.catalog-card').first().waitFor();
+    assert.equal(await page.locator('#feedback.error').isVisible(),false,'A superseded list failure must not overwrite the current view');
+    assert.equal(await page.locator('#results').getAttribute('data-state'),'success');
+    checks.push('A late failure from an abandoned tab does not show an unrelated error or replace the new result');
 
     await fixture(); await tab('installed').click(); await waitRows(3); await settled();
     // Warm up the same paths before measuring to avoid mistaking first-time JIT/font caches for leaks.

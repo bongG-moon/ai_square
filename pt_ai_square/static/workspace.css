@@ -593,3 +593,6 @@
  #square-app .ws-activity-filter-fields{grid-template-columns:minmax(0,1fr)}
  #square-app .ws-activity-filter-actions{grid-column:1/-1;justify-content:flex-start}
 }
+.ws-draft-note{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 20px;padding:10px 0;border-bottom:1px solid var(--sq-line,#e5e5ed);font-size:12px;line-height:1.6;color:var(--sq-muted,#6e6e73)}
+.ws-draft-note>span{min-width:0}.ws-draft-note .sq-link{flex-shrink:0;font-size:12px}
+@media(max-width:600px){.ws-draft-note{align-items:flex-start;flex-wrap:wrap;gap:4px}.ws-draft-note>span{flex:1 1 230px}}

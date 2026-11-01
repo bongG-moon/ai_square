@@ -47,7 +47,7 @@ markup=markup.replace('체험 모드','사내 공유')
 markup=re.sub(r'<button id="sq-autoplay".*?</button>','',markup,flags=re.S)
 markup=markup.replace('01 — 05</span>','실시간 순위</span>')
 markup=markup.replace('lang="en">P&amp;T AI SQUARE','lang="en"><img class="sq-logo" src="/static/brand/pt-ai-square-symbol.svg" width="34" height="34" alt="">P&amp;T AI SQUARE',1)
-markup=markup.replace('기준 · 예시','기준 · 접속 시 집계').replace('예시 데이터 · 실제 업로드·설치·권한 변경은 실행하지 않습니다.','사내 도구 공유 · PC 자동 설치는 후속 앱 연동으로 지원합니다.')
+markup=markup.replace('기준 · 예시','기준 · 접속 시 집계').replace('예시 데이터 · 실제 업로드·설치·권한 변경은 실행하지 않습니다.','사내 도구 공유 · 지원되는 패키지는 AX Workspace 확장에서 설치할 수 있습니다.')
 markup=markup.replace('<div class="sq-header-actions">','<div class="sq-header-actions"><span class="sq-session" id="sq-session"></span><button class="sq-quiet cursor-interaction" data-action="fullscreen" aria-label="전체화면 전환"><i data-lucide="maximize"></i></button><button class="sq-quiet cursor-interaction" data-action="logout" title="로그아웃"><i data-lucide="log-out"></i></button>',1)
 (BASE/'templates/index.html').write_text('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>P&amp;T AI SQUARE</title><link rel="icon" type="image/svg+xml" href="/static/brand/pt-ai-square-symbol.svg"><link rel="stylesheet" href="/static/app.css"><script defer src="/static/lucide.min.js"></script><script defer src="/static/app.js"></script></head><body>'+markup+'</body></html>',encoding='utf-8')
 js=re.search(r'<script>(.*?)</script>',fragment,re.S)[1]
@@ -89,7 +89,7 @@ start=js.index("  else if(x.platform==='ChatGPT'&&x.mode!=='server')")
 end=js.index('  if(x.guide)',start)
 js=js[:start]+'''  else {content+=`<div class="sq-callout"><strong>사용 환경</strong><br>${esc(x.environment||x.platform)}</div>`;
   if(x.mode==='server')content+=`<div class="sq-callout"><strong>등록된 연결 주소</strong><br><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><p class="sq-note">${x.platform==='ChatGPT'?'회사 ChatGPT 관리자에게 원격 연결 메뉴와 인증 방식의 지원 여부를 확인한 후 아래 안내를 따라 설정하세요.':'등록자가 제공한 안내에 따라 대상 프로그램에서 연결하세요.'} 웹이 연결 성공을 자동 확인하지는 않습니다.</p>`;
-  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} PC 자동 설치·업데이트는 후속 앱 연동 기능입니다.</div>`;
+  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} AX Workspace의 P&T AI Square 확장에서는 지원되는 패키지를 공통 또는 업무별로 설치할 수 있습니다. 설치 가능 여부와 범위는 앱에서 확인하세요.</div>`;
   }
 '''+js[end:]
 js=js.replace('좋아요 3점 · 다운로드 1점에 최근 1시간 4배, 1–6시간 2배, 6–24시간 1배를 적용하는 제안입니다.','좋아요 3점 · 다운로드 1점에 최근 1시간 4배, 1–6시간 2배, 6–24시간 1배를 적용합니다.')

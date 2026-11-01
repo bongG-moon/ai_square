@@ -62,7 +62,7 @@ VERSION = '0.1.0'
 PUBLISH_ACCESS_DEADLINE = 6.0
 ACTIONS = frozenset({'status', 'connect', 'disconnect', 'options', 'catalog', 'detail', 'requestAccess', 'cancelAccessRequest',
                      'like', 'download', 'prepareInstallRequest', 'prepareInstall', 'install', 'installations', 'removeInstallationRecord',
-                     'checkUpdates', 'verify', 'rollback', 'publishOptions', 'publishUpdateAccess',
+                     'checkUpdates', 'installationInfo', 'verify', 'rollback', 'publishOptions', 'publishUpdateAccess',
                      'inspectPublishSource', 'preparePublish', 'publishStatus', 'publish'})
 PUBLISH_FIELDS = frozenset({'name', 'desc', 'owner', 'platform', 'type', 'guide', 'orgId',
                            'categoryId', 'approval', 'workTags', 'environment', 'changes',
@@ -489,7 +489,7 @@ class Store:
         except SquareError:
             return False, INSTALL_METADATA_NOTICE
         if profile is None:
-            return False, INSTALL_METADATA_NOTICE
+            return False, zip_install.INSPECTION_NOTICE if zip_install.can_inspect(manifest) else INSTALL_METADATA_NOTICE
         can = bool(profile.get('kind') in {'skill', 'mcp'}
                    and profile.get('host') == 'claude' and manifest.get('downloadUrl'))
         return can, ('설치 범위를 선택하면 변경할 파일과 경로를 먼저 확인할 수 있습니다.' if can else MANUAL_NOTICE)
@@ -703,6 +703,53 @@ class Store:
                 item['metadataStatus'] = 'cached'
             items.append(item)
         return items
+
+    def installation_info(self, runtime, payload):
+        """Read one explicitly opened record; no folder scan, network or execution."""
+        if (set(payload) != {'installationId', 'recordDigest'}
+                or not isinstance(payload.get('installationId'), str)
+                or not isinstance(payload.get('recordDigest'), str)
+                or not re.fullmatch(r'[0-9a-f]{64}', payload['recordDigest'])):
+            raise SquareError('설치 목록을 새로고침한 뒤 설치 정보를 다시 열어 주세요.')
+        with operation_lock(runtime.settings.state):
+            record = self.visible_records(runtime, self.records(runtime)).get(payload['installationId'])
+            if not record or digest(record) != payload['recordDigest']:
+                raise SquareError('설치 기록이 변경되었어요. 목록을 새로고침한 뒤 다시 확인해 주세요.')
+            info = dict(origin=runtime.settings.url, release=record.get('release'),
+                        scope=record.get('scope'), scopeDir=record.get('scopeDir'),
+                        target=record.get('target'), connectionVerified=False,
+                        notice='파일 설치 기록입니다. 현재 Claude 연결에서 사용할 수 있는지는 스킬·플러그인 관리에서 확인하세요.')
+            if record.get('status') == 'configured':
+                name = record.get('serverName')
+                if isinstance(name, str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,100}', name):
+                    info['serverName'] = name
+                return info
+            # The package slug may differ from SKILL.md's actual name. Read only
+            # this bounded file when requested, never infer a slash command from
+            # the tool title or folder. Linked/malformed files stay unknown.
+            # This is the current local name, not an integrity or CLI load check.
+            try:
+                scope = Path(record['scopeDir'])
+                target = Path(record['target'])
+                if not scope.is_absolute() or target.parent != scope / '.claude' / 'skills':
+                    return info
+                skill = no_links(target / 'SKILL.md')
+                with skill.open('rb') as source:
+                    raw = source.read(zip_install.MAX_SKILL_BYTES + 1)
+                if len(raw) > zip_install.MAX_SKILL_BYTES:
+                    return info
+                text = raw.decode('utf-8-sig')
+                front = re.match(r'\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)', text, re.S)
+                names = re.findall(r'^name[ \t]*:[ \t]*(.*?)[ \t]*\r?$', front.group(1), re.M) if front else []
+                if len(names) == 1:
+                    name = names[0]
+                    if len(name) >= 2 and name[0] == name[-1] and name[0] in {'"', "'"}:
+                        name = name[1:-1]
+                    if re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}', name):
+                        info['skillName'] = name
+            except (OSError, UnicodeError, ValueError, KeyError, SquareError):
+                pass
+            return info
 
     def check_updates(self, runtime, records, recovery, tool_id=None):
         started = time.monotonic()
@@ -1249,6 +1296,8 @@ class Store:
             if set(payload) != {'toolId', 'expectedRevision'}:
                 raise SquareError('취소할 신청 상태를 새로 확인해 주세요.')
             return client.cancel_access_request(positive(payload['toolId']), payload['expectedRevision'])
+        if action == 'installationInfo':
+            return self.installation_info(runtime, payload)
         if action in {'installations', 'checkUpdates'}:
             # Snapshot and recovery need the canonical lock; remote read-only
             # metadata/version requests do not. Another install can proceed.

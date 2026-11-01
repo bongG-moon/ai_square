@@ -313,8 +313,8 @@ def search_catalog():
     if not 1 <= limit <= 100 or not 0 <= offset <= 100000:
         raise BadRequest('limit는 1~100, offset은 0~100000입니다.')
     mode = SORT_ALIASES.get(request.args.get('sort', 'recommended'), request.args.get('sort', 'recommended'))
-    if mode not in {'recommended', 'realtime', 'cumulative', 'newest'}:
-        raise BadRequest('정렬은 recommended, realtime, cumulative, newest 중 선택하세요.')
+    if mode not in {'recommended', 'realtime', 'cumulative', 'newest', 'downloads', 'name'}:
+        raise BadRequest('정렬은 recommended, realtime, cumulative, newest, downloads, name 중 선택하세요.')
     query = {'deleted': {'$ne': True}, 'purge': {'$exists': False}}
     groups = query_groups(q)
     registrant_matches = {}
@@ -339,6 +339,15 @@ def search_catalog():
         query['data.type'] = {'$in': [kind] + [k for k, v in TYPE_ALIASES.items() if v == kind]}
     if request.args.get('orgId'):
         query['data.orgId'] = request.args['orgId']
+    elif request.args.get('org'):
+        # Web filters use the current taxonomy label; IDs keep renamed rows searchable.
+        organization = request.args['org']
+        ids = [row['_id'] for row in db().taxonomy.find({'kind': 'organization', 'name': organization}, {'_id': 1})]
+        query.setdefault('$and', []).append({'$or': [{'data.orgId': {'$in': ids}}, {'data.org': organization}]})
+    if request.args.get('category'):
+        category = request.args['category']
+        ids = [row['_id'] for row in db().taxonomy.find({'kind': 'category', 'name': category}, {'_id': 1})]
+        query.setdefault('$and', []).append({'$or': [{'data.categoryId': {'$in': ids}}, {'data.category': category}]})
     platform = request.args.get('platform', '')
     if platform:
         if platform not in {'Claude', 'ChatGPT', '기타'}:
@@ -397,6 +406,10 @@ def search_catalog():
             key = (-int(exact), -matches, -weight, -min(15, signal['score'] if signal else 0), *rank_key)
         elif mode == 'newest':
             key = (-row.get('created', 0), tid)
+        elif mode == 'downloads':
+            key = (-metric['downloads'], -row.get('created', 0), tid)
+        elif mode == 'name':
+            key = (normalize(data.get('name')), tid)
         else:
             key = rank_key
         reasons = []

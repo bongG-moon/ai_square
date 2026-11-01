@@ -76,6 +76,8 @@ def test_root_skill_zip_is_reviewed_then_installed_and_rolled_back(configured, s
     store, client, project, home = configured
     detail = store.dispatch('detail', {'toolId': 1})
     assert not detail['canInstall'] and detail['canInspectInstall']
+    assert detail['installNotice'] == worker.zip_install.INSPECTION_NOTICE
+    assert '등록해야' not in detail['installNotice']
     assert not client.transfers
     plan = store.dispatch('prepareInstall', {'toolId': 1, 'scope': scope})
     target = (project if scope == 'project' else home)/'.claude/skills/verified-skill'

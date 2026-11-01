@@ -2,7 +2,11 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {test}=require('node:test');
 const base=path.join(__dirname,'..'),read=p=>fs.readFileSync(path.join(base,p),'utf8').replace(/\r\n/g,'\n');
-const app=read('static/app.js'),source=app.slice(app.indexOf('// Workspace extension:'),app.indexOf('function fileSize(n)')).trim();
+const app=read('static/app.js'),maintained=read('frontend/frontend_workspace.js').trim();
+// Later UI modules are concatenated after this module; their DOM dependencies
+// do not belong to this isolated test. The equality check below still verifies
+// that the complete deployed module matches its maintained source.
+const start=app.indexOf('// Workspace extension:'),source=app.slice(start,start+maintained.length);
 const tick=()=>new Promise(setImmediate);
 function deferred(){let resolve,reject;const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});return {promise,resolve,reject};}
 
@@ -41,7 +45,7 @@ function setup(){
  return {context,writes,reads,errors,announcements,invoke,form};
 }
 
-test('deployed workspace matches its maintained source',()=>assert.equal(source,read('frontend/frontend_workspace.js').trim()));
+test('deployed workspace matches its maintained source',()=>{assert.ok(start>=0);assert.equal(source,maintained);});
 
 const cases=[['idea-claim'],['subscribe'],['delete-tool'],['restore-tool'],['choose-user','grant'],['choose-user','admin'],['remove-admin'],['read-all'],['notification-open']];
 for(const [action,mode] of cases){

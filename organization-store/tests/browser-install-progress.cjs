@@ -6,7 +6,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || path.join(require(
 const root = path.resolve(__dirname, '../..'), source = path.join(root, 'organization-store');
 const html = fs.readFileSync(path.join(source, 'ui/index.html'), 'utf8').replace('<!--STORE_STYLE-->', '<style>' + fs.readFileSync(path.join(source, 'ui/store.css'), 'utf8') + '</style>');
 const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
-const font = fs.readFileSync(path.join(root, 'build/workspace-local-repository/local_app/web/fonts/NotoSansKR-Variable.woff'));
+const font = fs.readFileSync(process.env.STORE_HOST_FONT || path.join(root, 'build/workspace-local-repository/local_app/web/fonts/NotoSansKR-Variable.woff'));
 const output = process.env.STORE_PROGRESS_OUTPUT || path.join(root, 'outputs/store-install-progress-20261026');
 fs.mkdirSync(output, { recursive: true });
 

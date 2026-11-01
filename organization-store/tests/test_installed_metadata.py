@@ -143,7 +143,9 @@ def test_detail_snapshot_survives_install_update_and_rollback(configured):
         value.pop('name')  # Current web manifests do not carry a title.
         return value
     client.manifest = manifest
-    client.json = lambda path, *args: dict(id=1, name='실제 도구 이름', type='Skill', registrantName='이등록')
+    original_json = client.json
+    client.json = lambda path, *args: (original_json(path, *args) if path == '/api/integration/me'
+                                     else dict(id=1, name='실제 도구 이름', type='Skill', registrantName='이등록'))
     store.dispatch('detail', {'toolId': 1})
     first_plan = store.dispatch('prepareInstall', dict(toolId=1, scope='project'))
     first = store.dispatch('install', dict(first_plan, confirmed=True))
@@ -158,6 +160,55 @@ def test_detail_snapshot_survives_install_update_and_rollback(configured):
     canonical = worker.read_json(store.settings().state / 'installations.json')[first['installationId']]
     assert 'name' not in canonical and 'registrantName' not in canonical
     assert store.dispatch('verify', dict(installationId=first['installationId']))['filesIntact']
+
+
+def test_installation_info_reads_actual_skill_name_only_on_demand(configured):
+    store, client, project, _ = configured
+    plan = store.dispatch('prepareInstall', dict(toolId=1, scope='project'))
+    store.dispatch('install', dict(plan, confirmed=True))
+    item = store.dispatch('installations')['items'][0]
+    path = store.settings().state / 'installations.json'
+    before = path.read_bytes()
+    client.json = lambda *a, **kw: pytest.fail('Local installation info must not access the platform')
+    result = store.dispatch('installationInfo', dict(installationId=item['installationId'], recordDigest=item['recordDigest']))
+    assert result['skillName'] == 'test-store'  # Deliberately different from folder fixture-store.
+    assert result['release'] == 1 and result['origin'] == client.origin
+    assert result['connectionVerified'] is False
+    assert '스킬·플러그인 관리' in result['notice']
+    assert path.read_bytes() == before
+    assert not any(key in result for key in ['configEntry', 'accountBinding', 'backup'])
+
+
+@pytest.mark.parametrize('content', ['# Missing frontmatter', '---\nname: one\nname: two\n---\nbody', 'x' * (128 * 1024 + 1)], ids=['missing', 'ambiguous', 'oversized'])
+def test_installation_info_never_guesses_unreadable_or_ambiguous_name(configured, content):
+    store, client, project, _ = configured
+    plan = store.dispatch('prepareInstall', dict(toolId=1, scope='project'))
+    store.dispatch('install', dict(plan, confirmed=True))
+    item = store.dispatch('installations')['items'][0]
+    (project / '.claude/skills/fixture-store/SKILL.md').write_text(content, encoding='utf-8')
+    result = store.dispatch('installationInfo', dict(installationId=item['installationId'], recordDigest=item['recordDigest']))
+    assert 'skillName' not in result and not result['connectionVerified']
+
+
+def test_installation_info_requires_current_visible_record_and_confined_path(configured):
+    store, client, project, _ = configured
+    rows = seed(store, project)
+    outside = project / 'not-an-installed-skill'
+    outside.mkdir()
+    (outside / 'SKILL.md').write_text('---\nname: do-not-read\n---\nbody', encoding='utf-8')
+    rows['install-1']['target'] = str(outside)
+    path = store.settings().state / 'installations.json'
+    worker.atomic_json(path, rows)
+    reader(client, lambda p: {'id': tid(p), 'name': 'Fixture'})
+    item = store.dispatch('installations')['items'][0]
+    payload = dict(installationId=item['installationId'], recordDigest=item['recordDigest'])
+    assert 'skillName' not in store.dispatch('installationInfo', payload)
+    with pytest.raises(worker.SquareError):
+        store.dispatch('installationInfo', {**payload, 'recordDigest':'0' * 64})
+    store.dispatch('removeInstallationRecord', {**payload, 'confirmed':True})
+    with pytest.raises(worker.SquareError):
+        store.dispatch('installationInfo', payload)
+    assert (outside / 'SKILL.md').is_file()
 
 
 def test_display_write_failure_does_not_fail_completed_install(configured, monkeypatch):

@@ -21,8 +21,8 @@ from pt_square_mcp.profiles import relative, validate_profile
 DETECTION_KEY = '_axStoreZipSkill'
 MAX_SKILL_BYTES = 128 * 1024
 MAX_PACKAGE_BYTES = 64 * 1024
-INSPECTION_NOTICE = ('ZIP 안의 Skill 구조를 확인한 뒤 설치할 수 있어요. '
-                     '파일을 확인할 때 다운로드가 집계되며, 설치 전 변경 위치를 보여드립니다.')
+INSPECTION_NOTICE = ('ZIP 구조를 검사해 바로 설치할 수 있는지 확인합니다. '
+                     '지원되는 Skill이면 설치 위치와 변경 내용을 보여드립니다. 파일 확인 시 다운로드가 집계됩니다.')
 DETECTED_NOTICE = ('ZIP 최상위 SKILL.md와 스킬 이름을 확인했습니다. 선택한 공간의 '
                    '.claude/skills 폴더에 파일을 설치합니다. ZIP의 설치 스크립트나 명령은 실행하지 않습니다.')
 UNSUPPORTED_NOTICE = ('이 ZIP에서는 설치할 Skill 구조나 실행 명령을 확인할 수 없어요. '
