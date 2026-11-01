@@ -80,6 +80,17 @@ def normalize(value):
     return unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
 
 
+def compact(value):
+    return re.sub(r'\s+', '', normalize(value))
+
+
+def literal_pattern(values):
+    # Preserve the browser's established spacing-insensitive names (김 하늘 /
+    # 김하늘) in the shared matcher, without interpreting regex metacharacters.
+    return '|'.join(r'\s*'.join(re.escape(char) for char in compact(value))
+                    for value in values)
+
+
 def _query_stem(term):
     if term in ACTION_FORMS:
         return ACTION_FORMS[term]
@@ -133,16 +144,16 @@ def group_importance(variants):
 
 def relevance(row, query, groups, registrant_name=''):
     data = row['data']
-    values = {key: [normalize(x) for x in data.get(key, [])]
-              if isinstance(data.get(key), list) else [normalize(data.get(key, ''))]
+    values = {key: [compact(x) for x in data.get(key, [])]
+              if isinstance(data.get(key), list) else [compact(data.get(key, ''))]
               for key in QUERY_FIELDS}
-    values['registrant'] = [normalize(registrant_name)]
-    exact = bool(query and (normalize(data.get('name')) == normalize(query)
+    values['registrant'] = [compact(registrant_name)]
+    exact = bool(query and (compact(data.get('name')) == compact(query)
                            or str(row['_id']) == query.strip()))
     matched, weight, fields = 0, 0, set()
     for variants in groups:
         hits = [key for key, texts in values.items()
-                if any(variant in text for variant in variants for text in texts)]
+                if any(compact(variant) in text for variant in variants for text in texts)]
         if hits:
             matched += group_importance(variants)
             weight += max(FIELD_WEIGHTS[key] for key in hits)
@@ -276,13 +287,13 @@ def _candidates(query, projection, q, groups, registrant_matches):
                     'in': {'$concat': ['$$value', ' ', '$$this']}}}) for key in QUERY_FIELDS}
     group_hits, group_weights = [], []
     for variants in groups:
-        pattern = '|'.join(re.escape(word) for word in variants)
+        pattern = literal_pattern(variants)
         hits = {key: {'$regexMatch': {'input': {'$ifNull': [value, '']}, 'regex': pattern, 'options': 'i'}}
                 for key, value in text_fields.items()}
         # Actual registering account names are resolved once, separate from the
         # editable contact label in data.owner. Only owner IDs enter the pipeline.
         matching_ids = [uid for uid, name in registrant_matches.items()
-                        if any(variant in normalize(name) for variant in variants)]
+                        if any(compact(variant) in compact(name) for variant in variants)]
         hits['registrant'] = {'$in': ['$owner', {'$literal': matching_ids}]}
         group_hits.append({'$cond': [{'$or': list(hits.values())}, group_importance(variants), 0]})
         group_weights.append({'$max': [{'$cond': [hit, FIELD_WEIGHTS[key], 0]} for key, hit in hits.items()]})
@@ -290,7 +301,8 @@ def _candidates(query, projection, q, groups, registrant_matches):
         {'$match': query}, {'$project': projection},
         {'$set': {
             '_searchExact': {'$or': [
-                {'$eq': [{'$toLower': '$data.name'}, {'$literal': normalize(q)}]},
+                {'$regexMatch': {'input': {'$ifNull': ['$data.name', '']},
+                                 'regex': '^' + literal_pattern([q]) + '$', 'options': 'i'}},
                 {'$eq': [{'$toString': '$_id'}, {'$literal': q}]}]},
             '_searchMatches': {'$sum': group_hits}, '_searchWeight': {'$sum': group_weights},
         }},
@@ -313,14 +325,14 @@ def search_catalog():
     if not 1 <= limit <= 100 or not 0 <= offset <= 100000:
         raise BadRequest('limit는 1~100, offset은 0~100000입니다.')
     mode = SORT_ALIASES.get(request.args.get('sort', 'recommended'), request.args.get('sort', 'recommended'))
-    if mode not in {'recommended', 'realtime', 'cumulative', 'newest', 'downloads', 'name'}:
-        raise BadRequest('정렬은 recommended, realtime, cumulative, newest, downloads, name 중 선택하세요.')
+    if mode not in {'recommended', 'realtime', 'cumulative', 'newest', 'name', 'downloads'}:
+        raise BadRequest('정렬은 recommended, realtime, cumulative, newest, name, downloads 중 선택하세요.')
     query = {'deleted': {'$ne': True}, 'purge': {'$exists': False}}
     groups = query_groups(q)
     registrant_matches = {}
     if q:
-        patterns = list(dict.fromkeys(re.escape(word) for group in groups for word in group))
-        pattern = '|'.join(patterns)
+        patterns = list(dict.fromkeys(word for group in groups for word in group))
+        pattern = literal_pattern(patterns)
         # A single account-name lookup also lets registrant-only matches enter
         # the lexical candidate cap. Never accept a caller's asserted owner.
         registrant_matches = {user['_id']: user['name'] for user in db().users.find(
@@ -337,14 +349,9 @@ def search_catalog():
         if kind not in {'MCP/Tool', 'Skill', '플러그인/하네스'}:
             raise BadRequest('도구 유형을 확인하세요.')
         query['data.type'] = {'$in': [kind] + [k for k, v in TYPE_ALIASES.items() if v == kind]}
-    if request.args.get('orgId'):
-        query['data.orgId'] = request.args['orgId']
-    elif request.args.get('org'):
-        # Web filters use the current taxonomy label; IDs keep renamed rows searchable.
-        organization = request.args['org']
-        ids = [row['_id'] for row in db().taxonomy.find({'kind': 'organization', 'name': organization}, {'_id': 1})]
-        query.setdefault('$and', []).append({'$or': [{'data.orgId': {'$in': ids}}, {'data.org': organization}]})
-    if request.args.get('category'):
+    if request.args.get('categoryId'):
+        query['data.categoryId'] = request.args['categoryId']
+    elif request.args.get('category'):
         category = request.args['category']
         ids = [row['_id'] for row in db().taxonomy.find({'kind': 'category', 'name': category}, {'_id': 1})]
         query.setdefault('$and', []).append({'$or': [{'data.categoryId': {'$in': ids}}, {'data.category': category}]})
@@ -353,6 +360,22 @@ def search_catalog():
         if platform not in {'Claude', 'ChatGPT', '기타'}:
             raise BadRequest('프로그램을 확인하세요.')
         query['data.platform'] = platform
+
+    # Facets describe the same text/type/category candidates before selecting
+    # an organization. Compute in Mongo, before the evaluation cap, and only
+    # when requested by the browser; MCP clients keep their bounded read path.
+    facet_rows = []
+    if request.args.get('facets') == 'organizations':
+        facet_rows = list(db().tools.aggregate([
+            {'$match': query},
+            {'$group': {'_id': {'id': '$data.orgId', 'name': '$data.org'}, 'count': {'$sum': 1}}},
+        ], maxTimeMS=5000))
+    if request.args.get('orgId'):
+        query['data.orgId'] = request.args['orgId']
+    elif request.args.get('org'):
+        organization = request.args['org']
+        ids = [row['_id'] for row in db().taxonomy.find({'kind': 'organization', 'name': organization}, {'_id': 1})]
+        query.setdefault('$and', []).append({'$or': [{'data.orgId': {'$in': ids}}, {'data.org': organization}]})
 
     projection = {('data.' + k): 1 for k in (*QUERY_FIELDS, 'type', 'platform', 'org', 'orgId', 'categoryId', 'approval', 'owner')}
     projection.update(owner=1, created=1, departmentGrants=1)
@@ -377,6 +400,7 @@ def search_catalog():
         'not_used_for_ranking': '이 정렬은 조직 선호를 반영하지 않습니다.',
     }[recommendation['status']]
     taxonomy_ids = {r['data'].get(key) for r in rows for key in ('orgId', 'categoryId')}
+    taxonomy_ids.update(row['_id'].get('id') for row in facet_rows)
     taxonomy = {r['_id']: r['name'] for r in db().taxonomy.find({'_id': {'$in': list(taxonomy_ids - {None})}}, {'name': 1})}
     granted = {r['tool'] for r in db().access.find(
         {'user': g.user['id'], 'tool': {'$in': ids}, 'granted': True}, {'tool': 1})}
@@ -406,10 +430,10 @@ def search_catalog():
             key = (-int(exact), -matches, -weight, -min(15, signal['score'] if signal else 0), *rank_key)
         elif mode == 'newest':
             key = (-row.get('created', 0), tid)
-        elif mode == 'downloads':
-            key = (-metric['downloads'], -row.get('created', 0), tid)
         elif mode == 'name':
             key = (normalize(data.get('name')), tid)
+        elif mode == 'downloads':
+            key = (-metric['downloads'], -row.get('created', 0), tid)
         else:
             key = rank_key
         reasons = []
@@ -423,6 +447,10 @@ def search_catalog():
             reasons.append(('최근 7일' if recent else '전체 기간') + ' 좋아요 × 2 + 다운로드 수 × 1 기준입니다.')
         elif mode == 'recommended' and (metric['likes'] or metric['downloads']):
             reasons.append(f'전체 기간 좋아요 {metric["likes"]}개, 다운로드 {metric["downloads"]}회를 참고했습니다.')
+        elif mode == 'downloads':
+            reasons.append('전체 기간 다운로드 수가 많은 순서입니다.')
+        elif mode == 'name':
+            reasons.append('도구 이름 순서입니다.')
         if not reasons:
             reasons.append('최근 등록 순서입니다.' if mode == 'newest' else '검색 관련도가 같은 경우 전사 누적 집계를 참고합니다.')
         access = can_read(row, g.user['id'], profile, administrator=is_admin,
@@ -442,9 +470,20 @@ def search_catalog():
     prepared.sort(key=lambda pair: pair[0])
     complete = total <= CANDIDATE_LIMIT
     available = len(prepared)
+    facets = None
+    if request.args.get('facets') == 'organizations':
+        organizations = {}
+        for row in facet_rows:
+            identity = row['_id']
+            name = taxonomy.get(identity.get('id'), identity.get('name', ''))
+            key = identity.get('id') or name
+            value = organizations.setdefault(key, dict(id=identity.get('id'), name=name, count=0))
+            value['count'] += row['count']
+        facets = dict(organizations=list(organizations.values()),
+                      total=sum(row['count'] for row in facet_rows))
     return jsonify(items=[item for _, item in prepared[offset:offset + limit]], total=total,
                    nextOffset=offset + limit if offset + limit < available else None,
-                   sort=mode, dataAsOf=now, recommendation=recommendation,
+                   sort=mode, dataAsOf=now, recommendation=recommendation, facets=facets,
                    queryInterpretation={'method': 'local_concept_matching',
                                         'concepts': [variants[0] for variants in groups]},
                    complete=complete, evaluatedCount=available, candidateLimit=CANDIDATE_LIMIT,

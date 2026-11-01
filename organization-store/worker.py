@@ -695,6 +695,12 @@ class Store:
                         recordDigest=digest(record),
                         rollbackAvailable=record.get('status') in {'installed', 'configured'},
                         **self.display_metadata(saved))
+            # Provenance is from the committed local receipt, never the current
+            # catalog response or cosmetic name cache. Older records stay usable.
+            if record.get('origin') == runtime.settings.url:
+                item['origin'] = record['origin']
+            if isinstance(record.get('sha256'), str) and re.fullmatch(r'[0-9a-fA-F]{64}', record['sha256']):
+                item['sha256'] = record['sha256'].lower()
             completed_plan = self.completed_plan_id(runtime, record)
             if completed_plan is not None:
                 item['completedPlanId'] = completed_plan

@@ -157,7 +157,7 @@ function detail(id,tab='intro'){
   else {content+=`<div class="sq-callout"><strong>사용 환경</strong><br>${esc(x.environment||x.platform)}</div>`;
   if(x.mode==='server')content+=`<div class="sq-callout"><strong>등록된 연결 주소</strong><br><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><p class="sq-note">${x.platform==='ChatGPT'?'회사 ChatGPT 관리자에게 원격 연결 메뉴와 인증 방식의 지원 여부를 확인한 후 아래 안내를 따라 설정하세요.':'등록자가 제공한 안내에 따라 대상 프로그램에서 연결하세요.'} 웹이 연결 성공을 자동 확인하지는 않습니다.</p>`;
   else if(x.mode==='command')content+=commandScopePanel(x,x.versions.find(v=>v.n===x.active));
-  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} AX Workspace의 P&T AI Square 확장에서는 지원되는 패키지를 공통 또는 업무별로 설치할 수 있습니다. 설치 가능 여부와 범위는 앱에서 확인하세요.</div>`;
+  else content+=`${button('download-file','파일 다운로드','sq-primary')}<div class="sq-callout">${x.platform==='ChatGPT'?'회사 계정에서 허용된 파일 첨부·지침 활용 방법을 확인하세요. Python 코드와 실행 파일은 ChatGPT에 첨부한다고 자동 설치되지 않습니다.':'파일을 받은 뒤 아래 설치 안내를 따라주세요.'} ${x.platform==='Claude'?'지원되는 Skill과 MCP는 AX Workspace 확장이나 AI SQUARE MCP에서 설치할 수 있습니다. ZIP은 파일 구조와 설치 위치를 먼저 확인하며, 설치 후 실제 사용은 AI에서 확인하세요.':'웹에서는 원본 파일을 제공합니다. 실제 설치나 연결은 사용하는 프로그램에서 진행하세요.'}</div>`;
   }
   if(x.guide)content+=`<div class="sq-callout"><strong>등록자가 제공한 안내</strong><br>${esc(x.guide).replace(/\n/g,'<br>')}</div>`;
   if(x.updatePaused)content+='<div class="sq-callout">현재 배포는 이전 버전으로 복구한 상태입니다. 자동 업데이트 재개 전 점검이 필요합니다.</div>';
@@ -181,7 +181,9 @@ function wizard(){
 }
 async function publish(){
  if(runtime.publishBusy)return;
+ if(typeof registrationDraftMatchesUser==='function'&&!registrationDraftMatchesUser())throw Error('로그인한 사용자가 바뀌었습니다. 도구 등록을 다시 열어 주세요.');
  const d=runtime.draft;if(!d)return;
+ if(typeof saveRegistrationDraft==='function')saveRegistrationDraft();
  const draftOwner=runtime.draftOwner,viewToken=runtime.detailLoadToken,draftSequence=runtime.draftChangeSequence||0;
  const draftRevision=typeof registrationDraftRevision==='function'?registrationDraftRevision():null;
  const error=packageBlockingError(d)||Core.validate(d,1)||Core.validate(d,2);if(runtime.step!==3||error){if(error)throw Error(error);return;}
@@ -197,11 +199,17 @@ async function publish(){
  const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
  const signature=JSON.stringify(canonical(identity));
  let attempt=runtime.publishAttempt;
- if(!attempt||attempt.signature!==signature||attempt.target!==target||attempt.file!==file){
+ if(attempt?.restored||attempt?.uncertain){
+  // A changed File object after reload must not allocate a second publication.
+  // The server still verifies the original request's metadata and file hash.
+  if(attempt.target!==target||attempt.signature!==signature&&!attempt.canCorrect)throw Error('이전 게시의 입력 내용이 달라졌습니다. 이전 내용으로 되돌리거나 게시 결과 확인에서 먼저 완료 여부를 확인해 주세요.');
+  attempt.file=file;attempt.signature=signature;
+ }else if(!attempt||attempt.signature!==signature||attempt.target!==target||attempt.file!==file){
   const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');
   attempt=runtime.publishAttempt={signature,target,file,id:`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`};
  }
+ if(typeof saveRegistrationDraft==='function')saveRegistrationDraft();
  const progress=typeof $==='function'?$('#sq-register-error'):null;
  const validResult=value=>Number.isInteger(value?.id)&&value.id>0&&Number.isInteger(value?.version)&&value.version>0&&(!target||value.id===target);
  const recover=async()=>{
@@ -227,6 +235,7 @@ async function publish(){
   const form=new FormData();form.append('metadata',JSON.stringify({...JSON.parse(metadata),clientRequestId:attempt.id}));if(file)form.append('artifact',file);
   try{result=await requestAPI(target?`/api/tools/${target}/versions`:'/api/tools','POST',form);if(!validResult(result)){const error=Error('게시 응답 형식을 확인하지 못했습니다.');error.uncertain=true;throw error;}}
   catch(error){
+   if((attempt.restored||attempt.uncertain)&&!error.uncertain&&error.status===400)attempt.canCorrect=true;
    if(!error.uncertain)throw error;
    attempt.uncertain=true;
    try{result=await recover();}catch(recoveryError){throw unresolved(recoveryError);}
@@ -239,12 +248,13 @@ async function publish(){
  const ownsDraft=(runtime.draftChangeSequence||0)===draftSequence&&runtime.draft===d&&runtime.releaseId===target&&runtime.draftOwner===draftOwner&&JSON.stringify({...d,file:undefined,sample:undefined,packageInspection:undefined})===metadata&&(d.mode==='file'?d.file:null)===file;
  if(ownsDraft)runtime.draft=null;
  if(runtime.publishAttempt===attempt)runtime.publishAttempt=null;
+ if(typeof settleRegistrationAttempt==='function')settleRegistrationAttempt(draftOwner,target,attempt.id);
  const stillHere=()=>ownsDraft&&runtime.detailLoadToken===viewToken&&(typeof server==='undefined'||server.user.id===draftOwner);
  if(stillHere())runtime.newId=result.id;
  let refreshNotice='';try{await refresh();}catch{refreshNotice='게시가 완료되었습니다. 목록을 갱신하지 못했으므로 새로고침 후 확인해 주세요.';}
  if(!stillHere()){const status=typeof $==='function'?$('#sq-status'):null;if(status)status.textContent=`${d.name} 게시가 완료되었습니다. 등록 관리에서 확인할 수 있어요.`;return result;}
  openModal('공유할 준비가 되었습니다.','게시 완료',`<div class="sq-success"><span class="sq-feature-icon">${icon('check')}</span><h3>${esc(getItem(result.id)?.name||d.name)}</h3><p>v${result.version}을 서버에 저장했습니다.<br>설치·연결 안내와 공개 범위를 확인해 주세요.</p>${refreshNotice?`<p role="status">${refreshNotice}</p>`:''}${result.pending?'<p role="status">게시가 완료되었습니다. 이력·알림은 다음 조회 시 동기화됩니다.</p>':''}${result.packageWarning?`<div class="ws-package"><strong>파일은 게시되었습니다. 배포 정보는 읽지 못했습니다.</strong><p>${esc(result.packageWarning)}</p><p>직접 입력한 등록 정보로 제공됩니다.</p></div>`:''}${result.deploymentUrl?`<div class="ws-package"><strong>도구 ID ${result.id} · 배포 v${result.version}</strong><p>배포 정보에 원본 파일·버전 확인 주소를 연결했습니다.</p><a class="sq-link" href="${esc(result.deploymentUrl)}" download>배포 정보 JSON 받기</a></div>`:''}<div class="sq-actions" style="justify-content:center">${button('published-detail','상세 화면 보기','sq-primary')}${button('manage','등록 도구 관리')}</div></div>`);
- }finally{runtime.publishBusy=false;}
+ }finally{runtime.publishBusy=false;if(typeof saveRegistrationDraft==='function')saveRegistrationDraft();}
 }
 function versionManager(id){const x=getItem(id);runtime.detailId=x.id;const rows=x.versions.filter(v=>!v.deleted).map(v=>`<div class="sq-version"><div><strong>v${v.n}</strong> ${v.n===x.active?'<span class="sq-badge blue">현재 배포</span>':v.withdrawn?'<span class="sq-badge">배포 중단</span>':v.n===x.fallback?'<span class="sq-badge">복구용 보호</span>':''}<p>${esc(v.note)} · ${v.age}일 전 · ${v.size} MB</p></div><div class="sq-row-actions">${button('rollback','이 버전으로 복구','',`data-version="${v.n}" ${v.n===x.active||v.withdrawn?'disabled':''}`)}${button('delete-version','삭제','',`data-version="${v.n}" ${Core.canDelete(x,v)?'':'disabled'}`)}</div></div>`).join('');openModal('버전과 배포 관리',x.name,`<div class="sq-admin-head"><div><h3>현재 배포 v${x.active}</h3><p class="sq-note">배포 지시 번호 ${x.revision} · ${x.updatePaused?'업데이트 보류':'업데이트 정보 제공'}</p></div>${button('new-release','새 버전 등록','sq-primary',`data-id="${x.id}"`)}</div>${x.updatePaused?'<div class="sq-callout"><strong>이전 버전으로 복구했습니다.</strong> 문제가 있던 버전은 배포가 중단되었습니다. 사용자 PC 반영 여부는 연동 앱에서 별도로 확인해야 합니다.</div>':''}<div class="sq-version-list">${rows}</div><div class="sq-callout">현재 배포와 복구용 버전은 삭제할 수 없습니다. PC별 설치 현황은 아직 수집하지 않습니다. 파일을 지워도 배포 이력과 변경 기록은 남깁니다.</div><div class="sq-actions">${button('manage','관리 목록으로')}</div>`);}
 function manage(tab='tools'){
@@ -1069,6 +1079,127 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!orgMorePanel.hidde
 if(globalThis.ResizeObserver)new ResizeObserver(scheduleOrgFilter).observe(orgFilterGroup);
 else window.addEventListener('resize',scheduleOrgFilter);
 if(document.fonts?.ready)document.fonts.ready.then(scheduleOrgFilter);
+
+// Search uses the same authenticated catalog as MCP and the store extension.
+// The unsearched catalog and demo data keep their original editorial layout.
+const catalogLocalRender=renderCatalog,catalogLocalTabs=renderFilterTabs,catalogOriginalDetail=detail;
+const catalogSearch={key:'',generation:0,phase:'idle',result:null,error:'',promise:null};
+function usesSharedCatalog(){return state.route==='browse'&&server.dataMode!=='dummy'&&!!state.query.trim();}
+function catalogQuery(){
+ const params=new URLSearchParams({q:state.query.trim(),sort:({discovery:'recommended',recent:'newest',downloads:'downloads',name:'name'})[state.sort]||'recommended',limit:'12',offset:String(state.page*12),facets:'organizations'});
+ if(state.type!=='전체')params.set('type',state.type);
+ if(state.org!=='전체 조직')params.set('orgId',organizations.find(row=>row.name===state.org)?.id||'__unknown_organization__');
+ if(state.category!=='모든 업무')params.set('categoryId',(server.categories||[]).find(row=>row.name===state.category)?.id||'__unknown_category__');
+ return params;
+}
+// rankAsOf changes only after a successful bootstrap, unlike refreshToken
+// which changes before I/O and may belong to a failed refresh.
+function catalogKey(){return JSON.stringify([server.user.id,server.rankAsOf||0,catalogQuery().toString()]);}
+function catalogCurrent(key,generation){return usesSharedCatalog()&&catalogSearch.key===key&&catalogSearch.generation===generation&&catalogKey()===key;}
+function catalogControls(){
+ $('#sq-types').innerHTML=toolTypes.map(type=>`<button class="cursor-interaction" data-type="${esc(type)}" aria-pressed="${type===state.type}">${typeLabel(type)}</button>`).join('');
+ $('#sq-category').value=state.category;$('#sq-sort').value=state.sort;
+}
+renderFilterTabs=function(){
+ if(!usesSharedCatalog())return catalogLocalTabs();
+ const tabs=$('#sq-filter-tabs'),facets=catalogSearch.key===catalogKey()&&catalogSearch.phase==='ready'?catalogSearch.result?.facets:null;
+ const names=[...new Set([...organizations.filter(row=>row.enabled!==false||items.some(item=>!item.hidden&&item.org===row.name)).map(row=>row.name),...(facets?.organizations||[]).map(row=>row.name),state.org].filter(name=>name&&name!=='전체 조직'))];
+ tabs.setAttribute('aria-label','등록 조직');tabs.classList.add('sq-organization-tabs');
+ tabs.innerHTML=['전체 조직',...names].map(name=>{
+  const count=facets?(name==='전체 조직'?facets.total:facets.organizations.filter(row=>row.name===name).reduce((sum,row)=>sum+row.count,0)):null;
+  return `<button class="cursor-interaction" data-org="${esc(name)}" aria-pressed="${name===state.org}">${esc(name==='전체 조직'?'전체':name)}${count===null?'':` <span class="sq-filter-count">(${num(count)})</span>`}</button>`;
+ }).join('');
+ scheduleOrgFilter();
+};
+function catalogEmpty(){
+ const filtered=state.org!=='전체 조직'||state.type!=='전체'||state.category!=='모든 업무';
+ return `<div class="sq-empty"><h3>검색 결과가 없습니다.</h3><p>“보고서”나 “엑셀 비교”처럼 필요한 업무를 짧게 입력해 보세요.${filtered?' 선택한 조직, 유형 또는 업무 분야를 해제해도 됩니다.':''}</p><div class="sq-actions">${button('catalog-edit-query','검색어 바꾸기')}${filtered?button('catalog-reset-filters','필터 해제'):''}${button('clear-filters','전체 도구 보기')}</div></div>`;
+}
+function catalogSummary(row){
+ const metric=row.statistics||{},existing=getItem(row.id);
+ // Search summaries never become bootstrap state, installation authority, or
+ // new home ranking rows. Existing shared like controls remain authoritative
+ // when a click occurred after this search began.
+ const currentLike=catalogSearch.likeGeneration===(runtime.catalogLikeGeneration||0)&&!catalogSearch.pendingLikes?.has(row.id)&&!runtime.likeRequests?.has(row.id);
+ return {...existing,...row,likes:!currentLike&&existing?existing.likes:Number(metric.likes||0)-(row.liked===true?1:0),downloads:Number(metric.downloads||0),icon:existing?.icon||({'MCP/Tool':'plug',Skill:'file-text','플러그인/하네스':'layers-2'})[row.type]||'plug'};
+}
+detail=async function(id,tab='intro'){
+ if(!getItem(id)&&catalogSearch.result?.items.some(row=>row.id===Number(id))){
+  // A new catalog item can precede the next bootstrap poll. Obtain the normal
+  // authenticated item mapping; never fabricate versions/permissions locally.
+  const token=invalidateDetailLoad(),user=server.user.id;
+  await refresh();
+  if(token!==runtime.detailLoadToken||user!==server.user.id)return false;
+ }
+ return catalogOriginalDetail(id,tab);
+};
+function drawSharedCatalog(){
+ catalogControls();renderFilterTabs();
+ const list=$('#sq-catalog'),pages=$('#sq-catalog-pages'),label=$('#sq-result-count');
+ pages.innerHTML='';
+ if(catalogSearch.phase==='loading'){
+  list.setAttribute('aria-busy','true');label.textContent='검색 결과를 확인하고 있습니다.';
+  list.innerHTML='<div class="sq-empty" role="status"><h3>필요한 도구를 찾고 있습니다.</h3></div>';return;
+ }
+ list.removeAttribute('aria-busy');
+ if(catalogSearch.phase==='error'){
+  label.textContent='검색 결과를 불러오지 못했습니다.';
+  list.innerHTML=`<div class="sq-empty" role="alert"><h3>검색을 완료하지 못했습니다.</h3><p>${esc(catalogSearch.error)}</p>${button('catalog-retry','다시 검색','sq-primary')}</div>`;return;
+ }
+ const result=catalogSearch.result,available=Math.min(result.total,result.evaluatedCount),count=Math.max(1,Math.ceil(available/12));
+ label.textContent=`“${state.query}” 검색 결과 ${num(result.total)}개`;
+ const warning=result.warning?`<p class="sq-callout" role="status">${esc(result.warning)}</p>`:'';
+ list.innerHTML=warning+(result.items.map(row=>card(catalogSummary(row))).join('')||catalogEmpty());
+ if(count>1)pages.innerHTML=`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${count}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',result.nextOffset===null?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`;
+ revealElements();
+}
+renderCatalog=function(){
+ if(!usesSharedCatalog()){
+  catalogSearch.generation++;catalogSearch.key='';catalogSearch.phase='idle';catalogSearch.result=null;
+  $('#sq-catalog').removeAttribute('aria-busy');
+  return catalogLocalRender();
+ }
+ const key=catalogKey();
+ if(catalogSearch.key===key&&catalogSearch.phase!=='idle'){drawSharedCatalog();return catalogSearch.promise;}
+ const generation=++catalogSearch.generation;catalogSearch.key=key;catalogSearch.phase='loading';catalogSearch.result=null;
+ catalogSearch.likeGeneration=runtime.catalogLikeGeneration||0;catalogSearch.pendingLikes=new Set(runtime.likeRequests?.keys()||[]);
+ drawSharedCatalog();
+ catalogSearch.promise=(async()=>{
+  try{
+   const result=await requestAPI('/api/catalog?'+catalogQuery(), 'GET', null, {timeoutMs:15000});
+   if(!catalogCurrent(key,generation))return;
+   if(!Array.isArray(result.items)||!Number.isSafeInteger(result.total)||!Number.isSafeInteger(result.evaluatedCount)||!result.facets||!Array.isArray(result.facets.organizations))throw Error('검색 결과 형식을 확인하지 못했습니다. 다시 시도해 주세요.');
+   const lastPage=Math.max(0,Math.ceil(Math.min(result.total,result.evaluatedCount)/12)-1);
+   if(state.page>lastPage){state.page=lastPage;catalogSearch.phase='idle';return renderCatalog();}
+   // Reflect another client's latest like state only if no local like changed
+   // during the request. Do not insert partial catalog rows into bootstrap data.
+   if(catalogSearch.likeGeneration===(runtime.catalogLikeGeneration||0))for(const row of result.items){
+    if(typeof row.liked!=='boolean'||catalogSearch.pendingLikes.has(row.id)||runtime.likeRequests?.has(row.id))continue;
+    row.liked?state.liked.add(row.id):state.liked.delete(row.id);
+    const existing=getItem(row.id);if(existing)existing.likes=Number(row.statistics?.likes||0)-(row.liked?1:0);
+   }
+   catalogSearch.result=result;catalogSearch.phase='ready';
+  }catch(error){
+   if(!catalogCurrent(key,generation))return;
+   catalogSearch.phase='error';catalogSearch.error=error.message||'서버 연결을 확인한 뒤 다시 시도해 주세요.';
+  }
+  drawSharedCatalog();mountIcons();
+ })();
+ return catalogSearch.promise;
+};
+actions['catalog-retry']=()=>{catalogSearch.phase='idle';return renderCatalog();};
+actions['catalog-edit-query']=()=>{$('#sq-query').focus();$('#sq-query').select();};
+actions['catalog-reset-filters']=()=>{Object.assign(state,{org:'전체 조직',type:'전체',category:'모든 업무',page:0});render();persist();};
+const catalogLike=actions.like;
+actions.like=function(...args){runtime.catalogLikeGeneration=(runtime.catalogLikeGeneration||0)+1;return catalogLike?.(...args);};
+const catalogRefresh=refresh;
+refresh=async function(...args){
+ const key=catalogSearch.key,result=await catalogRefresh(...args);
+ // A real bootstrap normally changes rankAsOf and redraws immediately. A
+ // successful same-stamp refresh still expires cached data on the next render.
+ if(catalogSearch.key===key){catalogSearch.generation++;catalogSearch.key='';catalogSearch.phase='idle';}
+ return result;
+};
 
 function fileSize(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function uploadArea(kind,files=[]){
@@ -1927,140 +2058,162 @@ Object.assign(actions,{
  'room-admin-cancel':()=>confirmAdminRoomDecision('cancelled')
 });
 
-// Registration drafts stay in this browser tab and belong to one authenticated account.
-// Only descriptive fields are persisted: never files, URLs, commands, credentials or inspections.
-const registrationDraftFields={name:50,desc:200,workTags:300,platform:30,type:30,org:80,category:80,owner:80,environment:200,changes:1000};
-const registrationDraftStorageKey=()=>server.user.id?'ptai.registration-drafts.v1:'+String(server.user.id):null;
-function readRegistrationDrafts(){
- try{const raw=sessionStorage.getItem(registrationDraftStorageKey());if(!raw||raw.length>60000)return {};const saved=JSON.parse(raw);return saved&&typeof saved==='object'&&!Array.isArray(saved)?saved:{};}catch{return {};}
+// Registration drafts belong to one signed-in user and one target tool in this tab.
+// File objects and inspection responses stay in memory; only allowlisted form data
+// goes to sessionStorage. Nothing is published by saving or restoring a draft.
+const registrationDrafts=new Map();
+const registrationFields=['name','desc','workTags','platform','type','org','orgId','category','categoryId','owner','visibility','audience','approval','mode','commandProject','commandUser','url','expectedRevision','guide','changes','environment','workflow','installProfile'];
+let registrationContext=null,registrationRendering=false;
+const registrationBase={register,captureDraft,wizard,openModal,closeModal,navigate};
+function registrationUser(){return String(server.user?.id||'');}
+function registrationDraftMatchesUser(){return !registrationContext||registrationContext.user===registrationUser();}
+function registrationKey(user,target){return `sq-registration-v1:${encodeURIComponent(user)}:${target||'new'}`;}
+function removeLegacyRegistrationDraft(user,target){
+ const key='ptai.registration-drafts.v1:'+String(user);
+ try{const saved=JSON.parse(sessionStorage.getItem(key)||'null');if(!saved||typeof saved!=='object'||Array.isArray(saved))return;delete saved[String(target||'new')];if(Object.keys(saved).length)sessionStorage.setItem(key,JSON.stringify(saved));else sessionStorage.removeItem(key);}catch{}
 }
-function clearRegistrationDraft(owner=server.user.id,target=runtime.releaseId,expectedAt=undefined){
- const key=owner?'ptai.registration-drafts.v1:'+String(owner):null;if(!key)return;
- let saved;try{saved=JSON.parse(sessionStorage.getItem(key)||'{}');}catch{return;}
- if(!saved||typeof saved!=='object'||Array.isArray(saved))return;
- const entry=String(target||'new');if(expectedAt!==undefined&&saved[entry]?.at!==expectedAt)return;
- delete saved[entry];
- try{if(Object.keys(saved).length)sessionStorage.setItem(key,JSON.stringify(saved));else sessionStorage.removeItem(key);}catch{}
- if(owner===server.user.id&&target===runtime.releaseId)runtime.draftRestored=false;
+function registrationDraftRevision(){return registrationContext?.revision??null;}
+function clearRegistrationDraft(user=registrationUser(),target=runtime.releaseId,expectedRevision=undefined){
+ const key=registrationKey(String(user),target||null),entry=registrationDrafts.get(key);
+ let stored;try{stored=JSON.parse(sessionStorage.getItem(key)||'null');}catch{}
+ const context=entry?.context||(registrationContext?.key===key?registrationContext:null);
+ const revision=context?.revision??stored?.revision??null;
+ if(expectedRevision!==undefined&&revision!==expectedRevision)return false;
+ registrationDrafts.delete(key);try{sessionStorage.removeItem(key);}catch{}
+ removeLegacyRegistrationDraft(user,target);
+ if(registrationContext?.key===key)registrationContext=null;
+ return true;
 }
-function registrationDraftRevision(){return readRegistrationDrafts()[String(runtime.releaseId||'new')]?.at??null;}
+function settleRegistrationAttempt(user,target,id){
+ const key=registrationKey(String(user),target||null),entry=registrationDrafts.get(key);
+ const context=entry?.context||(registrationContext?.key===key?registrationContext:null);
+ if(entry?.attempt?.id===id)entry.attempt=null;
+ if(context?.pending===id){context.pending=null;context.signature=null;}
+ try{const stored=JSON.parse(sessionStorage.getItem(key)||'null');if(stored?.pending?.id===id){stored.pending=null;sessionStorage.setItem(key,JSON.stringify(stored));}}catch{}
+}
+function registrationData(d){
+ const data={};for(const key of registrationFields)if(d[key]!==undefined)data[key]=d[key];
+ return JSON.parse(JSON.stringify(data));
+}
+function registrationVisible(){return !!$('#sq-register-form')&&$('#sq-dialog')?.open!==false;}
 function saveRegistrationDraft(){
- const d=runtime.draft,key=registrationDraftStorageKey();
- if(!d||!key||runtime.draftOwner!==server.user.id)return false;
- const data={};for(const [name,limit]of Object.entries(registrationDraftFields))data[name]=String(d[name]||'').slice(0,limit);
- data.approval=d.approval===true;data.mode=['file','url','command'].includes(d.mode)?d.mode:'file';
- if(!data.name.trim()&&!data.desc.trim()&&!data.workTags.trim()){clearRegistrationDraft();return true;}
- const saved=readRegistrationDrafts(),now=Date.now(),target=String(runtime.releaseId||'new');
- const step=Math.min(2,Math.max(1,runtime.step||1)),previous=saved[target],identity=runtime.savedDraftIdentity;
- const unchanged=previous&&JSON.stringify(previous.data)===JSON.stringify(data)&&previous.step===step&&identity?.draft===d&&identity.file===d.file&&identity.sequence===(runtime.draftChangeSequence||0);
- saved[target]={at:unchanged?previous.at:Math.max(now,(previous?.at||0)+1),step,data};
- runtime.savedDraftIdentity={draft:d,file:d.file,sequence:runtime.draftChangeSequence||0};
- const entries=Object.entries(saved).filter(([,value])=>value&&Number.isFinite(value.at)&&now-value.at<86400000).sort((a,b)=>b[1].at-a[1].at).slice(0,5);
- try{sessionStorage.setItem(key,JSON.stringify(Object.fromEntries(entries)));runtime.draftStorageFailed=false;return true;}catch{runtime.draftStorageFailed=true;return false;}
+ const c=registrationContext,d=runtime.draft;if(!c||!d||c.user!==registrationUser())return;
+ const data=registrationData(d),pending=runtime.publishAttempt?(runtime.publishBusy||runtime.publishAttempt.uncertain?runtime.publishAttempt.id:null):c.pending;
+ c.pending=pending||null;c.signature=pending?(runtime.publishAttempt?.signature||c.signature):null;
+ if(!d.file&&!pending&&JSON.stringify(data)===c.baseline&&!c.restored){registrationDrafts.delete(c.key);try{sessionStorage.removeItem(c.key);}catch{}return;}
+ const identity=JSON.stringify([data,runtime.step,runtime.draftChangeSequence||0]);
+ if(identity!==c.savedIdentity||d.file!==c.savedFile){c.revision=Math.max(Date.now(),(c.revision||0)+1);c.savedIdentity=identity;c.savedFile=d.file;}
+ const entry={draft:d,step:runtime.step,attempt:runtime.publishAttempt||null,context:c};registrationDrafts.set(c.key,entry);
+ const stored={schema:1,user:c.user,target:c.target,savedAt:Date.now(),revision:c.revision,data,step:runtime.step,fileName:d.file?.name||c.fileName||'',pending:pending?{id:pending,signature:runtime.publishAttempt?.signature||c.signature,canCorrect:runtime.publishAttempt?.canCorrect===true}:null};
+ try{sessionStorage.setItem(c.key,JSON.stringify(stored));removeLegacyRegistrationDraft(c.user,c.target);c.storageFailed=false;}
+ catch{c.storageFailed=true;}
+ const note=$('#sq-registration-save-note');if(note)note.textContent=registrationDraftNotice();
 }
-const experienceCaptureDraft=captureDraft;
-captureDraft=function(){if(!runtime.draft)return;experienceCaptureDraft();saveRegistrationDraft();};
+function registrationDraftNotice(){
+ const c=registrationContext;if(!c)return '';
+ if(c.pending)return '이전 게시 결과를 확인할 수 있습니다. 다시 게시하려면 같은 입력 내용과 파일을 사용해 주세요. 같은 요청 번호로 확인하고 재시도하므로 중복 등록되지 않습니다.';
+ if(c.storageFailed)return '입력 내용과 파일은 이 화면에서 보관 중입니다. 브라우저 저장 공간을 사용할 수 없어 새로고침하면 사라질 수 있습니다.';
+ if(c.restored&&c.fileName&&!runtime.draft?.file)return `입력 내용을 복원했습니다. 첨부파일은 다시 선택해 주세요: ${c.fileName}`;
+ return '입력 내용은 이 탭에 임시 보관됩니다. 창을 닫아도 이어서 작성할 수 있습니다. 새로고침한 뒤에는 파일을 다시 선택해 주세요.';
+}
+function forgetRegistrationDraft(){
+ const c=registrationContext;if(!c)return;
+ clearRegistrationDraft(c.user,c.target);
+}
+function restoreRegistrationDraft(user,target){
+ const key=registrationKey(user,target),memory=registrationDrafts.get(key);
+ if(memory){registrationContext=memory.context;runtime.draft=memory.draft;runtime.step=memory.step;runtime.publishAttempt=memory.attempt;return true;}
+ let stored;try{stored=JSON.parse(sessionStorage.getItem(key)||'null');}catch{return false;}
+ if(!stored){
+  // Preserve descriptive drafts made by the previously published client. The
+  // old format never saved files or publication receipts, so do not invent any.
+  try{const legacy=JSON.parse(sessionStorage.getItem('ptai.registration-drafts.v1:'+user)||'null')?.[String(target||'new')];if(legacy)stored={schema:1,user,target,savedAt:legacy.at,revision:legacy.at,data:legacy.data,step:legacy.step};}catch{}
+ }
+ if(!stored||stored.schema!==1||stored.user!==user||stored.target!==target||!stored.data||typeof stored.data!=='object'||Array.isArray(stored.data)||!Number.isFinite(stored.savedAt)||Date.now()-stored.savedAt>86400000)return false;
+ if(stored.data.audience!==undefined&&(!Array.isArray(stored.data.audience)||stored.data.audience.some(v=>typeof v!=='string')))return false;
+ for(const field of registrationFields)if(Object.hasOwn(stored.data,field)&&!['audience','approval','expectedRevision','workflow','installProfile'].includes(field)&&typeof stored.data[field]!=='string')return false;
+ const d=freshDraft(target?getItem(target):null);
+ for(const field of registrationFields)if(Object.hasOwn(stored.data,field))d[field]=stored.data[field];
+ // Browser form values are text, booleans or JSON metadata; never hydrate File,
+ // auth material, inspection state, or arbitrary runtime fields from storage.
+ d.file=null;d.sample=false;d.packageInspection=null;
+ const pending=stored.pending&&/^[a-f0-9-]{36}$/i.test(stored.pending.id||'')&&typeof stored.pending.signature==='string'?stored.pending:null;
+ registrationContext={key,user,target,baseline:'',restored:true,revision:Number.isFinite(stored.revision)?stored.revision:stored.savedAt,fileName:String(stored.fileName||''),pending:pending?.id||null,signature:pending?.signature};
+ runtime.draft=d;runtime.step=d.mode==='file'?Math.min(Number(stored.step)||1,2):Math.max(1,Math.min(Number(stored.step)||1,3));
+ runtime.publishAttempt=pending?{id:pending.id,signature:pending.signature,target,file:null,uncertain:true,restored:true,canCorrect:pending.canCorrect===true}:null;
+ return true;
+}
+captureDraft=function(){
+ if(registrationRendering||!runtime.draft)return;
+ registrationBase.captureDraft();saveRegistrationDraft();
+};
 register=function(id){
- captureDraft();
- const target=id?Number(id):null,same=runtime.draft&&runtime.draftOwner===server.user.id&&runtime.releaseId===target;
- if(!same){
-  runtime.releaseId=target;runtime.draft=freshDraft(target?getItem(target):null);runtime.step=1;runtime.draftOwner=server.user.id;runtime.draftRestored=false;
-  const saved=readRegistrationDrafts()[String(target||'new')];
-  if(saved?.data&&Number.isFinite(saved.at)&&Date.now()-saved.at<86400000){
-   for(const [name,limit]of Object.entries(registrationDraftFields))if(typeof saved.data[name]==='string')runtime.draft[name]=saved.data[name].slice(0,limit);
-   if(typeof saved.data.approval==='boolean')runtime.draft.approval=saved.data.approval;
-   if(['file','url','command'].includes(saved.data.mode))runtime.draft.mode=saved.data.mode;
-   runtime.step=[1,2].includes(saved.step)?saved.step:1;runtime.draftRestored=true;
-  }
+ const target=id?Number(id):null;
+ if(runtime.publishBusy&&target!==(runtime.releaseId||null)){announce('게시 결과를 확인하고 있습니다. 잠시 기다려 주세요.');return;}
+ if(registrationVisible())captureDraft();else saveRegistrationDraft();
+ const user=registrationUser();runtime.releaseId=target;
+ if(!user){announce('로그인 정보를 불러온 뒤 다시 등록해 주세요.');return;}
+ runtime.draftOwner=server.user.id;
+ if(!restoreRegistrationDraft(user,target)){
+  runtime.draft=freshDraft(target?getItem(target):null);runtime.step=1;runtime.publishAttempt=null;
+  registrationContext={key:registrationKey(user,target),user,target,baseline:JSON.stringify(registrationData(runtime.draft))};
  }
  wizard();
 };
-actions.register=b=>register(b?.dataset?.id);
-const experienceWizard=wizard;
 wizard=function(){
- experienceWizard();saveRegistrationDraft();const form=$('#sq-register-form');if(!form)return;
- const notice=document.createElement('div');notice.className='ws-draft-note';
- notice.innerHTML=`<span>${runtime.draftRestored?'작성 중이던 기본 정보를 불러왔어요. 파일과 설치 안내는 다시 확인해 주세요.':'기본 정보는 이 탭에 임시 보관됩니다. 파일과 연결 정보는 저장하지 않아요.'}</span>${button('discard-registration-draft','초안 지우기','sq-link','type="button"')}`;
- form.prepend(notice);
+ if(!runtime.draft)return;
+ if(registrationContext&&registrationContext.user!==registrationUser()){
+  runtime.draft=null;runtime.publishAttempt=null;registrationContext=null;registrationBase.closeModal();announce('로그인한 사용자가 바뀌었습니다. 도구 등록을 다시 열어 주세요.');return;
+ }
+ registrationRendering=true;
+ try{registrationBase.wizard();}finally{registrationRendering=false;}
+ const form=$('#sq-register-form');
+ if(form&&registrationContext){
+  form.insertAdjacentHTML('afterbegin',`<div class="sq-callout" data-registration-draft><p id="sq-registration-save-note" role="status">${esc(registrationDraftNotice())}</p><div class="sq-actions">${registrationContext.pending?button('registration-check-result','게시 결과 확인','sq-secondary'):button('registration-discard','작성 내용 지우기','sq-link','type="button"')}</div></div>`);
+ }
+ saveRegistrationDraft();
 };
-actions['discard-registration-draft']=()=>ask('작성 중인 내용을 지울까요?','현재 등록 초안을 지웁니다. 이미 게시한 도구는 바뀌지 않습니다.',()=>{
- clearRegistrationDraft();runtime.draft=freshDraft(runtime.releaseId?getItem(runtime.releaseId):null);runtime.step=1;wizard();
-},'초안 지우기');
-const experienceOpenModal=openModal,experienceCloseModal=closeModal;
-openModal=function(...args){if(runtime.draft&&$('#sq-register-form')&&!String(args[2]||'').includes('id="sq-register-form"'))captureDraft();return experienceOpenModal(...args);};
-closeModal=function(){if($('#sq-register-form'))captureDraft();return experienceCloseModal();};
+openModal=function(...args){
+ if(!registrationRendering&&registrationVisible())captureDraft();
+ return registrationBase.openModal(...args);
+};
+closeModal=function(){if(registrationVisible())captureDraft();return registrationBase.closeModal();};
+navigate=function(...args){if(registrationVisible())captureDraft();return registrationBase.navigate(...args);};
 actions['close-dialog']=closeModal;
-$('#sq-dialog').addEventListener('cancel',()=>{if($('#sq-register-form'))captureDraft();});
-root.addEventListener('input',event=>{if(!event.target.closest('#sq-register-form'))return;runtime.draftChangeSequence=(runtime.draftChangeSequence||0)+1;clearTimeout(runtime.draftSaveTimer);runtime.draftSaveTimer=setTimeout(()=>{if($('#sq-register-form'))captureDraft();},250);});
-root.addEventListener('change',event=>{if(event.target.closest('#sq-register-form')){runtime.draftChangeSequence=(runtime.draftChangeSequence||0)+1;captureDraft();}});
-window.addEventListener('pagehide',()=>{if($('#sq-register-form'))captureDraft();});
-window.addEventListener('beforeunload',event=>{if($('#sq-register-form'))captureDraft();if(runtime.draftStorageFailed&&runtime.draft){event.preventDefault();event.returnValue='';}});
-
-// Use the same authenticated catalog endpoint as the extension. One bounded page
-// is requested at a time, and a late response can never replace another search.
-let catalogSearch=null;
-let catalogPageSummaries=[];
-function clearCatalogPageSummaries(){
- for(const row of catalogPageSummaries){const at=items.indexOf(row);if(at>=0)items.splice(at,1);}
- catalogPageSummaries=[];
-}
-function resetCatalogSearch(){catalogSearch=null;clearCatalogPageSummaries();}
-function webCatalogKey(){return JSON.stringify([server.user.id,state.query,state.type,state.org,state.category,state.sort,state.page]);}
-function remoteCatalogActive(){return state.route==='browse'&&!!state.query&&server.dataMode!=='dummy';}
-function catalogSearchLive(search){return catalogSearch===search&&remoteCatalogActive()&&webCatalogKey()===search.key;}
-function paintCatalogSearch(search){
- if(!catalogSearchLive(search))return;
- const count=$('#sq-result-count'),catalog=$('#sq-catalog'),pages=$('#sq-catalog-pages');
- $$('.sq-filter-count').forEach(node=>node.remove()); // Local counts are not server search counts.
- catalog.setAttribute('aria-busy',String(search.phase==='loading'));
- if(search.phase==='loading'){count.textContent='검색 결과를 확인하고 있어요.';catalog.innerHTML='<div class="sq-empty" role="status"><p>잠시만 기다려 주세요.</p></div>';pages.innerHTML='';return;}
- if(search.phase==='error'){count.textContent='검색 결과를 불러오지 못했어요.';catalog.innerHTML=`<div class="sq-empty"><p role="alert">${esc(search.error)}</p>${button('retry-catalog-search','다시 시도')}</div>`;pages.innerHTML='';mountIcons();return;}
- const result=search.result,total=result.total,rows=result.items.map(row=>{
-  const metric=row.statistics||{},existing=getItem(row.id);
-  const acceptLike=search.likeGeneration===(runtime.catalogLikeGeneration||0)&&!search.pendingLikes.has(row.id)&&!runtime.likeRequests?.has(row.id);
-  if(acceptLike&&typeof row.liked==='boolean'){
-   row.liked?state.liked.add(row.id):state.liked.delete(row.id);
-   if(existing)existing.likes=Number(metric.likes||0)-(row.liked?1:0);
-  }
-  const publicCard={...row,icon:existing?.icon||'package',likes:!acceptLike&&existing?existing.likes:Number(metric.likes||0)-(state.liked.has(row.id)?1:0),downloads:Number(metric.downloads||0)};
-  // New public summaries can open details through the existing permission check.
-  if(!existing){const summary={...publicCard,versions:[],comments:[]};items.push(summary);catalogPageSummaries.push(summary);}
-  return publicCard;
- });
- count.textContent=`“${state.query}” 검색 결과 ${num(total)}개${result.complete===false?' (일부 후보 확인)':''}`;
- catalog.innerHTML=rows.map(row=>card(row)).join('')||`<div class="sq-empty"><h3>검색 결과가 없습니다.</h3><p>업무명이나 도구 이름으로 다시 검색해 보세요.${state.org!=='전체 조직'||state.type!=='전체'||state.category!=='모든 업무'?' 선택한 필터도 확인해 주세요.':''}</p>${button('clear-filters','전체 도구 보기')}</div>`;
- if(result.warning)catalog.insertAdjacentHTML('beforeend',`<p class="sq-note">${esc(result.warning)}</p>`);
- pages.innerHTML=state.page||result.nextOffset!==null?`${button('catalog-prev',icon('chevron-left'),'sq-icon',state.page===0?'disabled aria-label="이전 페이지"':'aria-label="이전 페이지"')}<span>${state.page+1} / ${Math.max(1,Math.ceil((result.evaluatedCount??total)/12))}</span>${button('catalog-next',icon('chevron-right'),'sq-icon',result.nextOffset===null?'disabled aria-label="다음 페이지"':'aria-label="다음 페이지"')}`:'';
- mountIcons();revealElements();
-}
-function loadCatalogSearch(force=false){
- const key=webCatalogKey();
- if(!force&&catalogSearch?.key===key){paintCatalogSearch(catalogSearch);return;}
- clearCatalogPageSummaries();
- const search=catalogSearch={key,phase:'loading',likeGeneration:runtime.catalogLikeGeneration||0,pendingLikes:new Set(runtime.likeRequests?.keys()||[])};paintCatalogSearch(search);
- const params=new URLSearchParams({q:state.query,sort:({discovery:'recommended',recent:'newest',downloads:'downloads',name:'name'})[state.sort]||'recommended',limit:'12',offset:String(state.page*12)});
- if(state.type!=='전체')params.set('type',state.type);
- if(state.org!=='전체 조직'){const org=organizations.find(row=>row.name===state.org);params.set(org?.id?'orgId':'org',org?.id||state.org);}
- if(state.category!=='모든 업무')params.set('category',state.category);
- void requestAPI('/api/catalog?'+params.toString(),'GET',undefined,{timeoutMs:15000}).then(result=>{
-  if(!catalogSearchLive(search))return;
-  if(!Array.isArray(result.items)||!Number.isFinite(result.total)||result.total<0)throw Error('검색 응답을 확인하지 못했어요. 다시 시도해 주세요.');
-  search.phase='success';search.result=result;paintCatalogSearch(search);
- }).catch(error=>{if(!catalogSearchLive(search))return;search.phase='error';search.error=error.message||'연결 상태를 확인한 뒤 다시 시도해 주세요.';paintCatalogSearch(search);});
-}
-const experienceSearchNavigate=navigate;
-navigate=function(...args){if(args[0]!=='browse')resetCatalogSearch();return experienceSearchNavigate(...args);};
-const experienceCatalog=renderCatalog;
-renderCatalog=function(){
- if(!remoteCatalogActive())resetCatalogSearch();
- const page=state.page;experienceCatalog();
- if(remoteCatalogActive()){state.page=page;loadCatalogSearch();}
+actions['resume-draft']=()=>wizard();
+actions['registration-discard']=()=>{
+ if(runtime.publishBusy||runtime.publishAttempt?.uncertain||registrationContext?.pending){announce('게시 결과를 먼저 확인해 주세요. 작성 내용은 보관하고 있습니다.');return;}
+ const original=registrationContext;
+ ask('작성 중인 내용을 지울까요?','이 탭에 보관된 입력 내용과 첨부파일 선택을 지웁니다. 이미 게시한 도구에는 영향을 주지 않습니다.',()=>{
+  if(original!==registrationContext||runtime.publishBusy||runtime.publishAttempt?.uncertain||registrationContext?.pending)return;
+  const target=runtime.releaseId;forgetRegistrationDraft();runtime.draft=null;runtime.publishAttempt=null;register(target);
+ },'내용 지우기');
 };
-const experienceLike=actions.like;
-actions.like=function(...args){runtime.catalogLikeGeneration=(runtime.catalogLikeGeneration||0)+1;return experienceLike(...args);};
-const experienceSearchRefresh=refresh;
-refresh=async function(...args){catalogSearch=null;return experienceSearchRefresh(...args);};
-actions['retry-catalog-search']=()=>{if(remoteCatalogActive())loadCatalogSearch(true);};
+actions['registration-check-result']=async()=>{
+ const c=registrationContext;if(!c?.pending||runtime.registrationChecking)return;
+ if(!registrationDraftMatchesUser())throw Error('로그인한 사용자가 바뀌었습니다. 도구 등록을 다시 열어 주세요.');
+ const draft=runtime.draft,revision=registrationDraftRevision(),viewToken=runtime.detailLoadToken,requestId=c.pending;
+ runtime.registrationChecking=true;
+ try{
+  const result=await requestAPI(`/api/publish-requests/${encodeURIComponent(requestId)}`,'GET',undefined,{timeoutMs:5000,redirectOnAuth:false});
+  if(c.user!==registrationUser())return;
+  if(result.status!=='confirmed'||!Number.isInteger(result.id)||result.id<1||c.target&&result.id!==c.target)throw Error('게시 완료 여부를 아직 확인하지 못했습니다. 잠시 후 다시 확인하거나 등록 관리에서 결과를 확인해 주세요. 입력 내용은 보관하고 있습니다.');
+  const ownsDraft=c===registrationContext&&runtime.draft===draft&&registrationDraftRevision()===revision;
+  clearRegistrationDraft(c.user,c.target,revision);
+  if(runtime.publishAttempt?.id===requestId)runtime.publishAttempt=null;
+  settleRegistrationAttempt(c.user,c.target,requestId);
+  if(ownsDraft){runtime.draft=null;runtime.newId=result.id;}
+  if(!ownsDraft||viewToken!==runtime.detailLoadToken||c.user!==registrationUser()){announce('게시가 완료되었습니다. 등록 관리에서 확인할 수 있습니다.');return;}
+  openModal('게시를 완료했습니다.','게시 결과 확인',`<div class="sq-callout">도구 ID ${result.id}의 게시 결과를 확인했습니다. 임시 작성 내용은 정리했습니다.</div>${button('published-detail','게시한 도구 보기','sq-primary')}`);
+ }finally{runtime.registrationChecking=false;saveRegistrationDraft();}
+};
+for(const eventName of ['input','change'])root.addEventListener(eventName,event=>{if(event.target.closest?.('#sq-register-form')){runtime.draftChangeSequence=(runtime.draftChangeSequence||0)+1;if(event.target.type!=='file')captureDraft();}});
+$('#sq-dialog').addEventListener('cancel',()=>{if(registrationVisible())captureDraft();});
+$('#sq-dialog').addEventListener('close',()=>{if(!$('#sq-dialog').open&&$('#sq-register-form'))captureDraft();});
+window.addEventListener('beforeunload',event=>{
+ if(registrationVisible())captureDraft();else saveRegistrationDraft();
+ if(runtime.publishBusy||runtime.publishAttempt?.uncertain||registrationContext?.storageFailed){event.preventDefault();event.returnValue='';}
+});
 
 // Zero activity is a list of available tools, not evidence of popularity.
 function updateCatalogActivityLabels(){

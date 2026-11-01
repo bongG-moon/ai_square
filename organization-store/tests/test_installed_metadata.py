@@ -135,6 +135,33 @@ def test_legacy_names_are_authorized_deduplicated_cached_and_records_unchanged(c
     assert record_path.read_bytes() == before
 
 
+def test_provenance_comes_from_original_receipt_and_survives_offline_lookup(configured):
+    store, client, project, _ = configured
+    records = seed(store, project, count=2)
+    records['install-1'].update(sha256='A' * 64, release=2, accountBinding='private-binding', backup='private-backup')
+    records['install-2']['sha256'] = 'invalid-hash'
+    records['other-origin'] = dict(records['install-1'], origin='https://other.example.test')
+    record_path = store.settings().state / 'installations.json'
+    worker.atomic_json(record_path, records)
+    before = record_path.read_bytes()
+    reader(client, lambda path: {'id': tid(path), 'name': '현재 이름', 'release': 99,
+                                'sha256': 'b' * 64, 'origin': 'https://wrong.example.test'})
+    listed = store.dispatch('installations')['items']
+    assert len(listed) == 2
+    item = next(row for row in listed if row['installationId'] == 'install-1')
+    assert item['release'] == 2 and item['sha256'] == 'a' * 64
+    assert item['origin'] == store.settings().url and item['target'] == records['install-1']['target']
+    assert 'accountBinding' not in item and 'backup' not in item
+    assert 'sha256' not in next(row for row in listed if row['installationId'] == 'install-2')
+    assert record_path.read_bytes() == before
+    client.read_installation_json = lambda _: pytest.fail('Stored metadata must work offline')
+    offline = store.dispatch('installations')['items']
+    assert all(row['metadataStatus'] == 'cached' for row in offline)
+    assert [{k: v for k, v in row.items() if k != 'metadataStatus'} for row in offline] == [
+        {k: v for k, v in row.items() if k != 'metadataStatus'} for row in listed]
+    assert record_path.read_bytes() == before
+
+
 def test_detail_snapshot_survives_install_update_and_rollback(configured):
     store, client, project, _ = configured
     original_manifest = client.manifest

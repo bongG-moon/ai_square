@@ -3,6 +3,10 @@ from pathlib import Path
 
 BASE=Path(__file__).resolve().parents[1]
 p=BASE/'static/app.js';s=p.read_text(encoding='utf-8')
+# Keep publication lifecycle hooks in sync with their maintained source.
+publish_start=s.index('async function publish(){')
+publish_end=s.index('function versionManager(',publish_start)
+s=s[:publish_start]+(BASE/'frontend/frontend_publish.js').read_text(encoding='utf-8').rstrip()+'\n'+s[publish_end:]
 # Activity reporting is part of the live management surface. Keep its maintained
 # source in the served bundle without rebuilding the historical base layout.
 activity_start=s.index('function activityPanel(){')
@@ -21,7 +25,7 @@ s=s.replace("throw Error(result.error||'요청을 처리하지 못했습니다.'
 s=s.replace("tab==='comments'", "tab==='comments'")
 anchor='refresh().catch(showError);setInterval('
 at=s.rindex(anchor)
-s=s[:at]+start+'\n'.join((BASE/'frontend'/name).read_text(encoding='utf-8') for name in ['frontend_workspace.js','frontend_org_filter.js','frontend_upload.js','frontend_package.js','frontend_commands.js','frontend_storage.js','frontend_people.js','frontend_ax_workspace.js','frontend_grants.js','frontend_contributions.js','frontend_immersion_room.js','frontend_room_admin.js','frontend_experience.js'])+'\n'+end+s[at:]
+s=s[:at]+start+'\n'.join((BASE/'frontend'/name).read_text(encoding='utf-8') for name in ['frontend_workspace.js','frontend_org_filter.js','frontend_catalog.js','frontend_upload.js','frontend_package.js','frontend_commands.js','frontend_storage.js','frontend_people.js','frontend_ax_workspace.js','frontend_grants.js','frontend_contributions.js','frontend_immersion_room.js','frontend_room_admin.js','frontend_registration_draft.js','frontend_experience.js'])+'\n'+end+s[at:]
 p.write_text(s,encoding='utf-8')
 p=BASE/'templates/index.html';s=p.read_text(encoding='utf-8')
 if '/static/workspace.css' not in s:s=s.replace('</head>','<link rel="stylesheet" href="/static/workspace.css"></head>')

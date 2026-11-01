@@ -11,7 +11,7 @@ const html = fs.readFileSync(path.join(source, 'ui/index.html'), 'utf8').replace
 const script = fs.readFileSync(path.join(source, 'ui/store.js'), 'utf8');
 const font = fs.readFileSync(process.env.STORE_HOST_FONT || path.join(root, 'build/workspace-local-repository/local_app/web/fonts/NotoSansKR-Variable.woff'));
 const records = [
-  {installationId:'report', toolId:101, name:'주간 실적 보고서 작성', type:'Skill', kind:'skill', release:2, scope:'directory', scopeDir:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서', target:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서/.claude/skills/weekly-performance-report', status:'installed', rollbackAvailable:true, metadataStatus:'current',recordDigest:'a'.repeat(64)},
+  {installationId:'report', toolId:101, name:'주간 실적 보고서 작성', type:'Skill', kind:'skill', release:2, scope:'directory', scopeDir:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서', target:'D:/업무 자료/2026년/생산성 개선 프로젝트/주간 실적 보고서/.claude/skills/weekly-performance-report', status:'installed', rollbackAvailable:true, metadataStatus:'current',recordDigest:'a'.repeat(64),origin:'https://square.example.test',sha256:'b'.repeat(64)},
   {installationId:'analysis', toolId:102, name:'제조 데이터 분석 도구', type:'MCP/Tool', kind:'mcp', release:4, scope:'user', target:'C:/Users/사용자/.claude.json', status:'configured', rollbackAvailable:false, metadataStatus:'current'},
   {installationId:'meeting', toolId:103, name:'회의록 정리와 후속 업무 실행을 함께 돕는 조직 공통 하네스', type:'하네스/플러그인', release:1, scope:'directory', target:'D:/Projects/이름이 매우 긴 업무 폴더/연구 개발 부서와 협업하는 2026년 하반기 프로젝트/공통 자료와 참고 문서/.claude/plugins/meeting-follow-up', status:'installed', rollbackAvailable:true, metadataStatus:'snapshot'},
 ];
@@ -95,6 +95,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(await count('installationInfo'),1);
     assert.match(await row('report').locator('.record-details').innerText(),/스킬·플러그인 관리/);
     assert.match(await row('report').locator('.record-details').innerText(),/https:\/\/square.example.test/);
+    assert.match(await row('report').locator('.record-details').innerText(),/파일 SHA-256/);
+    assert.ok((await row('report').locator('.record-details').innerText()).includes('b'.repeat(64)));
     await row('report').locator('.record-details summary').click();
     await row('report').locator('.record-details summary').click();
     assert.equal(await count('installationInfo'),1,'Reopening details reuses its bounded result');

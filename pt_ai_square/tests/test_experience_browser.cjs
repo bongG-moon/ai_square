@@ -24,23 +24,23 @@ fs.mkdirSync(output,{recursive:true});
   await page.locator('#sq-register-form [name=workTags]').fill('실적, 보고서');
   await page.locator('#sq-register-form [name=approval]').check();
   await page.locator('#sq-register-form button').filter({hasText:'다음'}).click();
-  await page.locator('#sq-register-form [name=guide]').fill('DO_NOT_PERSIST_PRIVATE_GUIDE');
+  await page.locator('#sq-register-form [name=guide]').fill('보관할 설치 안내');
   await page.locator('[data-action=close-dialog]').click();
   await page.locator('[data-action=register]').first().click();
-  assert.equal(await page.locator('#sq-register-form [name=guide]').inputValue(),'DO_NOT_PERSIST_PRIVATE_GUIDE');
+  assert.equal(await page.locator('#sq-register-form [name=guide]').inputValue(),'보관할 설치 안내');
   await page.keyboard.press('Escape');await page.reload();
   await page.locator('[data-action=register]').first().click();
-  assert.equal(await page.locator('#sq-register-form [name=guide]').inputValue(),'');
+  assert.equal(await page.locator('#sq-register-form [name=guide]').inputValue(),'보관할 설치 안내');
   await page.locator('[data-action=wizard-back]').click();
   assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'초안 보존 테스트');
   assert.equal(await page.locator('#sq-register-form [name=approval]').isChecked(),true);
   const stored=await page.evaluate(()=>JSON.stringify(sessionStorage));
-  assert(stored.includes('초안 보존 테스트'));assert(!stored.includes('DO_NOT_PERSIST_PRIVATE_GUIDE'));
+  assert(stored.includes('초안 보존 테스트'));assert(stored.includes('보관할 설치 안내'));
   await page.screenshot({path:path.join(output,'registration-draft-wide.png')});
   await page.setViewportSize({width:560,height:900});
   assert(await page.locator('#sq-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
   await page.screenshot({path:path.join(output,'registration-draft-narrow.png')});
-  await page.locator('[data-action=discard-registration-draft]').click();await page.locator('#sq-confirm-go').click();
+  await page.locator('[data-action=registration-discard]').click();await page.locator('#sq-confirm-go').click();
   assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'');
   await page.keyboard.press('Escape');await page.reload();await page.locator('[data-action=register]').first().click();
   assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'');
@@ -65,13 +65,13 @@ fs.mkdirSync(output,{recursive:true});
   await page.route('**/api/catalog?**',async route=>{
    const q=new URL(route.request().url()).searchParams.get('q');
    if(q==='fail-search'&&fail){await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'시험 서버에 연결하지 못했어요.'})});return;}
-   if(q==='slow-search'){await new Promise(r=>setTimeout(r,800));await route.fulfill({contentType:'application/json',body:JSON.stringify({items:[],total:0,nextOffset:null,evaluatedCount:0,complete:true})});return;}
+   if(q==='slow-search'){await new Promise(r=>setTimeout(r,800));await route.fulfill({contentType:'application/json',body:JSON.stringify({items:[],total:0,nextOffset:null,evaluatedCount:0,complete:true,facets:{total:0,organizations:[]}})});return;}
    await route.continue();
   });
   await page.locator('#sq-query').fill('fail-search');await page.locator('#sq-query').press('Enter');
-  await page.locator('[data-action=retry-catalog-search]').waitFor();
-  assert.equal(await page.locator('#sq-catalog').getAttribute('aria-busy'),'false');
-  fail=false;await page.locator('[data-action=retry-catalog-search]').click();
+  await page.locator('[data-action=catalog-retry]').waitFor();
+  assert.equal(await page.locator('#sq-catalog').getAttribute('aria-busy'),null);
+  fail=false;await page.locator('[data-action=catalog-retry]').click();
   await page.waitForFunction(()=>document.querySelector('#sq-result-count').textContent.includes('검색 결과 0개'));
   await page.locator('#sq-query').fill('slow-search');await page.locator('#sq-query').press('Enter');
   await page.locator('#sq-query').fill('html-report');await page.locator('#sq-query').press('Enter');
@@ -103,7 +103,7 @@ fs.mkdirSync(output,{recursive:true});
   assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'다음 작성 B');
   assert((await page.evaluate(()=>JSON.stringify(sessionStorage))).includes('다음 작성 B'));
   await page.unroute('**/api/tools');
-  await page.locator('[data-action=discard-registration-draft]').click();await page.locator('#sq-confirm-go').click();await page.keyboard.press('Escape');
+  await page.locator('[data-action=registration-discard]').click();await page.locator('#sq-confirm-go').click();await page.keyboard.press('Escape');
   await preparePublish('정상 게시 C');await page.locator('[data-action=publish]').click();await page.locator('#sq-dialog-title').filter({hasText:'공유할 준비가 되었습니다.'}).waitFor();
   await page.locator('[data-action=close-dialog]').click();await page.locator('[data-action=register]').first().click();assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'');await page.keyboard.press('Escape');
   // One account's draft never appears in another account.
@@ -112,6 +112,6 @@ fs.mkdirSync(output,{recursive:true});
   await context.addCookies([{name:'test_employee',value:'member',url:base}]);await page.goto(base+'/login');await page.locator('#sq-session').filter({hasText:'member'}).waitFor();
   await page.locator('[data-action=register]').first().click();assert.equal(await page.locator('#sq-register-form [name=name]').inputValue(),'');
   assert.deepEqual(errors,[]);
-  console.log('Browser experience checks passed: draft close/Escape/reload/discard/account isolation, secret omission, search pagination/error/retry/race, narrow dialog.');
+  console.log('Browser experience checks passed: draft close/Escape/reload/discard/account isolation, form restoration, search pagination/error/retry/race, narrow dialog.');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

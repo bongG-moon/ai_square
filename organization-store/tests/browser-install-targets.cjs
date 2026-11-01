@@ -93,10 +93,10 @@ fs.mkdirSync(output, {recursive:true});
     await fixture({manual:true});assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),1);
     await fixture({gated:true});assert.equal(await page.getByRole('button',{name:'바로 설치하기',exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:'파일 다운로드',exact:true}).count(),0);
 
-    await fixture({inspect:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({inspect:true});await page.getByRole('button',{name:'설치 가능 여부 확인',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();await page.getByRole('dialog',{name:'이 내용으로 설치할까요?'}).waitFor();
     assert.match(await page.locator('#confirm-content').innerText(),/ZIP의 SKILL.md를 확인/);await page.locator('#confirm-no').click();assert.equal(await count('install'),0);
-    await fixture({inspect:true,unsupportedArchive:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
+    await fixture({inspect:true,unsupportedArchive:true});await page.getByRole('button',{name:'설치 가능 여부 확인',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});
     await page.locator('input[value=user]').check();await page.locator('#confirm-yes').click();await page.locator('#detail-feedback').filter({hasText:'ZIP에서 설치할 스킬이나 연결 설정을 확인하지 못했습니다.'}).waitFor();assert.equal(await count('install'),0);
 
     await fixture({dark:true});await page.getByRole('button',{name:'바로 설치하기',exact:true}).click();await page.locator('#confirm-dialog').waitFor({state:'visible'});await page.getByRole('button',{name:'설치할 업무',exact:true}).click();
