@@ -277,6 +277,13 @@ def purge_deleted():
             db().tools.update_one({'_id': t['_id']}, {'$set': {'versions.$[v].path': None}}, array_filters=[{'v.n': v['n'], 'v.deleted': True}])
 
 def ensure_user(uid, name, org='공통', org_code=None):
+    from .taxonomy_delete import change_lock
+    with change_lock():
+        return _ensure_user(uid, name, org, org_code)
+
+
+def _ensure_user(uid, name, org='공통', org_code=None):
+    from .taxonomy_delete import resolve_alias
     tax = db().taxonomy.find_one({'kind': 'organization', 'ssoCode': org_code}) if org_code else None
     if not tax: tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if not tax:
@@ -284,6 +291,11 @@ def ensure_user(uid, name, org='공통', org_code=None):
         except DuplicateKeyError: pass
         tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if org_code: db().taxonomy.update_one({'_id': tax['_id']}, {'$set': {'ssoCode': org_code}})
+    # Keep original SSO codes on the alias row. Never overwrite the transfer
+    # target's department code with that of a deleted catalog organization.
+    tax = resolve_alias(tax)
+    if not tax:
+        raise RuntimeError('The default catalog organization is unavailable')
     # The employee number remains the primary key: existing tool ownership,
     # grants and connection-key pointers must survive an SSO profile refresh.
     # Keep the four company SSO fields explicitly as well as the existing UI

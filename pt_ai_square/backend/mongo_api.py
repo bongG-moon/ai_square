@@ -22,6 +22,7 @@ from .tool_access import can_read
 from .catalog_snapshot import CatalogSnapshot
 from .package_identity import fixed_package_id, identity_fields, valid_package_id
 from .publication_urls import publication_url
+from . import taxonomy_delete
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -66,7 +67,7 @@ def category(raw, kind, existing=None):
     value = raw.get(key + 'Id')
     q = {'kind': kind, '_id': value} if value else {'kind': kind, 'name': raw.get(key)}
     row = db().taxonomy.find_one(q)
-    if not row or (not row['enabled'] and (not existing or existing.get(key+'Id') != row['_id'])): raise BadRequest('현재 사용할 수 있는 조직·업무를 선택해 주세요.')
+    if not row or row.get('deleted') or row.get('deletion') or (not row['enabled'] and (not existing or existing.get(key+'Id') != row['_id'])): raise BadRequest('현재 사용할 수 있는 조직·업무를 선택해 주세요.')
     return row
 
 def metadata(raw, existing=None):
@@ -184,9 +185,9 @@ def bootstrap():
     now=time.time()
     ts=list(db().tools.find({'$or':[{'deleted':{'$ne':True}}, {'owner':g.user['id']}] } if g.user['role']!='admin' else {}).sort('_id',1))
     stats=activity.statistics([t['_id'] for t in ts],g.user['id'],now)
-    taxonomy_rows=list(db().taxonomy.find().sort([('order',1),('name',1)]))
+    taxonomy_rows=list(db().taxonomy.find({'deleted': {'$ne': True}}).sort([('order',1),('name',1)]))
     snapshot=CatalogSnapshot(ts,g.user,taxonomy_rows)
-    taxonomy=[dict(id=r['_id'],name=r['name'],kind=r['kind'],enabled=r['enabled'],order=r.get('order',0),owner=r.get('owner','')) for r in taxonomy_rows]
+    taxonomy=[dict(id=r['_id'],name=r['name'],kind=r['kind'],enabled=r['enabled'],order=r.get('order',0),owner=r.get('owner',''),deletionPending=(r.get('deletion') or {}).get('state')=='pending') for r in taxonomy_rows]
     retention=db().settings.find_one({'_id':'retention'})
     retention={key:retention[key] for key in ('keep','days')}
     return jsonify(items=[serialize(t,stats[t['_id']],now,snapshot=snapshot) for t in ts],user={k:v for k,v in g.user.items() if k!='enabled'},csrf=session['csrf'],authMode=current_app.config['AUTH_MODE'],organizations=[x for x in taxonomy if x['kind']=='organization'],categories=[x for x in taxonomy if x['kind']=='category'],requests=access_rows(snapshot),policy=retention,rankAsOf=now,activityBackend='mongodb',unread=db().notifications.count_documents({'user':g.user['id'],'read':False}),audit=[r['action'] for r in db().audit.find().sort('created',-1).limit(30)] if g.user['role']=='admin' else [],storage=dict(storage_snapshot(),pending=sum(1 for t in ts for v in t.get('versions',[]) if v.get('deleted') and v.get('path'))) if g.user['role']=='admin' else None)
@@ -308,58 +309,59 @@ def publish_prepared(raw, artifact, tid=None, *, cleanup_on_failure=True, draft_
     # client-controlled confirmation header can reach this path.
     committed=False
     try:
-        t=tool(tid,True) if tid else None
-        if (getattr(g,'api_token_id',None) or draft_id) and t and t['owner']!=g.user['id']:
-            raise Forbidden('연결 KEY로는 본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
-        if getattr(g,'api_token_id',None) and not draft_id:
-            raise Forbidden('승인된 게시 초안이 필요합니다.')
-        request_id=raw.get('clientRequestId')
-        request_key=publication_request_key(request_id) if request_id is not None else None
-        package=artifact.get('package')
-        identity=identity_fields(t,package)
-        data=publication_data(raw,artifact,t)
-        fingerprint=hashlib.sha256(json.dumps(dict(target=tid,data=data,sha=artifact['sha'],url=artifact['url'],commands=artifact.get('commands',{})),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-        def replay():
-            existing=db().tools.find_one({'versions.publishRequest.key':request_key})
-            if not existing: return None
-            saved=next(v for v in existing['versions'] if v.get('publishRequest',{}).get('key')==request_key)
-            if saved['publishRequest']['fingerprint']!=fingerprint:
-                raise Conflict('같은 게시 요청 번호의 내용이 다릅니다. 새 준비안을 생성하세요.')
-            return jsonify(id=existing['_id'],version=saved['n'],replayed=True,
-                           pending=publish_followup_pending(existing['_id']),
-                           **identity_fields(existing,saved.get('package'))),200
-        if request_key:
-            previous_response=replay()
-            if previous_response: return previous_response
-        if t: check_revision(t,raw)
-        n=max([v['n'] for v in t['versions']],default=0)+1 if t else 1
-        version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type','workflow','installProfile']})
-        if getattr(g, 'api_token_id', None):
-            version['apiUsage'] = dict(user=g.user['id'], tokenId=g.api_token_id)
-        if request_key:
-            version['publishRequest']=dict(key=request_key,fingerprint=fingerprint)
-        if not t: tid=new_tool_id if new_tool_id is not None else next_id('tools')
-        job=audit_event(f'{data["name"]} v{n} 게시', subscription={'tool':tid,'user':g.user['id']})
-        if t:
-            future=dict(t,data=data)
-            e=event(followers(future),f'{data["name"]} v{n} 업데이트',{'type':'tool','id':tid},'release')
-            changes={'data':data,'active':n,'fallback':t['active'],'paused':False}
-            if identity['packageId']:
-                changes['packageId']=identity['packageId']
-            pending=cas(t,{'$set':changes,'$push':{'versions':version,'outbox':{'$each':[e,job]}}})
-        else:
-            created={'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'outbox':[job]}
-            if identity['packageId']:
-                created['packageId']=identity['packageId']
-            try: db().tools.insert_one(created)
-            except DuplicateKeyError:
-                if request_key:
-                    previous_response=replay()
-                    if previous_response: return previous_response
-                raise
-        committed=True
-        if not t: pending=publish_followup_pending(tid)
-        return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None,**identity),201
+        with taxonomy_delete.change_lock():
+            t=tool(tid,True) if tid else None
+            if (getattr(g,'api_token_id',None) or draft_id) and t and t['owner']!=g.user['id']:
+                raise Forbidden('연결 KEY로는 본인이 등록한 도구만 새 버전을 게시할 수 있습니다.')
+            if getattr(g,'api_token_id',None) and not draft_id:
+                raise Forbidden('승인된 게시 초안이 필요합니다.')
+            request_id=raw.get('clientRequestId')
+            request_key=publication_request_key(request_id) if request_id is not None else None
+            package=artifact.get('package')
+            identity=identity_fields(t,package)
+            data=publication_data(raw,artifact,t)
+            fingerprint=hashlib.sha256(json.dumps(dict(target=tid,data=data,sha=artifact['sha'],url=artifact['url'],commands=artifact.get('commands',{})),sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+            def replay():
+                existing=db().tools.find_one({'versions.publishRequest.key':request_key})
+                if not existing: return None
+                saved=next(v for v in existing['versions'] if v.get('publishRequest',{}).get('key')==request_key)
+                if saved['publishRequest']['fingerprint']!=fingerprint:
+                    raise Conflict('같은 게시 요청 번호의 내용이 다릅니다. 새 준비안을 생성하세요.')
+                return jsonify(id=existing['_id'],version=saved['n'],replayed=True,
+                               pending=publish_followup_pending(existing['_id']),
+                               **identity_fields(existing,saved.get('package'))),200
+            if request_key:
+                previous_response=replay()
+                if previous_response: return previous_response
+            if t: check_revision(t,raw)
+            n=max([v['n'] for v in t['versions']],default=0)+1 if t else 1
+            version=dict(artifact,n=n,note=data['changes'] or '공유 버전 등록',created=time.time(),deleted=False,withdrawn=False,data={k:data[k] for k in ['guide','environment','platform','type','workflow','installProfile']})
+            if getattr(g, 'api_token_id', None):
+                version['apiUsage'] = dict(user=g.user['id'], tokenId=g.api_token_id)
+            if request_key:
+                version['publishRequest']=dict(key=request_key,fingerprint=fingerprint)
+            if not t: tid=new_tool_id if new_tool_id is not None else next_id('tools')
+            job=audit_event(f'{data["name"]} v{n} 게시', subscription={'tool':tid,'user':g.user['id']})
+            if t:
+                future=dict(t,data=data)
+                e=event(followers(future),f'{data["name"]} v{n} 업데이트',{'type':'tool','id':tid},'release')
+                changes={'data':data,'active':n,'fallback':t['active'],'paused':False}
+                if identity['packageId']:
+                    changes['packageId']=identity['packageId']
+                pending=cas(t,{'$set':changes,'$push':{'versions':version,'outbox':{'$each':[e,job]}}})
+            else:
+                created={'_id':tid,'owner':g.user['id'],'data':data,'created':time.time(),'active':1,'fallback':1,'revision':1,'deleted':False,'paused':False,'versions':[version],'outbox':[job]}
+                if identity['packageId']:
+                    created['packageId']=identity['packageId']
+                try: db().tools.insert_one(created)
+                except DuplicateKeyError:
+                    if request_key:
+                        previous_response=replay()
+                        if previous_response: return previous_response
+                    raise
+            committed=True
+            if not t: pending=publish_followup_pending(tid)
+            return jsonify(id=tid,version=n,pending=pending,packageRecognized=bool(package),packageWarning=artifact.get('packageWarning',''),deploymentUrl=f'/api/tools/{tid}/releases/{n}/deployment' if package else None,**identity),201
     finally:
         if cleanup_on_failure and not committed and artifact['path']:
             # A network timeout may follow a committed write. Never remove a potentially referenced file.
@@ -381,6 +383,7 @@ def inspect_package():
         artifact_path(artifact['path']).unlink(missing_ok=True)
 
 @api.patch('/api/tools/<int:tid>')
+@taxonomy_delete.serialized
 def edit(tid):
     t=tool(tid,True);raw=payload();check_revision(t,raw)
     merged={**resolved(t),**raw}
@@ -736,6 +739,7 @@ def ideas():
     return jsonify(ideas=result)
 
 @api.post('/api/ideas')
+@taxonomy_delete.serialized
 def idea():
     if request.mimetype=='multipart/form-data':
         try: raw=json.loads(request.form.get('metadata',''))
@@ -837,18 +841,30 @@ def users():
     return jsonify(users=[{'id':r['_id'],'name':r['name']} for r in db().users.find(q).limit(30)])
 
 @api.post('/api/taxonomy')
+@taxonomy_delete.serialized
 def taxonomy():
     admin();raw=payload();kind=raw.get('kind');name=text(raw,'name',80)
     if kind not in {'organization','category'}: raise BadRequest('분류 종류를 확인해 주세요.')
     enabled=raw.get('enabled',True);order=raw.get('order',0)
     if not isinstance(enabled,bool) or type(order)!=int or not 0<=order<=999: raise BadRequest('사용 여부와 표시 순서를 확인해 주세요.')
     key=raw.get('id') or uuid.uuid4().hex
-    if raw.get('id') and not db().taxonomy.find_one({'_id':key,'kind':kind}): raise NotFound()
+    if raw.get('id') and not db().taxonomy.find_one({'_id':key,'kind':kind,'deleted':{'$ne':True},'deletion':{'$exists':False}}): raise NotFound('삭제되었거나 삭제 처리 중인 항목입니다.')
+    if db().taxonomy.find_one({'deletion.state':'pending','deletion.targetId':key},{'_id':1}): raise Conflict('다른 항목을 이관 중입니다. 이관을 먼저 완료해 주세요.')
     if key=='organization-0' and (not enabled or name!='공통'): raise BadRequest('공통 조직은 유지해 주세요.')
     job=audit_event(f'{kind} {name} 설정 변경')
     try: db().taxonomy.update_one({'_id':key},{'$set':{'kind':kind,'name':name,'enabled':enabled,'order':order,'owner':text(raw,'owner',100,False)},'$push':{'outbox':job}},upsert=True)
-    except DuplicateKeyError: raise Conflict('같은 이름의 항목이 있습니다.')
+    except DuplicateKeyError: raise Conflict('같은 이름의 항목이 있거나 삭제 이력이 남아 있습니다. 다른 이름을 사용해 주세요.')
     return jsonify(ok=True,id=key,pending=deliver_pending('taxonomy',key))
+
+@api.get('/api/taxonomy/<key>/deletion-preview')
+def taxonomy_deletion_preview(key):
+    admin()
+    return jsonify(taxonomy_delete.preview(key))
+
+@api.post('/api/taxonomy/<key>/delete')
+def taxonomy_remove(key):
+    admin()
+    return jsonify(taxonomy_delete.remove(key,payload()))
 
 @api.get('/api/admins')
 def admins():

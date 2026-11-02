@@ -596,3 +596,27 @@
 .ws-draft-note{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 20px;padding:10px 0;border-bottom:1px solid var(--sq-line,#e5e5ed);font-size:12px;line-height:1.6;color:var(--sq-muted,#6e6e73)}
 .ws-draft-note>span{min-width:0}.ws-draft-note .sq-link{flex-shrink:0;font-size:12px}
 @media(max-width:600px){.ws-draft-note{align-items:flex-start;flex-wrap:wrap;gap:4px}.ws-draft-note>span{flex:1 1 230px}}
+#square-app .ws-taxonomy-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+#square-app .ws-taxonomy-actions .sq-icon{width:36px;min-width:36px;height:36px;border:1px solid #e4e7ee;border-radius:10px;background:#f7f7f9}
+#square-app .ws-taxonomy-actions .sq-secondary{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:7px 10px;font-size:12px;border:1px solid #e4e7ee;border-radius:10px}
+#square-app .ws-taxonomy-actions svg{width:15px;height:15px}
+#square-app .ws-taxonomy-delete{display:grid;gap:22px}
+#square-app .ws-taxonomy-delete-summary{display:flex;align-items:flex-start;gap:14px}
+#square-app .ws-taxonomy-delete-icon{display:grid;place-items:center;width:48px;height:48px;flex-shrink:0;border-radius:15px;background:#fff2f2;color:#aa616c}
+#square-app .ws-taxonomy-delete-icon svg{width:22px;height:22px}
+#square-app .ws-taxonomy-delete-summary strong{display:block;margin-bottom:7px;font-size:20px;overflow-wrap:anywhere}
+#square-app .ws-taxonomy-delete-summary p{margin:0;color:#727b8e;line-height:1.7;font-size:14px}
+#square-app .ws-taxonomy-usage{display:flex;gap:1px;overflow:hidden;border:1px solid #e8eaf0;border-radius:14px;background:#e8eaf0}
+#square-app .ws-taxonomy-usage>div{flex:1;padding:15px;background:#f8f9fc}
+#square-app .ws-taxonomy-usage span{display:block;color:#737d91;font-size:12px}
+#square-app .ws-taxonomy-usage strong{display:block;margin-top:7px;color:#424e68;font-size:23px;line-height:1.2}
+#square-app .ws-taxonomy-usage small{margin-left:4px;color:#8b93a2;font-size:12px;font-weight:400}
+#square-app .ws-taxonomy-usage-note{margin:8px 0 0;color:#8b93a2;font-size:12px}
+#square-app .ws-taxonomy-delete .sq-field{margin:0}
+#square-app .ws-taxonomy-delete .sq-field>span small{margin-left:5px;color:#96717a;font-size:11px}
+#square-app .ws-taxonomy-delete .sq-field>small{color:#7b8394;line-height:1.65}
+#square-app .ws-taxonomy-delete .sq-note,#square-app .ws-taxonomy-delete .sq-callout,#square-app .ws-taxonomy-delete .sq-error{margin:0}
+#square-app .ws-taxonomy-delete-actions{justify-content:flex-end;margin:0;padding-top:18px;border-top:1px solid #e8eaf0}
+#square-app .ws-taxonomy-delete-confirm{background:#a96571;border-color:#a96571}
+#square-app .ws-taxonomy-delete-confirm:not(:disabled):hover{background:#985664}
+@media(max-width:520px){#square-app .ws-taxonomy-actions{gap:4px}#square-app .ws-taxonomy-actions .sq-secondary{padding-inline:8px}#square-app .ws-taxonomy-usage>div{padding:12px 10px}#square-app .ws-taxonomy-delete-actions button{flex:1}}

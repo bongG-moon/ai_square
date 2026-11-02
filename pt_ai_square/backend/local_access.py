@@ -251,7 +251,7 @@ def revoke(token_id):
 
 @local_access.get('/api/catalog/options')
 def options():
-    rows = list(db().taxonomy.find({'enabled': True}, {'_id': 1, 'kind': 1, 'name': 1}).sort('order', 1))
+    rows = list(db().taxonomy.find({'enabled': True, 'deleted': {'$ne': True}, 'deletion': {'$exists': False}}, {'_id': 1, 'kind': 1, 'name': 1}).sort('order', 1))
     return jsonify(employee=dict(id=g.user['id'], name=g.user['name']),
                    organizations=[dict(id=r['_id'], name=r['name']) for r in rows if r['kind'] == 'organization'],
                    categories=[dict(id=r['_id'], name=r['name']) for r in rows if r['kind'] == 'category'])
