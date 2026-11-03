@@ -287,7 +287,9 @@ def _ensure_user(uid, name, org='공통', org_code=None):
     tax = db().taxonomy.find_one({'kind': 'organization', 'ssoCode': org_code}) if org_code else None
     if not tax: tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if not tax:
-        try: db().taxonomy.insert_one({'_id': uuid.uuid4().hex, 'kind': 'organization', 'name': org, 'enabled': True, 'order': 99, 'owner': '플랫폼 운영자'})
+        # New SSO departments await administrator activation as catalog labels.
+        # This does not disable the employee account or change existing labels.
+        try: db().taxonomy.insert_one({'_id': uuid.uuid4().hex, 'kind': 'organization', 'name': org, 'enabled': False, 'order': 99, 'owner': '플랫폼 운영자'})
         except DuplicateKeyError: pass
         tax = db().taxonomy.find_one({'kind': 'organization', 'name': org})
     if org_code: db().taxonomy.update_one({'_id': tax['_id']}, {'$set': {'ssoCode': org_code}})
