@@ -65,6 +65,11 @@ def make_server(config_path=DEFAULT_CONFIG):
                      '처음에는 맞는 후보를 3개 이내로 제시하고 이름, 하는 일, 요청과 맞는 이유를 짧게 설명하세요. '
                      'reasons와 일치한 실제 내용만 근거로 삼고, 필요하면 get_item으로 사용 조건을 확인하세요. '
                      '최근 인기 요청은 realtime, 전체 인기 요청은 cumulative, 그 외에는 recommended를 사용하세요. '
+                     'recommended의 서버 정렬은 검색 관련도, 추천 배지, 같은 SSO 부서 활용도, 전체 인기도 순입니다. '
+                     '반환된 순서를 따르고 관련 없는 도구를 추천 배지만 보고 앞으로 옮기지 마세요. '
+                     '항목의 recommendationBadge.active가 true일 때만 "추천" 도구라고 설명하세요. '
+                     '추천 이유와 확인한 버전은 반환된 recommendationBadge.reason과 reviewedVersion이 있을 때만 안내하세요. '
+                     '추천 표시는 보안 인증이나 모든 버전의 품질 보증이 아닙니다. 숨겨진 이유를 추측하거나 needs_review 항목에 추천 표시를 붙이지 마세요. '
                      '부서 선호는 동률인 관련 도구를 비교할 때만 참고하며 개인의 사용 여부나 성과를 추측하지 마세요. '
                      '조직 필터는 등록 분류이고 사용자 소속과 같지 않습니다. 내 팀 추천 요청에 organization을 임의로 넣지 마세요. '
                      '서버의 recommendation과 항목별 departmentPreference, statistics를 함께 읽어 추천 근거를 설명하세요. '
@@ -227,7 +232,7 @@ def make_server(config_path=DEFAULT_CONFIG):
 
     @mcp.tool(annotations=read)
     def search_items(query:str='',kind:str='',sort:str='recommended',organization:str='',platform:str='',offset:int=0,limit:int=10)->dict:
-        """필요한 일을 평소 쓰는 말로 검색합니다. query에는 자료·동작·결과를 담고 사용자가 지정한 이름·등록자는 보존하세요. 이름·등록자·설명·업무 태그를 찾습니다. kind/organization/platform은 요청에 없는 제한을 추측해 채우지 마세요. recommended=관련도 우선, 같은 관련도에서 부서 선호 참고; realtime=최근7일; cumulative=누적. reasons와 실제 기능만 근거로 후보의 용도와 맞는 이유를 짧게 설명하세요. 추천 문장에 항목을 나열할 때 가운데점 대신 쉼표나 자연스러운 연결 표현을 쓰세요. 검색만으로 설치하거나 게시하지 않습니다."""
+        """필요한 일을 평소 쓰는 말로 검색합니다. query에는 자료, 동작, 결과를 담고 사용자가 지정한 이름과 등록자는 보존하세요. 이름, 등록자, 설명, 업무 태그를 찾습니다. kind/organization/platform은 요청에 없는 제한을 추측해 채우지 마세요. recommended=검색 관련도, 추천 배지, 같은 SSO 부서 활용도, 전체 인기도 순; realtime=최근7일; cumulative=누적. 서버 순서와 reasons, 실제 기능을 근거로 설명합니다. recommendationBadge.active=true인 항목만 추천 도구로 안내하고, 반환된 reason과 reviewedVersion만 설명합니다. 추천은 보안 인증이나 모든 버전의 품질 보증이 아닙니다. 명시한 정렬은 유지합니다. 추천 문장에 항목을 나열할 때 가운데점 대신 쉼표나 자연스러운 연결 표현을 쓰세요. 검색만으로 설치하거나 게시하지 않습니다."""
         return run('search_items',query,kind,sort,organization,platform,offset,limit)
 
     @mcp.tool(annotations=read)

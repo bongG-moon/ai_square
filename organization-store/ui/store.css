@@ -139,3 +139,11 @@ dialog[open]::backdrop{opacity:1}
 .access-request-panel h4{font-size:14px;margin:0 0 8px}.access-request-panel p{font-size:12px;color:var(--muted);line-height:1.7;margin:0 0 12px}.access-request-panel p.error{color:var(--danger)}
 .access-request-panel .access-control-notice{display:none}
 @media(max-width:480px){.access-request-panel{padding:14px}.access-control-notice{max-width:100%}}
+.catalog-card .tags{align-items:center;height:24px;max-height:24px;flex-wrap:nowrap;overflow:hidden}
+.catalog-card .tags .type-badge{background:var(--type-tint,var(--accent-bg));color:var(--type-color,var(--accent));flex-shrink:0;max-width:none}
+.catalog-card .tags .org-badge{flex:0 0 auto;max-width:35%}.catalog-card .tags .catalog-extra-tag{flex:0 0 auto}
+.tags .recommendation-badge,.recommendation-badge{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;background:var(--accent-bg);color:var(--accent);border:1px solid transparent;border-radius:7px;padding:2px 7px;min-height:24px;font-size:11px;font-weight:600;line-height:18px;white-space:nowrap}
+.recommendation-badge svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+button.recommendation-badge:hover{border-color:var(--accent)}.recommendation-badge:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.recommendation-details{border-left:3px solid var(--accent);padding-left:14px}.recommendation-details h3{color:var(--accent)}
+@media(pointer:coarse){button.recommendation-badge{min-height:44px}.catalog-card .tags:has(.recommendation-badge){height:44px;max-height:44px}}

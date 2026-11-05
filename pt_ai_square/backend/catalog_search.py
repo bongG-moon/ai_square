@@ -14,6 +14,7 @@ from werkzeug.exceptions import BadRequest
 
 from .storage import db
 from .tool_access import can_read
+from . import recommendations
 
 CANDIDATE_LIMIT = 5000
 DEPARTMENT_MEMBER_LIMIT = 10000
@@ -275,8 +276,15 @@ def _department_signals(ids, now):
     return signals, meta
 
 
-def _candidates(query, projection, q, groups, registrant_matches):
+def _candidates(query, projection, q, groups, registrant_matches, mode='recommended'):
     if not q:
+        if mode == 'recommended':
+            return list(db().tools.aggregate([
+                {'$match': query}, {'$project': projection},
+                {'$set': {'_recommendationActive': recommendations.active_expression()}},
+                {'$sort': {'_recommendationActive': -1, '_id': 1}},
+                {'$limit': CANDIDATE_LIMIT},
+            ], maxTimeMS=5000))
         return list(db().tools.find(query, projection).sort('_id', 1).limit(CANDIDATE_LIMIT))
     # Select the best lexical matches before applying the candidate cap. An
     # arbitrary first/last N slice would hide an exact name match in a large
@@ -305,8 +313,9 @@ def _candidates(query, projection, q, groups, registrant_matches):
                                  'regex': '^' + literal_pattern([q]) + '$', 'options': 'i'}},
                 {'$eq': [{'$toString': '$_id'}, {'$literal': q}]}]},
             '_searchMatches': {'$sum': group_hits}, '_searchWeight': {'$sum': group_weights},
+            '_recommendationActive': recommendations.active_expression() if mode == 'recommended' else False,
         }},
-        {'$sort': {'_searchExact': -1, '_searchMatches': -1, '_searchWeight': -1, '_id': 1}},
+        {'$sort': {'_searchExact': -1, '_searchMatches': -1, '_searchWeight': -1, '_recommendationActive': -1, '_id': 1}},
         {'$limit': CANDIDATE_LIMIT},
     ], maxTimeMS=5000))
 
@@ -378,9 +387,11 @@ def search_catalog():
         query.setdefault('$and', []).append({'$or': [{'data.orgId': {'$in': ids}}, {'data.org': organization}]})
 
     projection = {('data.' + k): 1 for k in (*QUERY_FIELDS, 'type', 'platform', 'org', 'orgId', 'categoryId', 'approval', 'owner')}
-    projection.update(owner=1, created=1, departmentGrants=1)
+    projection.update(owner=1, created=1, departmentGrants=1, active=1, recommendationBadge=1)
+    # Only release validity fields participate; no filenames, paths or package data.
+    projection.update({'versions.n': 1, 'versions.deleted': 1, 'versions.withdrawn': 1})
     total = db().tools.count_documents(query, maxTimeMS=5000)
-    rows = _candidates(query, projection, q, groups, registrant_matches)
+    rows = _candidates(query, projection, q, groups, registrant_matches, mode)
     # Resolve actual registering accounts in one query, not a user lookup per
     # result. data.owner is an editable contact label, not the registrar.
     registrants = {user['_id']: user.get('name', '') for user in db().users.find(
@@ -393,10 +404,10 @@ def search_catalog():
             'minimumDistinctUsers': MIN_DEPARTMENT_USERS, 'identitySource': None})
     recommendation['explanation'] = {
         'applied': '최근 90일 같은 부서의 서로 다른 구성원 5명 이상이 활용한 경우에만 추천에 반영합니다.',
-        'insufficient_sample': '같은 부서 활용 표본이 부족한 항목은 검색 관련도와 전사 집계로 추천합니다.',
+        'insufficient_sample': '같은 부서 활용 표본이 부족한 항목은 검색 관련도, 추천 표시와 전사 집계를 참고합니다.',
         'department_unknown': '확인된 부서 코드나 부서명이 없어 조직 선호를 사용하지 않습니다.',
-        'department_ambiguous': '같은 부서명에 여러 부서 코드가 있어 조직 선호를 생략했습니다. 검색 관련도와 전체 집계를 사용합니다.',
-        'department_too_large': '부서 구성원 범위가 커 조직 선호를 생략했습니다. 검색 관련도와 전사 집계를 사용합니다.',
+        'department_ambiguous': '같은 부서명에 여러 부서 코드가 있어 조직 선호를 생략했습니다. 검색 관련도, 추천 표시와 전체 집계를 참고합니다.',
+        'department_too_large': '부서 구성원 범위가 커 조직 선호를 생략했습니다. 검색 관련도, 추천 표시와 전사 집계를 참고합니다.',
         'not_used_for_ranking': '이 정렬은 조직 선호를 반영하지 않습니다.',
     }[recommendation['status']]
     taxonomy_ids = {r['data'].get(key) for r in rows for key in ('orgId', 'categoryId')}
@@ -418,6 +429,7 @@ def search_catalog():
         tid, data = row['_id'], row['data']
         exact, matches, weight, fields = relevance(row, q, groups, registrants.get(row.get('owner'), ''))
         signal = signals.get(tid)
+        curated = recommendations.is_active(row)
         metric = stats[tid]
         recent = mode == 'realtime'
         rank_key = (-(metric['rankScore'] if recent else metric['totalRankScore']),
@@ -425,9 +437,9 @@ def search_catalog():
                     -(metric['recentLikes'] if recent else metric['likes']),
                     -row.get('created', 0), tid)
         if mode == 'recommended':
-            # Organization preference only breaks equal textual relevance; it
-            # cannot promote an unrelated/popular tool over a stronger match.
-            key = (-int(exact), -matches, -weight, -min(15, signal['score'] if signal else 0), *rank_key)
+            # Curation and organization preference only break equal textual
+            # relevance; neither can outrank a stronger search match.
+            key = (-int(exact), -matches, -weight, -int(curated), -min(15, signal['score'] if signal else 0), *rank_key)
         elif mode == 'newest':
             key = (-row.get('created', 0), tid)
         elif mode == 'name':
@@ -455,6 +467,9 @@ def search_catalog():
             reasons.append('최근 등록 순서입니다.' if mode == 'newest' else '검색 관련도가 같은 경우 전사 누적 집계를 참고합니다.')
         access = can_read(row, g.user['id'], profile, administrator=is_admin,
                           personal_grant=tid in granted)
+        badge = recommendations.public_badge(row, readable=access, administrator=is_admin)
+        if curated:
+            reasons.append('추천 도구입니다.' + (' ' + badge['reason'] if badge['reason'] else ''))
         item = {k: data.get(k, [] if k == 'workTags' else '') for k in ('name', 'desc', 'platform', 'org', 'orgId', 'category', 'workTags')}
         item.update(id=tid, type=TYPE_ALIASES.get(data.get('type'), data.get('type')),
                     owner=data.get('owner', ''), registrantId=row.get('owner'),
@@ -462,7 +477,7 @@ def search_catalog():
                     org=taxonomy.get(data.get('orgId'), data.get('org', '')),
                     category=taxonomy.get(data.get('categoryId'), data.get('category', '')),
                     access='approved' if access else 'permission_required',
-                    statistics=metric, reasons=reasons, liked=tid in liked,
+                    statistics=metric, reasons=reasons, liked=tid in liked, recommendationBadge=badge,
                     departmentPreference=({'status': 'applied', 'distinctUsers': signal['distinctUsers'],
                                            'identitySource': recommendation['identitySource']}
                                           if signal else {'status': recommendation['status'] if recommendation['status'] != 'applied' else 'insufficient_sample'}))

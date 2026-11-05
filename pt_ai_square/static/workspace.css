@@ -620,3 +620,42 @@
 #square-app .ws-taxonomy-delete-confirm{background:#a96571;border-color:#a96571}
 #square-app .ws-taxonomy-delete-confirm:not(:disabled):hover{background:#985664}
 @media(max-width:520px){#square-app .ws-taxonomy-actions{gap:4px}#square-app .ws-taxonomy-actions .sq-secondary{padding-inline:8px}#square-app .ws-taxonomy-usage>div{padding:12px 10px}#square-app .ws-taxonomy-delete-actions button{flex:1}}
+
+/* Recommendation metadata stays on the card's existing compact footer row. */
+#square-app .sq-tool-footer{gap:8px}
+#square-app .sq-tool-metadata{display:flex;align-items:center;gap:5px;min-width:0;flex:1;overflow:visible}
+#square-app .sq-tool-metadata>span{font-size:10px;line-height:20px;padding:0 7px;border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#square-app .sq-tool-metadata .sq-tool-type{background:var(--type-tint,#f2f3f8);max-width:94px;flex-shrink:0}
+#square-app .sq-tool-metadata .sq-tool-organization{background:#f2f3f6;color:#697080;flex-shrink:1}
+#square-app .sq-tool-footer .sq-tool-metrics{flex-shrink:0;gap:7px}
+#square-app .sq-recommendation-badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;border:1px solid #e9dfc7;border-radius:999px;background:#faf6ec;color:#886629;font-size:10px;font-weight:650;line-height:20px;height:22px;padding:0 7px;white-space:nowrap;touch-action:manipulation}
+#square-app .sq-recommendation-badge svg{width:12px;height:12px;stroke-width:1.8;fill:none;flex:none}
+#square-app .sq-recommendation-badge:hover{background:#f5edda;border-color:#d8c49d;color:#71511b}
+#square-app .sq-recommendation-badge:focus-visible{outline:2px solid #927341;outline-offset:3px}
+#square-app .sq-recommendation-reason{padding:18px 20px;margin:18px 0;border:1px solid #e9dfc7;border-radius:16px;background:#fdfbf6}
+#square-app .sq-recommendation-reason:focus-visible{outline:2px solid #927341;outline-offset:3px}
+#square-app .sq-recommendation-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#square-app .sq-recommendation-heading>span{display:flex;align-items:center;gap:8px;color:#886629}
+#square-app .sq-recommendation-heading svg{width:17px;height:17px;fill:none;stroke-width:1.8}
+#square-app .sq-recommendation-heading h3{font-size:15px;line-height:1.5;margin:0;font-weight:650}
+#square-app .sq-recommendation-heading small{font-size:11px;color:#8a7d66}
+#square-app .sq-recommendation-reason>p{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0 0;font-size:13px;line-height:1.8;color:#5c5c61}
+#square-app .ws-recommendation-control{display:inline-flex;align-items:center;gap:5px}
+#square-app .ws-recommendation-status{font-size:11px;line-height:20px;padding:0 7px;border-radius:6px;background:#faf6ec;color:#886629;white-space:nowrap}
+#square-app .ws-recommendation-status[data-status=needs_review]{background:#fff2e7;color:#966027}
+#square-app .ws-recommendation-control button{display:inline-flex;align-items:center;gap:4px}
+#square-app .ws-recommendation-control button svg{width:14px;height:14px;fill:none}
+#square-app .ws-recommendation-editor{display:grid;gap:20px}
+#square-app .ws-recommendation-summary{display:flex;align-items:center;gap:14px;padding-bottom:20px;border-bottom:1px solid #e8eaf0}
+#square-app .ws-recommendation-symbol{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:#faf6ec;color:#886629;flex:none}
+#square-app .ws-recommendation-symbol svg{width:23px;height:23px;fill:none;stroke-width:1.8}
+#square-app .ws-recommendation-summary strong{display:block;font-size:17px;line-height:1.5;overflow-wrap:anywhere}
+#square-app .ws-recommendation-summary div>span{display:block;margin-top:4px;font-size:12px;color:#7b8394}
+#square-app .ws-recommendation-editor .sq-field{margin:0}
+#square-app .ws-recommendation-editor .sq-field small{font-size:12px;color:#7b8394;line-height:1.7}
+#square-app .ws-recommendation-editor .sq-field>span small{margin-left:5px;font-size:11px}
+#square-app .ws-recommendation-editor textarea{min-height:112px;resize:vertical}
+#square-app .ws-recommendation-editor .sq-note,#square-app .ws-recommendation-editor .sq-callout,#square-app .ws-recommendation-editor .sq-error{margin:0}
+#square-app .ws-recommendation-actions{margin:0;padding-top:18px;border-top:1px solid #e8eaf0;gap:8px}
+#square-app .ws-recommendation-actions>span{flex:1}
+@media(max-width:520px){#square-app .sq-tool-metadata{gap:4px}#square-app .sq-tool-metadata .sq-tool-type{max-width:80px}#square-app .sq-recommendation-reason{padding:16px}#square-app .ws-recommendation-control{flex-wrap:wrap;justify-content:flex-end}}

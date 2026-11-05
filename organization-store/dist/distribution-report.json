@@ -1,8 +1,8 @@
 {
   "antivirusCleared": false,
   "archive": "PNT-AI-Square-0.1.0-Distribution.zip",
-  "build": "15891c8be66b115ca1e5e5a13cb21919796cae977a560815d59422ec8a614411",
-  "bytes": 1633097,
+  "build": "50b5bbdc75f304154d53ad6728acda2f79ab45f16ba1713eb1a14d2dbb5a87c2",
+  "bytes": 1634075,
   "id": "pt-ai-square.store",
   "installerExecutableIncluded": false,
   "nativeHelperIncluded": false,
@@ -10,8 +10,8 @@
   "published": false,
   "serverConnectionTested": false,
   "serverPresetIncluded": false,
-  "sha256": "3c82e48de3ac312e03e9664ea7cb6d13155e04af204faef4b4e14b707696c1da",
+  "sha256": "5cbdde4344771343b08bee2f40512f9aba2ff6a65ce9360add5614031de42484",
   "standardCompilerIncluded": true,
-  "templateSha256": "60bdc8593ef37bdb5fea33822bd93ab02ede47c2b6ad5565a87d2659d9502dbb",
+  "templateSha256": "9244b4a637f75ad9b8b443c26635ec2ac397ca6a8c215980e83f787cccdbd9e9",
   "version": "0.1.0"
 }

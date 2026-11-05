@@ -23,6 +23,7 @@ from .catalog_snapshot import CatalogSnapshot
 from .package_identity import fixed_package_id, identity_fields, valid_package_id
 from .publication_urls import publication_url
 from . import taxonomy_delete
+from . import recommendations
 
 api = Blueprint('api', __name__)
 TYPE_ALIASES={'MCP':'MCP/Tool','Tool':'MCP/Tool','Skill':'Skill','플러그인':'플러그인/하네스','하네스':'플러그인/하네스'}
@@ -168,7 +169,9 @@ def serialize(t, stats, now, registrants=None, snapshot=None):
         registrar = account.get('name', '') if account else ''
     else:
         registrar = registrants.get(t['owner'], '')
-    data.update(registrantId=t['owner'], registrantName=registrar or '등록자 정보 없음')
+    data.update(registrantId=t['owner'], registrantName=registrar or '등록자 정보 없음',
+                recommendationBadge=recommendations.public_badge(
+                    t, readable=can_read, administrator=g.user['role'] == 'admin'))
     comments = (snapshot.feedback.get(t['_id'], []) if snapshot is not None else db().feedback.find({'tool':t['_id']}).sort('created',-1)) if can_read else []
     return dict(data,id=t['_id'],ownerId=t['owner'],created=t['created'],editorial=t['_id'],hidden=bool(t.get('deleted')),deleted=bool(t.get('deleted')),purgePending=bool(t.get('purge')),active=t['active'],fallback=t['fallback'],revision=t['revision'],updatePaused=t.get('paused',False),**stats,canManage=manager(t),**access_request_fields(access,can_read),accessDecision=access.get('decision','') if access else '',versions=versions,comments=[feedback_row(c,snapshot) for c in comments],url=current['url'] if current and can_read else '',mode='command' if current and current.get('commands') else 'server' if current and current['url'] else 'zip',support='설치·연결 안내',subscribed=bool(subscription and subscription['enabled']),icon={'MCP/Tool':'plug','Skill':'file-text','플러그인/하네스':'layers-2'}[data['type']])
 
@@ -204,6 +207,36 @@ def details(tid):
         getattr(g, 'api_token_id', None) and getattr(g, 'api_token_scope', None) == 'publish'
         and t.get('owner') == g.user['id'] and not t.get('deleted') and 'purge' not in t)
     return jsonify(item)
+
+
+@api.put('/api/tools/<int:tid>/recommendation')
+def set_recommendation(tid):
+    admin()
+    # Curation is a website administrator action, never a personal KEY capability.
+    if getattr(g, 'api_token_id', None):
+        raise Forbidden('추천 설정은 웹 관리자 화면에서 변경해 주세요.')
+    raw = payload()
+    if (set(raw) - {'enabled', 'reason', 'expectedRevision'}
+            or type(raw.get('enabled')) is not bool or type(raw.get('expectedRevision')) is not int):
+        raise BadRequest('추천 설정과 현재 도구 버전을 확인해 주세요.')
+    t = tool(tid, True, True)
+    check_revision(t, raw)
+    enabled = raw['enabled']
+    reason = text(raw, 'reason', 300) if enabled else ''
+    version = next((v for v in t.get('versions', []) if v['n'] == t.get('active')), None)
+    if enabled:
+        if (t.get('deleted') or not version or version.get('deleted') or version.get('withdrawn')
+                or not (version.get('path') or version.get('url') or version.get('commands'))):
+            raise Conflict('현재 사용할 수 있는 배포 버전을 확인한 뒤 추천해 주세요.')
+        if version.get('path') and not artifact_path(version['path']).is_file():
+            raise Conflict('현재 배포 파일을 찾을 수 없습니다. 파일을 확인한 뒤 추천해 주세요.')
+    record = dict(enabled=enabled, reason=reason, reviewedVersion=version['n'] if enabled else None,
+                  reviewedBy=g.user['id'], updatedAt=time.time())
+    pending = cas(t, {'$set': {'recommendationBadge': record}},
+                  f'도구 {tid} 추천 ' + (f'설정 (v{version["n"]})' if enabled else '해제'))
+    return jsonify(ok=True, revision=t['revision'] + 1, pending=pending,
+                   recommendationBadge=recommendations.public_badge(
+                       dict(t, recommendationBadge=record), readable=True, administrator=True))
 
 
 @api.post('/api/tools/<int:tid>/view')

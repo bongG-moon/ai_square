@@ -411,6 +411,30 @@
     n.innerHTML = `<svg viewBox="0 0 24 24"><path d="${path}"/></svg>`; return n;
   }
   function typeBadge(type) { const n = el('span', 'badge type-badge', type || '기능'); n.dataset.type = type || ''; return n; }
+  function recommendationBadge(item, interactive = true) {
+    if (item.recommendationBadge?.active !== true) return null;
+    const n = interactive ? button('추천', 'badge recommendation-badge', () => detail(item.id)) : el('span', 'badge recommendation-badge', '추천');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+    path.setAttribute('d', 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z'); svg.append(path); n.prepend(svg);
+    if (interactive) { n.setAttribute('aria-label', '추천 이유 보기'); n.setAttribute('aria-haspopup', 'dialog'); n.setAttribute('aria-controls', 'detail-dialog'); }
+    return n;
+  }
+  function cardTags(item) {
+    const tags = el('div', 'tags'), recommended = recommendationBadge(item);
+    if (recommended) tags.append(recommended);
+    tags.append(typeBadge(item.type));
+    if (item.org) tags.append(el('span', 'org-badge', item.org));
+    for (const tag of [item.category, ...(item.workTags || []).slice(0, 2)].filter(Boolean)) tags.append(el('span', 'catalog-extra-tag', tag));
+    return tags;
+  }
+  function recommendationDetails(item) {
+    const recommendation = item.recommendationBadge;
+    if (recommendation?.active !== true || item.access !== 'approved' || typeof recommendation.reason !== 'string' || !recommendation.reason.trim()) return null;
+    const n = section('추천하는 이유', recommendation.reason); n.classList.add('recommendation-details');
+    if (Number.isInteger(recommendation.reviewedVersion) && recommendation.reviewedVersion > 0) n.append(el('p', 'muted', `확인한 버전 v${recommendation.reviewedVersion}`));
+    return n;
+  }
   function registrant(item) { return item.registrantName || '등록자 정보 없음'; }
   function number(item, kind) { const value = item.statistics?.[kind] ?? item[kind]; return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null; }
   function metrics(item) {
@@ -424,13 +448,14 @@
   function updateCard(item) {
     for (const card of $('results').querySelectorAll('.tool-card[data-tool-id]')) if (card.dataset.toolId === String(item.id)) {
       card.querySelector('.metrics')?.replaceWith(metrics(item));
+      card.querySelector('.tags')?.replaceWith(cardTags(item));
       card.querySelector('.access-badge')?.remove();
       if (item.access && item.access !== 'approved') card.querySelector('.card-bottom').before(el('span','badge access-badge',item.access==='pending'?'승인 대기 중':'사용 승인 필요'));
     }
   }
   function toolCard(item) {
     const card = el('article', 'tool-card catalog-card'); card.dataset.toolId = item.id;
-    const top = el('div', 'card-top'); top.append(symbol(item.type), typeBadge(item.type));
+    const top = el('div', 'card-top'); top.append(symbol(item.type));
     const title = button(item.name, 'tool-title', () => detail(item.id));
     title.setAttribute('aria-haspopup', 'dialog');
     title.setAttribute('aria-controls', 'detail-dialog');
@@ -443,7 +468,7 @@
       if (title.disabled) return;
       title.focus({preventScroll:true}); title.click();
     });
-    const tags = el('div', 'tags'); for (const tag of [item.org, item.category, ...(item.workTags || []).slice(0, 2)].filter(Boolean)) tags.append(el('span', '', tag));
+    const tags = cardTags(item);
     const owner = el('p', 'card-owner'); owner.append(el('span', 'owner-label', '등록자'), el('span', '', registrant(item))); owner.title = `등록자 · ${registrant(item)}`;
     const foot = el('div', 'card-bottom'); foot.append(metrics(item), button('자세히 보기', 'text-button', () => detail(item.id)));
     card.append(top, title, el('p', 'tool-desc', item.desc || '상세 화면에서 사용 방법을 확인하세요.'), tags, owner);
@@ -681,6 +706,7 @@
       const hero = el('section','detail-hero'); hero.append(el('h3','',item.name),el('p','',item.desc || '등록된 설명이 없습니다.'));
       const cols = el('div','detail-columns'); cols.append(metadata([['사용 프로그램',item.platform],['공유 유형',item.type],['등록 조직',item.org],['등록자',registrant(item)],['담당자',item.owner]]),metadata([['현재 플랫폼 배포',active != null ? `v${active}` : undefined],['배포일',dated(currentVersion?.created)],['공개 범위',item.visibility],['사용 권한',item.approval ? (item.access==='approved'?'사용 승인됨':item.access==='pending'?'사용 승인 대기':'담당자 승인 필요') : '사내 사용자'],['지원 수준',item.support]]));
       panel.append(hero,cols);
+      const recommended = recommendationDetails(item); if (recommended) panel.append(recommended);
       const flow=workflowView(item.workflow || result.manifest?.workflow);if(flow)panel.append(flow);
       if(currentVersion?.note || item.changes)panel.append(section('현재 배포의 변경 내용',currentVersion?.note || item.changes));
       if (item.workTags?.length) { const tags=el('div','tags'); item.workTags.forEach(t=>tags.append(el('span','',t))); const related=el('section','detail-section'); related.append(el('h3','','관련 업무'),tags); panel.append(related); }
@@ -779,7 +805,7 @@
   }
   function renderDetail(result, tab='intro') {
     state.detail=result; const item=result.item, root=$('detail-view');
-    $('detail-title').textContent=item.name; $('detail-kicker').replaceChildren(typeBadge(item.type),el('span','',item.platform || ''));
+    $('detail-title').textContent=item.name; const recommended = recommendationBadge(item, false); $('detail-kicker').replaceChildren(...(recommended ? [recommended] : []),typeBadge(item.type),el('span','',item.platform || ''));
     const top=el('div','detail-top'), identity=el('div','detail-identity'), identityText=el('div');
     identityText.append(el('strong','',item.org || '등록 조직 미지정'),el('p','',`등록자 · ${registrant(item)}`),metrics(item)); identity.append(symbol(item.type),identityText);
     const actions=el('div','detail-top-actions');
